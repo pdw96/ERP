@@ -1,0 +1,6 @@
+# 런타임 — 1단계는 DB만 쓴다. 공개 API 가 없으므로 FastAPI 는 아직 없다.
+# 들어오는 자리는 2단계(관문 1·2 IQC)이며, 그때 첫 쓰기 엔드포인트가 선다.
+SQLAlchemy==2.0.36
+alembic==1.14.0
+psycopg[binary]==3.2.3
+pydantic-settings==2.6.1

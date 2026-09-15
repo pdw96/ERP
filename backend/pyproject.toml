@@ -1,0 +1,56 @@
+[project]
+name = "erp"
+version = "0.1.0"
+description = "조기경보 ERP — 1단계 기준정보"
+# 하한이 3.11 인 것은 **이 저장소를 손으로 검증할 수 있게 하기 위해서**다.
+# 컨테이너는 3.12 를 쓰지만, 개발자의 로컬이 3.11 이어도 같은 테스트가 돈다.
+requires-python = ">=3.11"
+
+[tool.ruff]
+line-length = 96
+target-version = "py311"
+src = ["."]
+
+[tool.ruff.lint]
+select = [
+    "E", "W",   # pycodestyle
+    "F",        # pyflakes
+    "I",        # isort
+    "UP",       # pyupgrade
+    "B",        # bugbear
+    "SIM",      # simplify
+    "RUF",      # ruff 고유 — RUF001/002/003 이 한글 주석의 전각 문장부호를 잡는다
+]
+ignore = [
+    # 이 저장소의 주석과 docstring 은 한국어이고 「」· — 같은 전각 기호를 쓴다.
+    # 혼동 문자 경고는 여기서 소음일 뿐이다.
+    "RUF001", "RUF002", "RUF003",
+]
+
+[tool.ruff.lint.per-file-ignores]
+# 자동 생성된 마이그레이션은 CHECK 식을 **한 줄 문자열로** 굽는다. 읽기 좋게
+# 줄바꿈하면 데이터베이스에 저장되는 식이 달라지고, 그러면 모델과 갈린다 —
+# 정합 테스트가 그 차이를 잡아 낼 것이므로 여기서는 줄길이를 풀어 준다.
+"migrations/versions/*.py" = ["E501"]
+
+[tool.mypy]
+python_version = "3.11"
+strict = true
+# **SQLAlchemy 의 mypy 플러그인을 쓰지 않는다.** 2.0 에서 deprecated 되었고
+# mypy 1.10.1 까지만 지원하는데 이 저장소는 1.14 를 고정한다 — 켜 두면 도는지
+# 안 도는지 모르는 채로 「검사하고 있다」고 믿게 된다.
+#
+# 필요도 없다. 모델이 전부 `Mapped[...]` · `mapped_column()` 네이티브 선언이라
+# 플러그인 없이도 타입이 읽힌다: `Mapped[str]` 을 int 로 돌려주거나
+# `int | None` 에 바로 더하면 mypy 가 그대로 잡는다(확인함).
+
+[[tool.mypy.overrides]]
+module = "tests.*"
+# 테스트에서 반환형을 일일이 적게 하면 읽기만 나빠진다.
+disallow_untyped_defs = false
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+# 실패를 조용히 넘기지 않는다 — 경고도 실패로 올린다.
+filterwarnings = ["error"]
+addopts = "-ra --strict-markers --strict-config"
