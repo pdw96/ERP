@@ -25,6 +25,25 @@ TEST_DATABASE_URL = os.environ.get(
 )
 
 
+@pytest.fixture(autouse=True)
+def guard_against_the_app_database(monkeypatch: pytest.MonkeyPatch) -> None:
+    """테스트가 **앱의 기본 DB 에 붙는 것을 구조적으로 막는다.**
+
+    이 가드가 없어서 결함 하나가 로컬을 통과하고 CI 에서야 잡혔다.
+    `migrations/env.py` 가 부르는 쪽이 준 URL 을 설정 기본값으로 덮어썼는데,
+    개발자의 로컬에는 그 이름의 DB(`erp`)가 있었으므로 **잘못된 DB 에 붙고도
+    성공했다.** CI 에는 `erp_test` 뿐이라 거기서 터졌다.
+
+    닿을 수 없는 값으로 덮어 두면 같은 종류의 실수가 로컬에서 곧바로 드러난다
+    — 「환경에 따라 다르게 도는 테스트」를 없애는 것이 이 가드의 일이다.
+    자기 설정값을 보는 테스트는 `monkeypatch` 로 다시 덮으면 된다.
+    """
+    monkeypatch.setenv(
+        "ERP_DATABASE_URL",
+        "postgresql+psycopg://guard:guard@127.0.0.1:1/erp_must_not_be_used",
+    )
+
+
 @pytest.fixture(scope="session")
 def engine() -> Iterator[Engine]:
     """테스트 세션 하나가 쓰는 엔진."""

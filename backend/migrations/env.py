@@ -17,7 +17,12 @@ config = context.config
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)
 
-config.set_main_option("sqlalchemy.url", get_settings().database_url)
+# **부르는 쪽이 URL 을 주면 그것이 이긴다.** 설정으로 무조건 덮으면 테스트가
+# 자기 DB 를 가리켜도 앱의 기본 DB 로 붙고, 그 사고는 개발자의 로컬에 그
+# 이름의 DB 가 있으면 **성공한 것처럼 보인다** — 실제로 그렇게 지나갔고 CI 가
+# 잡았다. 설정은 아무도 주지 않았을 때의 기본값이지 우선값이 아니다.
+if not config.get_main_option("sqlalchemy.url", None):
+    config.set_main_option("sqlalchemy.url", get_settings().database_url)
 
 # 표가 아직 없다. 모델이 서면 `app.db` 아래 모듈을 여기서 import 해야
 # `Base.metadata` 가 그 표들을 알게 된다.

@@ -38,13 +38,29 @@ def test_the_migration_history_is_a_single_line() -> None:
     assert len(heads) <= 1, f"마이그레이션 머리가 둘 이상이다: {heads}"
 
 
-def test_alembic_reads_its_url_from_the_settings(engine: Engine) -> None:
-    """URL 을 `alembic.ini` 에 적지 않는다 — 두 벌이면 반드시 갈린다."""
-    config = _alembic_config(engine.url.render_as_string(hide_password=False))
+def test_the_url_is_not_written_in_alembic_ini() -> None:
+    """URL 을 `alembic.ini` 에 적지 않는다 — 두 벌이면 반드시 갈린다.
 
-    # 오류 없이 끝나는 것 자체가 확인이다. `env.py` 가 설정을 읽고 엔진을
-    # 세워 붙었다는 뜻이며, 리비전이 없으므로 아무 표도 만들지 않는다.
-    command.upgrade(config, "head")
+    `env.py` 가 설정에서 읽으므로 ini 에 적으면 같은 값이 두 곳에 산다.
+    """
+    config = Config(str(BACKEND_ROOT / "alembic.ini"))
+
+    assert config.get_main_option("sqlalchemy.url", None) in (None, "")
+
+
+def test_alembic_connects_to_the_url_it_is_given(engine: Engine) -> None:
+    """**부르는 쪽이 준 URL 이 이긴다.** 설정은 기본값이지 우선값이 아니다.
+
+    이 테스트가 CI 에서 처음 터졌다. `env.py` 가 준 URL 을 설정값으로 덮어써
+    앱의 기본 DB 로 붙고 있었는데, 개발자의 로컬에 그 이름의 DB 가 있어서
+    **잘못된 DB 에 붙고도 성공했다.** `conftest` 의 가드가 이제 그 함정을
+    로컬에서도 드러낸다 — 앱 기본 URL 은 닿을 수 없는 값으로 덮여 있으므로,
+    이 테스트가 그리로 붙으면 곧바로 터진다.
+
+    오류 없이 끝나는 것 자체가 확인이다. 리비전이 없으므로 아무 표도 만들지
+    않는다.
+    """
+    command.upgrade(_alembic_config(engine.url.render_as_string(hide_password=False)), "head")
 
 
 def test_the_first_revision_has_not_landed_yet() -> None:
