@@ -9,6 +9,7 @@ from logging.config import fileConfig
 from alembic import context
 from sqlalchemy import engine_from_config, pool
 
+import app.db  # noqa: F401  — 모델 모듈을 불러들여 Base.metadata 를 채운다
 from app.core.config import get_settings
 from app.db.base import Base
 
@@ -24,8 +25,7 @@ if config.config_file_name is not None:
 if not config.get_main_option("sqlalchemy.url", None):
     config.set_main_option("sqlalchemy.url", get_settings().database_url)
 
-# 표가 아직 없다. 모델이 서면 `app.db` 아래 모듈을 여기서 import 해야
-# `Base.metadata` 가 그 표들을 알게 된다.
+# `app.db` 를 위에서 불러들였으므로 metadata 가 표를 전부 알고 있다.
 target_metadata = Base.metadata
 
 

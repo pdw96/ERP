@@ -16,7 +16,8 @@ from sqlalchemy import text
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session, sessionmaker
 
-from app.db.base import create_db_engine, create_session_factory
+import app.db  # noqa: F401  — 모델 모듈을 불러들여 metadata 를 채운다
+from app.db.base import Base, create_db_engine, create_session_factory
 
 # 개발용 DB 를 밟지 않도록 테스트는 자기 URL 을 따로 받는다.
 TEST_DATABASE_URL = os.environ.get(
@@ -66,3 +67,47 @@ def engine() -> Iterator[Engine]:
 def session_factory(engine: Engine) -> sessionmaker[Session]:
     """세션 공장."""
     return create_session_factory(engine)
+
+
+@pytest.fixture(scope="session")
+def tables(engine: Engine) -> Iterator[None]:
+    """표를 세운다.
+
+    **지금은 모델에서 직접 만든다** (`create_all`). 마이그레이션은 조각 7에서
+    하나로 굽기 때문이며, 그 조각이 서면 **마이그레이션이 만든 표와 모델이
+    같은지를 견주는 테스트**가 여기 붙어야 한다 — 그때까지 이 픽스처는
+    「모델이 말하는 표」만 보증하고 「마이그레이션이 만드는 표」는 보증하지
+    않는다.
+    """
+    Base.metadata.drop_all(engine)
+    Base.metadata.create_all(engine)
+    yield
+    Base.metadata.drop_all(engine)
+
+
+@pytest.fixture
+def session(engine: Engine, tables: None) -> Iterator[Session]:
+    """테스트 하나가 쓰는 세션 — 끝나면 통째로 되돌린다.
+
+    바깥 트랜잭션을 열고 그 안에서 돌린 뒤 롤백하므로, 테스트끼리 서로가 넣은
+    줄을 보지 않는다. 표를 매번 다시 만드는 것보다 빠르고, 「앞 테스트가 남긴
+    줄 때문에 통과하는」 테스트를 막는다.
+    """
+    connection = engine.connect()
+    transaction = connection.begin()
+    # **SAVEPOINT 로 합류한다.** 그냥 바인딩하면 세션이 제 트랜잭션을 되돌릴 때
+    # (제약이 물어 `IntegrityError` 가 날 때마다 그렇다) 바깥 트랜잭션까지 함께
+    # 무효가 되고, teardown 의 롤백이 터진다 — 제약을 검사하는 테스트가
+    # 통과하고도 오류로 끝난다.
+    session = Session(
+        bind=connection,
+        expire_on_commit=False,
+        join_transaction_mode="create_savepoint",
+    )
+    try:
+        yield session
+    finally:
+        session.close()
+        if transaction.is_active:
+            transaction.rollback()
+        connection.close()
