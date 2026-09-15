@@ -9,6 +9,9 @@
 CHECK 식을 줄바꿈하는 것조차 이 테스트가 잡는다.
 """
 
+import os
+import subprocess
+import sys
 from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
@@ -212,6 +215,50 @@ def test_downgrade_takes_every_table_back_out(engine: Engine) -> None:
 
         remaining = {table for table, _ in _columns(engine, "round_trip")}
         assert remaining <= {"alembic_version"}, f"내렸는데 남은 표가 있다: {remaining}"
+
+
+def test_two_containers_can_migrate_at_the_same_time(engine: Engine) -> None:
+    """**동시에 뜬 컨테이너가 서로를 죽이지 않는가.**
+
+    compose 가 백엔드를 둘 이상 띄우면 각자 `alembic upgrade head` 로 시작한다.
+    둘 다 아직 적용되지 않은 리비전을 보고 각자 `CREATE TABLE` 을 내면, 진 쪽은
+    `pg_type_typname_nsp_index` 유일 위반으로 **기동에 실패한다.** 잠금을 걸기
+    전에 넷을 동시에 띄워 둘이 실제로 그렇게 죽었다.
+
+    시드 구간에만 잠금을 두는 것은 반쪽이다 — 시드에 닿기 전에 여기서 죽는다.
+
+    **프로세스로 띄운다.** `alembic.context` 가 프로세스 전역이라 한 프로세스
+    안의 스레드 둘로는 alembic 자신이 먼저 깨진다 — 재현되는 것은 우리 결함이
+    아니라 그 전역이다. 기동은 원래 프로세스마다 일어난다.
+    """
+    schema = "concurrent_start"
+    url = engine.url.render_as_string(hide_password=False)
+    joiner = "&" if "?" in url else "?"
+    # 퍼센트를 여기서 두 번 적지 않는다 — `env.py` 가 부르는 함수가 그 일을 한다.
+    environment = {
+        **os.environ,
+        "ERP_DATABASE_URL": f"{url}{joiner}options=-csearch_path%3D{schema}",
+    }
+
+    with _schema(engine, schema):
+        starters = [
+            subprocess.Popen(
+                [sys.executable, "-m", "alembic", "upgrade", "head"],
+                cwd=BACKEND_ROOT,
+                env=environment,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+            )
+            for _ in range(3)
+        ]
+        results = [
+            (starter.wait(timeout=180), starter.communicate()[0]) for starter in starters
+        ]
+
+        died = [output for code, output in results if code != 0]
+        assert not died, "동시에 마이그레이션하면 죽는다:\n" + "\n".join(died)
+        assert {table for table, _ in _columns(engine, schema)} >= {"items", "lots"}
 
 
 def test_a_percent_in_the_url_does_not_break_alembic(

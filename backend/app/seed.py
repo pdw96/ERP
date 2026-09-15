@@ -19,6 +19,7 @@ from pathlib import Path
 from sqlalchemy import text
 from sqlalchemy.engine import Engine
 
+from app.core import locks
 from app.core.config import get_settings
 from app.db.base import create_db_engine
 
@@ -27,7 +28,7 @@ SEED_DIR = Path(__file__).parent / "seed_data"
 # 시드 구간을 감싸는 잠금. **컨테이너가 둘 이상 동시에 뜨면 둘 다 「비어 있다」를
 # 보고 둘 다 넣는다** — 파일 하나였을 때는 없던 문제이며, PostgreSQL 이라서
 # 생긴다. 트랜잭션이 끝나면 저절로 풀린다.
-_LOCK_KEY = 8_150_001
+_LOCK_KEY = locks.SEED
 
 
 def seed(engine: Engine) -> bool:

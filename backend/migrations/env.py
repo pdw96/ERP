@@ -7,9 +7,10 @@ URL 을 `alembic.ini` 에 적지 않고 여기서 설정에서 읽는다 — 두
 from logging.config import fileConfig
 
 from alembic import context
-from sqlalchemy import engine_from_config, pool
+from sqlalchemy import engine_from_config, pool, text
 
 import app.db  # noqa: F401  — 모델 모듈을 불러들여 Base.metadata 를 채운다
+from app.core import locks
 from app.core.alembic_url import apply_database_url
 from app.db.base import Base
 
@@ -57,6 +58,17 @@ def run_migrations_online() -> None:
             compare_type=True,
         )
         with context.begin_transaction():
+            # **컨테이너 둘이 동시에 뜨면 같은 DDL 을 나란히 돌린다.** 둘 다 아직
+            # 적용되지 않은 리비전을 보고 각자 `CREATE TABLE` 을 내고, 진 쪽은
+            # `pg_type_typname_nsp_index` 유일 위반으로 **기동에 실패한다.**
+            # 실제로 셋을 동시에 띄워 둘이 그렇게 죽는 것을 확인했다.
+            #
+            # 시드 구간에만 잠금을 걸어 두는 것은 반쪽이다 — 시드에 닿기 전에
+            # 여기서 죽기 때문이다. 트랜잭션 잠금이므로 커밋이나 롤백과 함께
+            # 저절로 풀린다.
+            connection.execute(
+                text("SELECT pg_advisory_xact_lock(:key)"), {"key": locks.MIGRATION}
+            )
             context.run_migrations()
 
 

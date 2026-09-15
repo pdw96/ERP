@@ -11,7 +11,7 @@
 ## 지금 어디인가
 
 **1단계가 끝났다** — 기준정보 표 열셋과 로트 표 하나, 마이그레이션, 시드.
-테스트 134개가 PostgreSQL 16 위에서 돈다.
+테스트 135개가 PostgreSQL 16 위에서 돈다.
 
 `app/seed_data/` 의 숫자는 **전부 시연용 임의값**이다. 실제 규격은 고객 도면이
 있어야 나온다 — 각 파일 머리에 그 사실을 적어 두었다.
@@ -70,6 +70,6 @@ backend/
   app/seed.py            세 조건 · 트랜잭션 하나
   app/seed_data/*.sql    기준정보 — 사람이 읽고 고치는 표
   migrations/            Alembic — 리비전 하나
-  tests/                 실제 PostgreSQL 에 붙는다 (134개)
+  tests/                 실제 PostgreSQL 에 붙는다 (135개)
 compose.yaml             postgres + 일회성 migrate 잡
 ```
