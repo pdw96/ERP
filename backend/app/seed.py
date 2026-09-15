@@ -45,6 +45,11 @@ def seed(engine: Engine) -> bool:
     with engine.begin() as conn:
         conn.execute(text("SELECT pg_advisory_xact_lock(:key)"), {"key": _LOCK_KEY})
 
+        # **이미 심긴 데이터베이스는 이후의 수정을 받지 않는다 — 그것이 의도다.**
+        # 사람이 화면에서 고친 값을 재시드가 덮어쓰는 쪽이 더 큰 사고이기 때문이다.
+        # 그래서 기준정보 값을 고쳐야 하면 시드가 아니라 마이그레이션으로 낸다.
+        # 그 길이 실제로 필요해지는 것은 데이터베이스가 시드보다 오래 사는 날이며,
+        # `docs/schema.md` 의 미결에 적어 두었다.
         if conn.execute(text("SELECT count(*) FROM items")).scalar_one():
             return False
 

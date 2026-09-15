@@ -96,6 +96,14 @@ class ProcessInspectionStandard(Base):
         ),
     )
 
+    # **이 PK 는 품목을 가리지 못한다 — 아직.** 「수입」 기준 여덟이 원자재
+    # 열다섯 전부에 똑같이 걸린다. 자재는 한 덩어리가 아니고 재고단위가 그것을
+    # 말한다(KG 아홉 · L 둘 · M2 넷) — 분말에 점도를, 라이너에 입도를 재라고
+    # 내미는 셈이다.
+    #
+    # 품목 축을 더할지 자재군을 둘지는 **읽는 쪽(IQC 화면)이 서는 2단계에서**
+    # 정한다. 지금 축을 더하면 쓰지 않는 칸에 값을 채우게 되고, 그 값은 화면에
+    # 뜨는 순간 진짜로 보인다. `docs/schema.md` 의 미결에 적어 두었다.
     process_code: Mapped[str] = mapped_column(String(30), primary_key=True)
     process_group: Mapped[str] = mapped_column(
         String(20), default=codes.PROCESS, server_default=codes.PROCESS
