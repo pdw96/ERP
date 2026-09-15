@@ -121,6 +121,24 @@ def test_a_bom_quantity_cannot_be_negative(prepared: Session) -> None:
         prepared.flush()
 
 
+def test_a_bom_row_cannot_consume_nothing(prepared: Session) -> None:
+    """**0 은 BOM 줄이 아니다.**
+
+    하나도 쓰지 않는 자재를 자재표에 적은 것이고, 그 줄은 「이 자재는 어딘가에
+    쓰인다」는 판단만 통과시킨 뒤 소요량 전개에서 0 을 내놓는다 — 아무 데도 안
+    쓰이는 자재가 **쓰이는 것처럼 보인다.** 재고가 쌓이는 쪽에서 드러날 때는
+    이미 사 놓은 뒤다.
+    """
+    semi = make_item(codes.SEMI_FINISHED, stock_uom="KG")
+    raw = make_item(codes.RAW_MATERIAL, stock_uom="KG")
+    prepared.add_all([semi, raw])
+    prepared.flush()
+
+    prepared.add(make_bom(semi, raw, level=2, unit_quantity=0.0))
+    with pytest.raises(IntegrityError):
+        prepared.flush()
+
+
 # ── 유형과 접두 ─────────────────────────────────────────────────────────────
 
 

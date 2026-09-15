@@ -78,7 +78,7 @@
 | `level` | int | 1 = 완제품 ← 반제품 · 2 = 반제품 ← 원자재 |
 | `unit_quantity` | float | |
 
-**제약** — `UNIQUE (parent, child)` · `CHECK unit_quantity >= 0` ·
+**제약** — `UNIQUE (parent, child)` · **`CHECK unit_quantity > 0`**(0 은 BOM 줄이 아니다 — 하나도 쓰지 않는 자재가 「어딘가에 쓰인다」는 판단만 통과시킨 뒤 소요량 전개에서 0 을 내놓는다) 이고 유한한 수 ·
 `CHECK parent <> child` · 복합 FK `(parent_item_id, parent_item_type) → items` ·
 같은 모양의 child FK · **`CHECK` 단계가 양쪽 유형을 정한다**
 
@@ -223,6 +223,8 @@ OR
 | `sigma_source` | 미정 · 임의 · 실측 |
 | `time_variant` | 품질 — 「시간이 이 값을 바꿀 수 있는가」 |
 | `unit` | |
+
+**규격은 유한한 수여야 한다.** 순서 CHECK 는 `NaN` 을 막지 못한다 — `NaN > 하한` 이 참이고 `중심선 <= NaN` 도 참이라 줄이 그대로 선다. 그리고 판정하는 쪽에서 `측정값 <= 상한` 이 **언제나 참**이 되어, 규격이 있는 것처럼 보이는데 아무것도 걸러 내지 않는 기준이 남는다. 불합격이 한 건도 나지 않는 공정은 정상으로 보인다. 상·하한 · 중심선 · σ 넷 다 `is_finite()` 가 걸린다.
 
 **σ 를 비워 둔다.** 규격에서 뽑은 σ 는 어떤 계수를 쓰든 Cpk 를 그 계수의
 역수로 못박는다. 경고선과 WE 규칙 4 는 σ 없이 그대로 돈다.

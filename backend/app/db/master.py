@@ -181,8 +181,11 @@ class BomComponent(Base):
         CheckConstraint("parent_item_id <> child_item_id", name="ck_bom_component_not_self"),
         # 수량은 음수가 될 수 없다. 음수가 섞이면 서로 다른 줄이 0 으로 상쇄되어
         # 합계를 읽는 쪽이 **혼재를 빈 것으로** 읽는다.
+        # **0 은 BOM 줄이 아니다.** 하나도 쓰지 않는 자재를 자재표에 적은 것이고,
+        # 그 줄은 「이 자재는 어딘가에 쓰인다」는 판단만 통과시킨 뒤 소요량 전개에서
+        # 0 을 내놓는다 — 아무 데도 안 쓰이는 자재가 **쓰이는 것처럼 보인다.**
         CheckConstraint(
-            f"unit_quantity >= 0 AND {is_finite('unit_quantity')}",
+            f"unit_quantity > 0 AND {is_finite('unit_quantity')}",
             name="ck_bom_component_quantity",
         ),
         ForeignKeyConstraint(

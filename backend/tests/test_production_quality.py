@@ -186,6 +186,23 @@ def test_the_center_line_cannot_sit_outside_the_spec(prepared: Session) -> None:
         prepared.flush()
 
 
+@pytest.mark.parametrize("field", ["upper_spec_limit", "lower_spec_limit", "center_line"])
+@pytest.mark.parametrize("value", [float("nan"), float("inf"), float("-inf")])
+def test_a_spec_cannot_hold_a_number_you_cannot_compare_with(
+    prepared: Session, field: str, value: float
+) -> None:
+    """**규격이 `NaN` 이면 모든 측정값이 합격한다.**
+
+    순서 CHECK 는 이것을 막지 못한다 — `NaN > 하한` 이 참이고 `중심선 <= NaN` 도
+    참이라 줄이 그대로 선다. 그리고 판정하는 쪽에서 `측정값 <= 상한` 이 **언제나
+    참**이 되어, 규격이 있는 것처럼 보이는데 아무것도 걸러 내지 않는 기준이
+    남는다. **불합격이 한 건도 나지 않는 공정은 정상으로 보인다.**
+    """
+    prepared.add(_standard(**{field: value}))
+    with pytest.raises(IntegrityError):
+        prepared.flush()
+
+
 def test_a_one_sided_spec_is_allowed(prepared: Session) -> None:
     """상한만 있는 항목이 있다 — 이물 수나 수분처럼 적을수록 좋은 값이다."""
     prepared.add(_standard(lower_spec_limit=None, center_line=None))

@@ -239,6 +239,18 @@ def upgrade() -> None:
             name="ck_inspection_standard_sigma",
         ),
         sa.CheckConstraint(
+            "center_line IS NULL OR (center_line > '-Infinity'::double precision AND center_line < 'Infinity'::double precision)",
+            name="ck_inspection_standard_center_line_is_finite",
+        ),
+        sa.CheckConstraint(
+            "lower_spec_limit IS NULL OR (lower_spec_limit > '-Infinity'::double precision AND lower_spec_limit < 'Infinity'::double precision)",
+            name="ck_inspection_standard_lower_spec_limit_is_finite",
+        ),
+        sa.CheckConstraint(
+            "upper_spec_limit IS NULL OR (upper_spec_limit > '-Infinity'::double precision AND upper_spec_limit < 'Infinity'::double precision)",
+            name="ck_inspection_standard_upper_spec_limit_is_finite",
+        ),
+        sa.CheckConstraint(
             "upper_spec_limit IS NULL OR lower_spec_limit IS NULL OR upper_spec_limit > lower_spec_limit",
             name="ck_inspection_standard_spec_order",
         ),
@@ -349,7 +361,7 @@ def upgrade() -> None:
         ),
         sa.CheckConstraint("parent_item_id <> child_item_id", name="ck_bom_component_not_self"),
         sa.CheckConstraint(
-            "unit_quantity >= 0 AND unit_quantity > '-Infinity'::double precision AND unit_quantity < 'Infinity'::double precision",
+            "unit_quantity > 0 AND unit_quantity > '-Infinity'::double precision AND unit_quantity < 'Infinity'::double precision",
             name="ck_bom_component_quantity",
         ),
         sa.ForeignKeyConstraint(

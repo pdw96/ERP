@@ -62,6 +62,25 @@ class ProcessInspectionStandard(Base):
             "warning_ratio > 0 AND warning_ratio < 1",
             name="ck_inspection_standard_warning_ratio",
         ),
+        # **규격에 `NaN` 이 들어가면 모든 측정값이 합격한다.**
+        #
+        # 아래의 순서 CHECK 는 이것을 막지 못한다 — `NaN > 하한` 이 참이고
+        # `중심선 <= NaN` 도 참이라 줄이 그대로 선다. 그리고 판정하는 쪽에서
+        # `측정값 <= 상한` 이 **언제나 참**이 되어, 규격이 있는 것처럼 보이는데
+        # 아무것도 걸러 내지 않는 기준이 된다. 불합격이 한 건도 나지 않는 공정은
+        # 정상으로 보인다.
+        CheckConstraint(
+            f"upper_spec_limit IS NULL OR ({is_finite('upper_spec_limit')})",
+            name="ck_inspection_standard_upper_spec_limit_is_finite",
+        ),
+        CheckConstraint(
+            f"lower_spec_limit IS NULL OR ({is_finite('lower_spec_limit')})",
+            name="ck_inspection_standard_lower_spec_limit_is_finite",
+        ),
+        CheckConstraint(
+            f"center_line IS NULL OR ({is_finite('center_line')})",
+            name="ck_inspection_standard_center_line_is_finite",
+        ),
         CheckConstraint(
             "upper_spec_limit IS NULL"
             " OR lower_spec_limit IS NULL"
