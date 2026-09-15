@@ -1,0 +1,34 @@
+# 1단계에는 **상주 서비스가 없다.** 공개 API 가 없으므로 뜨는 것은
+# 데이터베이스 하나뿐이고, backend 는 마이그레이션과 시드를 돌리고 끝나는
+# 일회성 잡이다. 웹 서버는 2단계에 들어온다.
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: erp
+      POSTGRES_PASSWORD: erp
+      POSTGRES_DB: erp
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      # 마이그레이션이 붙기 전에 DB 가 받을 준비가 되어야 한다.
+      test: ["CMD-SHELL", "pg_isready -U erp -d erp"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+  migrate:
+    build: ./backend
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      ERP_DATABASE_URL: postgresql+psycopg://erp:erp@postgres:5432/erp
+      # 개발과 시연에서만 켠다.
+      ERP_SEED_ENABLED: "true"
+    command: ["true"]
+
+volumes:
+  pgdata:

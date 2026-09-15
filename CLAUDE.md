@@ -6,16 +6,40 @@
 
 ## 스택
 
-- Python 3.12 · FastAPI · SQLAlchemy 2.x (`Mapped` / `mapped_column`)
+- Python 3.12 (컨테이너) · 하한 3.11 (로컬에서도 같은 테스트가 돌게)
+- SQLAlchemy 2.x — `Mapped` / `mapped_column`
 - Alembic — 마이그레이션. 스키마 변경에 반드시 따라붙는다
 - PostgreSQL 16 — 로컬 Docker Compose
-- pytest — 백엔드 테스트
+- pytest · ruff · mypy(strict)
+- **FastAPI 는 아직 없다.** 1단계에 공개 API 가 없으므로 설치하지 않았다 —
+  빈 의존성은 빈 기준정보와 같다. 들어오는 자리는 2단계이며, 첫 쓰기
+  엔드포인트가 설 때 `requirements.txt` 에 함께 온다
 - **프론트엔드 없음.** 1단계는 화면이 없는 단계다
+
+### 검사 넷 — CI 가 도는 것과 같다
+
+```sh
+cd backend
+.venv/bin/ruff check .
+.venv/bin/ruff format --check .
+.venv/bin/mypy app migrations
+ERP_TEST_DATABASE_URL="postgresql+psycopg://erp:erp@127.0.0.1:5432/erp_test" .venv/bin/pytest
+```
+
+**테스트는 실제 PostgreSQL 에 붙는다.** SQLite 로 대신하면 이 설계가 제약에
+기대는 자리(복합 외래키 · CHECK · 부분 인덱스)를 검증할 수 없다. DB 가 없으면
+건너뛰지 않고 실패한다 — 건너뛴 테스트는 통과한 것처럼 보인다.
 
 ## 지금 어디인가
 
 **1단계 — 표를 세우는 단 한 번.** 설계도의 여덟 단계 중 첫째다.
 기준정보 13표 + 로트 표 1개를 세우고, 마이그레이션과 시드를 붙이고 끝낸다.
+
+**가설공사는 섰고 본 공사는 아직이다.** 도구(린트 · 타입체크 · 테스트 러너 ·
+Alembic · compose)가 돌고 표는 하나도 없다. 마이그레이션 리비전도 0개이며,
+`tests/test_migrations.py::test_the_first_revision_has_not_landed_yet` 이 첫
+리비전이 서는 순간 실패해서 그 파일을 강화하라고 알려 준다 — 그 실패는
+고장이 아니라 다음 할 일의 알림이다.
 
 2단계(IQC 판정 → 로트 생성)는 **이 저장소에서 아직 시작하지 않는다.**
 

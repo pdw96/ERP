@@ -1,0 +1,45 @@
+[project]
+name = "erp"
+version = "0.1.0"
+description = "조기경보 ERP — 1단계 기준정보"
+# 하한이 3.11 인 것은 **이 저장소를 손으로 검증할 수 있게 하기 위해서**다.
+# 컨테이너는 3.12 를 쓰지만, 개발자의 로컬이 3.11 이어도 같은 테스트가 돈다.
+requires-python = ">=3.11"
+
+[tool.ruff]
+line-length = 96
+target-version = "py311"
+src = ["."]
+
+[tool.ruff.lint]
+select = [
+    "E", "W",   # pycodestyle
+    "F",        # pyflakes
+    "I",        # isort
+    "UP",       # pyupgrade
+    "B",        # bugbear
+    "SIM",      # simplify
+    "RUF",      # ruff 고유 — RUF001/002/003 이 한글 주석의 전각 문장부호를 잡는다
+]
+ignore = [
+    # 이 저장소의 주석과 docstring 은 한국어이고 「」· — 같은 전각 기호를 쓴다.
+    # 혼동 문자 경고는 여기서 소음일 뿐이다.
+    "RUF001", "RUF002", "RUF003",
+]
+
+[tool.mypy]
+python_version = "3.11"
+strict = true
+# SQLAlchemy 2.x 의 Mapped[] 를 읽으려면 필요하다.
+plugins = ["sqlalchemy.ext.mypy.plugin"]
+
+[[tool.mypy.overrides]]
+module = "tests.*"
+# 테스트에서 반환형을 일일이 적게 하면 읽기만 나빠진다.
+disallow_untyped_defs = false
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+# 실패를 조용히 넘기지 않는다 — 경고도 실패로 올린다.
+filterwarnings = ["error"]
+addopts = "-ra --strict-markers --strict-config"
