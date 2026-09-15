@@ -64,7 +64,9 @@
 
 ## 제약
 
-- **스택**: Python · FastAPI · SQLAlchemy · Alembic · PostgreSQL 16
+- **스택**: Python · SQLAlchemy · Alembic · PostgreSQL 16.
+  **FastAPI 는 1단계에 설치하지 않는다** — 공개 API 가 없으므로 지금 넣으면
+  쓰이지 않는 의존성이 남는다. 첫 쓰기 엔드포인트가 서는 2단계에 온다
 - **호스팅**: 로컬 Docker Compose만. 배포처 없음.
 - **월 비용 한도**: 0원
 - **외부 API와 쿼터**: 없음. 1단계는 순수 DB 작업이다.
