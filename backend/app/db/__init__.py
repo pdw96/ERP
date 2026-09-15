@@ -8,5 +8,6 @@
 """
 
 from app.db import common_codes as common_codes
+from app.db import master as master
 
-__all__ = ["common_codes"]
+__all__ = ["common_codes", "master"]

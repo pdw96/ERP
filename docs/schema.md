@@ -71,15 +71,38 @@
 |---|---|---|
 | `id` | PK | |
 | `parent_item_id` | FK items | |
+| `parent_item_type` | str(20) | 복합 외래키의 절반 — 파생값이 아니다 |
 | `child_item_id` | FK items | |
+| `child_item_type` | str(20) | 〃 |
 | `level` | int | 1 = 완제품 ← 반제품 · 2 = 반제품 ← 원자재 |
 | `unit_quantity` | float | |
 
-**제약** — `UNIQUE (parent, child)` · `CHECK level IN (1,2)` ·
-`CHECK unit_quantity >= 0` · `CHECK parent <> child`
+**제약** — `UNIQUE (parent, child)` · `CHECK unit_quantity >= 0` ·
+`CHECK parent <> child` · 복합 FK `(parent_item_id, parent_item_type) → items` ·
+같은 모양의 child FK · **`CHECK` 단계가 양쪽 유형을 정한다**
 
-「단계」 열 하나가 재귀를 막는다. 전개가 두 번으로 고정되므로 계산이 단순하고
-테스트할 경우의 수가 유한하다.
+### 「단계」가 재귀를 막는 것을 규칙이 아니라 구조로 둔다
+
+설계도는 「단계 열 하나가 재귀를 막는다」고 적었고, 그것이 어떻게 강제되는지는
+적지 않았다. `level` 을 1·2로 제한하는 CHECK 만으로는 **1단에 원자재를 하위로
+넣는 줄**이 선다 — 전개가 두 번이어도 잘못된 두 번이 된다.
+
+`items` 의 `UNIQUE (id, item_type)` 이 여기서 값을 한다. 유형을 BOM 줄에 함께
+적고 복합 외래키로 품목을 가리키면, 한 CHECK 가 단계와 양쪽 유형을 묶을 수 있다:
+
+```
+(level = 1 AND parent_item_type = '완제품' AND child_item_type = '반제품')
+OR
+(level = 2 AND parent_item_type = '반제품' AND child_item_type = '원자재')
+```
+
+그래서 3단이 **적을 수가 없다** — 원자재를 상위로 둔 줄은 어느 단계로도 서지
+않는다. 유형 두 칸은 파생값을 저장한 것이 아니라 복합 외래키의 절반이며,
+품목의 유형과 다를 수 없다는 것을 데이터베이스가 보증한다. 덤으로 품목의
+유형을 나중에 바꾸는 것도 막힌다.
+
+**설계도보다 한 걸음 나간 자리다.** 42판은 강제 수단을 정하지 않았고, 기존
+저장소에는 유형 칸도 복합 외래키도 없었다.
 
 > **미결 — 손실률 칸(지적 ㉜).** 투입과 산출을 견주는 자리가 없으면 손실이
 > 재고조정으로 숨는다. 견줄 실적이 생기는 5단계의 일이므로 1단계에는 두지

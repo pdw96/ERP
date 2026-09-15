@@ -121,3 +121,34 @@ CODE_GROUPS: tuple[CodeGroupDef, ...] = (
 )
 
 GROUP_CODES: tuple[str, ...] = tuple(group.group_code for group in CODE_GROUPS)
+
+
+# ── 값이 고정된 그룹의 값 ───────────────────────────────────────────────────
+# 프로그램이 이 값을 보고 분기하므로 **여기에도 적고 CHECK 로 박는다.** 값이
+# 가변인 그룹(공정 · 단위 …)은 반대로 여기 적지 않고 복합 외래키로 공통코드를
+# 가리킨다 — 파이썬 상수에서 구워 CHECK 로 박으면 「늘 수 있다」고 선언한
+# 그룹이 실제로는 얼어붙기 때문이다.
+
+FINISHED_GOODS = "완제품"
+SEMI_FINISHED = "반제품"
+RAW_MATERIAL = "원자재"
+ITEM_TYPES = (FINISHED_GOODS, SEMI_FINISHED, RAW_MATERIAL)
+
+# 품목 코드의 접두. **접두는 유형과 유일성만 맡는다** — 공정을 담지 않는다.
+# 담으면 공정이 바뀔 때 코드를 바꿔야 하고, 코드는 바뀌지 않는 것이어야 한다.
+ITEM_CODE_PREFIXES: dict[str, str] = {
+    FINISHED_GOODS: "FG-",
+    SEMI_FINISHED: "SF-",
+    RAW_MATERIAL: "RM-",
+}
+
+PHASE_INITIAL = "초기"
+PHASE_MASS_PRODUCTION = "양산"
+ITEM_PHASES = (PHASE_INITIAL, PHASE_MASS_PRODUCTION)
+
+# 2단 고정 BOM. 1단 = 완제품 ← 반제품 · 2단 = 반제품 ← 원자재.
+BOM_LEVELS = (1, 2)
+BOM_LEVEL_TYPES: dict[int, tuple[str, str]] = {
+    1: (FINISHED_GOODS, SEMI_FINISHED),
+    2: (SEMI_FINISHED, RAW_MATERIAL),
+}
