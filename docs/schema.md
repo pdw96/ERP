@@ -144,7 +144,7 @@ OR
 ### 값이 늘 수 있는 그룹 여덟 — 세기만 한다
 
 `NC_REASON`(19) · `PO_CLOSE`(7) · `SP_REASON`(5) · `ADJ_REASON`(0) ·
-`PROCESS`(5) · `INSP_ITEM`(18) · `DEPT` · `UOM`
+`PROCESS`(5) · `INSP_ITEM`(16) · `DEPT`(5) · `UOM`(7)
 
 `ADJ_REASON` 이 0인 것은 빠진 것이 아니다 — 실제로 조정을 내 보아야 목록이
 나온다.
