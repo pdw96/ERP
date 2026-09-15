@@ -31,11 +31,19 @@ UPDATE txn_type_attributes SET paired_code = '생산산출' WHERE code = '생산
 -- ── 확장 ② 불합격사유 ──────────────────────────────────────────────────────
 -- 계량 열넷은 검사 항목을 가리킨다. 계수 다섯은 가리킬 항목이 없을 수 있다.
 --
+-- **코드와 항목은 1:1 이 아니다.** 단계가 다르면 같은 항목에 다른 코드가 붙는다
+-- — 두께는 IQC 에서 `IQ-DIM`, FQC·OQC 에서 `FQ-THK` 다. 그래서 계량 코드는
+-- 열넷이고 계량 항목은 열둘이다.
+--
+-- `IQ-DIM` 의 이름은 「치수 이탈」이지만 가리키는 항목은 **두께**다. 설계도가
+-- 「치수 이탈(두께 · 폭)」이라 적었고, 수입 공정이 실제로 재는 것이 두께이기
+-- 때문이다 — 이름이 아니라 **재는 것**을 가리켜야 기준이 끌려온다.
+--
 -- `IQ-EXP` 를 계수로 둔다. 재는 값이 아니라 **입고일 + 설정기간의 비교 결과**를
 -- 시스템이 달아 주는 것이라, 관리도에 오를 측정값이 없다.
 INSERT INTO nonconformity_attributes (group_code, code, measure_kind, inspection_item_group, inspection_item_code) VALUES
   ('NC_REASON', 'IQ-FM',  '계수', 'INSP_ITEM', '이물'),
-  ('NC_REASON', 'IQ-DIM', '계량', 'INSP_ITEM', '치수'),
+  ('NC_REASON', 'IQ-DIM', '계량', 'INSP_ITEM', '두께'),
   ('NC_REASON', 'IQ-VIS', '계량', 'INSP_ITEM', '점도'),
   ('NC_REASON', 'IQ-PSD', '계량', 'INSP_ITEM', '입도'),
   ('NC_REASON', 'IQ-MOI', '계량', 'INSP_ITEM', '수분'),

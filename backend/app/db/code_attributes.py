@@ -132,11 +132,18 @@ class NonconformityStageRule(Base):
 
     __tablename__ = "nonconformity_stage_rules"
     __table_args__ = (
-        *code_reference(
-            group_column="reason_group",
-            code_column="reason_code",
-            group_code=codes.NC_REASON,
-            name="nonconformity_stage_rule_reason",
+        # **속성 줄이 있는 사유만** 단계에 걸 수 있다. 공통코드를 가리키면
+        # 「그 코드가 있다」까지만 증명된다 — `measure_kind` 도 검사 항목도 없는
+        # 사유가 단계에서 쓸 수 있게 되고, 검사원이 그것을 고르면 다음 화면이
+        # 무엇을 할지 모른다. 수불유형의 짝에서 쓴 것과 같은 한 겹이다.
+        ForeignKeyConstraint(
+            ["reason_group", "reason_code"],
+            ["nonconformity_attributes.group_code", "nonconformity_attributes.code"],
+            name="fk_nonconformity_stage_rule_reason",
+        ),
+        CheckConstraint(
+            f"reason_group = '{codes.NC_REASON}'",
+            name="ck_nonconformity_stage_rule_reason_group",
         ),
         *code_reference(
             group_column="stage_group",
@@ -195,6 +202,13 @@ class PurchaseCloseAttribute(Base):
         CheckConstraint(
             f"reorder_default IN ({_quoted(codes.REORDER_DEFAULTS)})",
             name="ck_purchase_close_attribute_reorder",
+        ),
+        # **성적 축은 공급사 책임일 때만 붙는다.** 자사 사유에 축이 달리면
+        # 계획이 줄어 종결한 것까지 공급사 성적에 섞이고, 성적이 망가진다.
+        # 반대는 열려 있다 — 공급사 책임이어도 축이 없을 수 있다(단종).
+        CheckConstraint(
+            f"scorecard_axis IS NULL OR responsibility = '{codes.SUPPLIER}'",
+            name="ck_purchase_close_attribute_axis_needs_supplier",
         ),
     )
 

@@ -214,3 +214,135 @@ def test_the_same_reason_disposes_differently_by_stage_in_the_seed(blank: Engine
 
     assert rows["FQC"] == "재작업"
     assert rows["OQC"] == "등급 하향"
+
+
+# ── 기준과 코드가 맞물리는가 ────────────────────────────────────────────────
+#
+# 검사원이 코드를 고르면 그 항목의 기준(규격 · 중심선 · 경고선)이 딸려 와야
+# 한다. 코드는 있는데 기준이 없으면 무엇을 보고 판정하는지 표가 말하지 못하고,
+# 기준은 있는데 코드가 없으면 불합격을 적을 수 없는 항목이 남는다.
+#
+# **두 방향 다 본다.** 한쪽만 보면 반대쪽으로 샌다.
+
+
+def _stage_rules(engine: Engine) -> list[tuple[str, str]]:
+    with engine.connect() as conn:
+        return [
+            (str(row[0]), str(row[1]))
+            for row in conn.execute(
+                text("SELECT reason_code, stage_code FROM nonconformity_stage_rules")
+            )
+        ]
+
+
+def _reason_items(engine: Engine) -> dict[str, tuple[str, str | None]]:
+    with engine.connect() as conn:
+        return {
+            str(row[0]): (str(row[1]), row[2])
+            for row in conn.execute(
+                text(
+                    "SELECT code, measure_kind, inspection_item_code"
+                    "  FROM nonconformity_attributes"
+                )
+            )
+        }
+
+
+def _standards(engine: Engine) -> set[tuple[str, str]]:
+    with engine.connect() as conn:
+        return {
+            (str(row[0]), str(row[1]))
+            for row in conn.execute(
+                text("SELECT process_code, item_code FROM process_inspection_standards")
+            )
+        }
+
+
+def test_every_usable_reason_has_a_standard_to_read(blank: Engine) -> None:
+    """**코드를 고르면 기준이 딸려 와야 한다.**
+
+    어느 단계에서 쓸 수 있는 계량 코드가 가리키는 항목은, 그 단계가 쓰는 공정의
+    기준 표에 있어야 한다. 없으면 검사원이 고를 수는 있는데 규격도 중심선도
+    나오지 않는다.
+    """
+    seed_module.seed(blank)
+    reasons = _reason_items(blank)
+    standards = _standards(blank)
+
+    missing = []
+    for reason_code, stage_code in _stage_rules(blank):
+        if stage_code == codes.RETEST_STAGE:
+            continue
+        kind, item = reasons[reason_code]
+        if kind != codes.MEASURED_KIND or item is None:
+            continue
+        for process in codes.STAGE_PROCESSES[stage_code]:
+            if (process, item) in standards:
+                break
+        else:
+            missing.append(f"{reason_code}({item}) × {stage_code}")
+
+    assert not missing, "기준 없이 쓸 수 있는 코드: " + ", ".join(sorted(missing))
+
+
+def test_every_standard_has_a_reason_that_can_use_it(blank: Engine) -> None:
+    """반대 방향 — **잴 수는 있는데 불합격을 적을 수 없는 항목**이 없어야 한다.
+
+    「폭」과 「치수」를 항목에서 뺀 잣대가 이것이다. 기준만 있고 그것을 가리키는
+    코드가 없으면 그 줄은 아무도 읽지 않는다.
+    """
+    seed_module.seed(blank)
+    reasons = _reason_items(blank)
+    rules = _stage_rules(blank)
+
+    usable: set[tuple[str, str]] = set()
+    for reason_code, stage_code in rules:
+        if stage_code == codes.RETEST_STAGE:
+            continue
+        _, item = reasons[reason_code]
+        if item is None:
+            continue
+        for process in codes.STAGE_PROCESSES[stage_code]:
+            usable.add((process, item))
+
+    unreachable = sorted(f"{process} × {item}" for process, item in _standards(blank) - usable)
+    assert not unreachable, "가리키는 코드가 없는 기준: " + ", ".join(unreachable)
+
+
+def test_a_retest_only_looks_at_what_time_can_change(blank: Engine) -> None:
+    """**재검사는 시간이 바꾸는 것만 본다.**
+
+    만료 로트가 돌아와 다시 보는 항목은 경시 변화가 켜진 것뿐이다. 켜지지 않은
+    항목까지 보면 22판이 좁혀 둔 범위가 되돌아간다 — 그리고 그것은 규칙이
+    아니라 데이터로 지켜져야 한다.
+    """
+    seed_module.seed(blank)
+    reasons = _reason_items(blank)
+
+    with blank.connect() as conn:
+        time_variant = {
+            str(row[0])
+            for row in conn.execute(
+                text(
+                    "SELECT DISTINCT item_code FROM process_inspection_standards"
+                    " WHERE time_variant"
+                )
+            )
+        }
+
+    offenders = [
+        reason_code
+        for reason_code, stage_code in _stage_rules(blank)
+        if stage_code == codes.RETEST_STAGE
+        and (item := reasons[reason_code][1]) is not None
+        and item not in time_variant
+    ]
+
+    assert not offenders, "재검사에 걸린 비경시 항목: " + ", ".join(sorted(offenders))
+
+
+def test_there_are_sixteen_inspection_items(blank: Engine) -> None:
+    """설계도는 18, 공정별 표는 17, **불합격을 적을 수 있는 것만 세면 16**이다."""
+    seed_module.seed(blank)
+
+    assert _count(blank, "common_codes", "group_code = 'INSP_ITEM'") == 16

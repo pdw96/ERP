@@ -224,3 +224,16 @@ def test_the_measuring_unit_is_not_a_stock_unit(prepared: Session) -> None:
     prepared.flush()
 
     assert standard.unit == "ΔE"
+
+
+def test_a_warning_ratio_of_one_is_not_a_warning(prepared: Session) -> None:
+    """**계수가 1 이면 경고선이 규격과 겹친다.**
+
+    그러면 「규격에 가까워졌는가」를 미리 말하지 못하고, 불합격이 난 뒤에야
+    같이 걸린다 — 경고선을 두는 이유가 사라진다. 경계값이라 `<= 1` 과 `< 1` 의
+    차이가 조용히 지나가기 쉬운 자리다.
+    """
+    prepared.add(_standard(warning_ratio=1.0))
+
+    with pytest.raises(IntegrityError):
+        prepared.flush()

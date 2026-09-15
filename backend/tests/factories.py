@@ -100,6 +100,7 @@ def make_supplier_item(
         partner_id=partner.id,
         partner_type=partner.partner_type,
         item_id=item.id,
+        item_type=item.item_type,
         lead_time_hours=lead_time_hours,
         purchase_uom=purchase_uom,
         purchase_uom_group=codes.UOM,

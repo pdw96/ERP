@@ -3,13 +3,13 @@
 표 열넷을 한 번에 굽는다. 조각마다 리비전을 내면 같은 표를 여러 번 다시 만들게
 되므로 **재시드가 한 번으로 끝나지 않는다.**
 
-자동 생성이 CHECK 식을 문자열로 구워 박으므로 이 파일과 모델은 갈릴 수 있다.
-**실제로 갈렸다** — 자동 생성이 `LIKE 'FG-%'` 의 퍼센트를 두 번 적어 박았고,
-그 이스케이프가 데이터베이스까지 들어갔다. 손으로 되돌렸다.
+**자동 생성을 그대로 믿지 않는다.** Alembic 은 CHECK 식을 실행 시점 방언으로
+문자열로 박으면서 바꾼다 — `LIKE 'FG-%'` 의 퍼센트를 두 번 적어 넣었고, 그것이
+데이터베이스까지 들어갔다. 다시 생성할 때마다 또 들어가므로 손으로 되돌린다.
 `tests/test_migrations.py` 가 두 스키마를 실제로 만들어 견주므로, 이 파일을
 손보든 다시 생성하든 **그 테스트를 돌려 보고 나서** 믿는다.
 
-Revision ID: eebf10fc77f6
+Revision ID: 3c602ffaebc3
 Revises:
 Create Date: 2026-09-15
 """
@@ -19,7 +19,7 @@ from collections.abc import Sequence
 import sqlalchemy as sa
 from alembic import op
 
-revision: str = "eebf10fc77f6"
+revision: str = "3c602ffaebc3"
 down_revision: str | None = None
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
@@ -196,42 +196,6 @@ def upgrade() -> None:
         sa.PrimaryKeyConstraint("group_code", "code"),
     )
     op.create_table(
-        "nonconformity_stage_rules",
-        sa.Column(
-            "reason_group", sa.String(length=20), server_default="NC_REASON", nullable=False
-        ),
-        sa.Column("reason_code", sa.String(length=30), nullable=False),
-        sa.Column(
-            "stage_group", sa.String(length=20), server_default="INSP_STAGE", nullable=False
-        ),
-        sa.Column("stage_code", sa.String(length=30), nullable=False),
-        sa.Column("disposition", sa.String(length=20), nullable=False),
-        sa.Column(
-            "special_acceptance_allowed", sa.Boolean(), server_default="false", nullable=False
-        ),
-        sa.CheckConstraint(
-            "disposition IN ('반품', '환불', '재작업', '폐기', '등급 하향')",
-            name="ck_nonconformity_stage_rule_disposition",
-        ),
-        sa.CheckConstraint(
-            "reason_group = 'NC_REASON'", name="ck_nonconformity_stage_rule_reason_group"
-        ),
-        sa.CheckConstraint(
-            "stage_group = 'INSP_STAGE'", name="ck_nonconformity_stage_rule_stage_group"
-        ),
-        sa.ForeignKeyConstraint(
-            ["reason_group", "reason_code"],
-            ["common_codes.group_code", "common_codes.code"],
-            name="fk_nonconformity_stage_rule_reason",
-        ),
-        sa.ForeignKeyConstraint(
-            ["stage_group", "stage_code"],
-            ["common_codes.group_code", "common_codes.code"],
-            name="fk_nonconformity_stage_rule_stage",
-        ),
-        sa.PrimaryKeyConstraint("reason_group", "reason_code", "stage_group", "stage_code"),
-    )
-    op.create_table(
         "process_inspection_standards",
         sa.Column("process_code", sa.String(length=30), nullable=False),
         sa.Column(
@@ -273,7 +237,7 @@ def upgrade() -> None:
             name="ck_inspection_standard_spec_order",
         ),
         sa.CheckConstraint(
-            "warning_ratio > 0 AND warning_ratio <= 1",
+            "warning_ratio > 0 AND warning_ratio < 1",
             name="ck_inspection_standard_warning_ratio",
         ),
         sa.ForeignKeyConstraint(
@@ -305,6 +269,10 @@ def upgrade() -> None:
         sa.CheckConstraint(
             "responsibility IN ('공급사', '자사')",
             name="ck_purchase_close_attribute_responsibility",
+        ),
+        sa.CheckConstraint(
+            "scorecard_axis IS NULL OR responsibility = '공급사'",
+            name="ck_purchase_close_attribute_axis_needs_supplier",
         ),
         sa.CheckConstraint(
             "scorecard_axis IS NULL OR scorecard_axis IN ('수량 준수율', '납기 준수율', '공급 가능성')",
@@ -437,6 +405,14 @@ def upgrade() -> None:
         ),
         sa.CheckConstraint("stock_type IN ('양품', '불량품')", name="ck_lot_stock_type"),
         sa.CheckConstraint("warehouse IN ('원재료', '생산', '제품')", name="ck_lot_warehouse"),
+        sa.CheckConstraint(
+            "expiry_date IS NULL OR expiry_date >= COALESCE(passed_date, received_date, produced_date)",
+            name="ck_lot_expires_after_it_exists",
+        ),
+        sa.CheckConstraint(
+            "passed_date IS NULL OR passed_date >= COALESCE(received_date, produced_date)",
+            name="ck_lot_passed_after_arrival",
+        ),
         sa.CheckConstraint("quantity >= 0", name="ck_lot_quantity"),
         sa.ForeignKeyConstraint(
             ["item_id", "item_type"], ["items.id", "items.item_type"], name="fk_lot_item"
@@ -447,25 +423,64 @@ def upgrade() -> None:
     op.create_index(op.f("ix_lots_lot_number"), "lots", ["lot_number"], unique=False)
     op.create_index(op.f("ix_lots_warehouse"), "lots", ["warehouse"], unique=False)
     op.create_table(
+        "nonconformity_stage_rules",
+        sa.Column(
+            "reason_group", sa.String(length=20), server_default="NC_REASON", nullable=False
+        ),
+        sa.Column("reason_code", sa.String(length=30), nullable=False),
+        sa.Column(
+            "stage_group", sa.String(length=20), server_default="INSP_STAGE", nullable=False
+        ),
+        sa.Column("stage_code", sa.String(length=30), nullable=False),
+        sa.Column("disposition", sa.String(length=20), nullable=False),
+        sa.Column(
+            "special_acceptance_allowed", sa.Boolean(), server_default="false", nullable=False
+        ),
+        sa.CheckConstraint(
+            "disposition IN ('반품', '환불', '재작업', '폐기', '등급 하향')",
+            name="ck_nonconformity_stage_rule_disposition",
+        ),
+        sa.CheckConstraint(
+            "reason_group = 'NC_REASON'", name="ck_nonconformity_stage_rule_reason_group"
+        ),
+        sa.CheckConstraint(
+            "stage_group = 'INSP_STAGE'", name="ck_nonconformity_stage_rule_stage_group"
+        ),
+        sa.ForeignKeyConstraint(
+            ["reason_group", "reason_code"],
+            ["nonconformity_attributes.group_code", "nonconformity_attributes.code"],
+            name="fk_nonconformity_stage_rule_reason",
+        ),
+        sa.ForeignKeyConstraint(
+            ["stage_group", "stage_code"],
+            ["common_codes.group_code", "common_codes.code"],
+            name="fk_nonconformity_stage_rule_stage",
+        ),
+        sa.PrimaryKeyConstraint("reason_group", "reason_code", "stage_group", "stage_code"),
+    )
+    op.create_table(
         "supplier_items",
         sa.Column("partner_id", sa.Integer(), nullable=False),
         sa.Column(
             "partner_type", sa.String(length=10), server_default="공급사", nullable=False
         ),
         sa.Column("item_id", sa.Integer(), nullable=False),
+        sa.Column("item_type", sa.String(length=20), server_default="원자재", nullable=False),
         sa.Column("lead_time_hours", sa.Float(), nullable=False),
         sa.Column("purchase_uom", sa.String(length=30), nullable=False),
         sa.Column(
             "purchase_uom_group", sa.String(length=20), server_default="UOM", nullable=False
         ),
         sa.Column("conversion_factor", sa.Float(), server_default="1.0", nullable=False),
+        sa.CheckConstraint("item_type = '원자재'", name="ck_supplier_item_is_raw_material"),
         sa.CheckConstraint("partner_type = '공급사'", name="ck_supplier_item_is_supplier"),
         sa.CheckConstraint("purchase_uom_group = 'UOM'", name="ck_supplier_item_uom_group"),
         sa.CheckConstraint("conversion_factor > 0", name="ck_supplier_item_conversion"),
         sa.CheckConstraint("lead_time_hours >= 0", name="ck_supplier_item_lead_time"),
         sa.ForeignKeyConstraint(
-            ["item_id"],
-            ["items.id"],
+            ["item_id", "item_type"],
+            ["items.id", "items.item_type"],
+            name="fk_supplier_item_item",
         ),
         sa.ForeignKeyConstraint(
             ["partner_id", "partner_type"],
@@ -483,6 +498,7 @@ def upgrade() -> None:
 
 def downgrade() -> None:
     op.drop_table("supplier_items")
+    op.drop_table("nonconformity_stage_rules")
     op.drop_index(op.f("ix_lots_warehouse"), table_name="lots")
     op.drop_index(op.f("ix_lots_lot_number"), table_name="lots")
     op.drop_table("lots")
@@ -491,7 +507,6 @@ def downgrade() -> None:
     op.drop_table("shift_patterns")
     op.drop_table("purchase_close_attributes")
     op.drop_table("process_inspection_standards")
-    op.drop_table("nonconformity_stage_rules")
     op.drop_table("nonconformity_attributes")
     op.drop_index(op.f("ix_items_item_type"), table_name="items")
     op.drop_index(op.f("ix_items_code"), table_name="items")

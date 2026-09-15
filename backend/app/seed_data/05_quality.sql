@@ -49,16 +49,24 @@ INSERT INTO process_inspection_standards
   ('PROCESS', '적층경화', 'INSP_ITEM', '두께',   105.0,  95.0, 100.0, 0.70, NULL, '미정', FALSE, 'µm'),
   ('PROCESS', '적층경화', 'INSP_ITEM', '광택',    95.0,  80.0,  88.0, 0.70, NULL, '미정', TRUE,  'GU'),
   ('PROCESS', '적층경화', 'INSP_ITEM', '색차',     1.00, NULL,   0.30, 0.70, NULL, '미정', TRUE,  'ΔE'),
-  ('PROCESS', '적층경화', 'INSP_ITEM', '접착력',  NULL,   3.00,  4.00, 0.70, NULL, '미정', TRUE,  'N/mm');
+  ('PROCESS', '적층경화', 'INSP_ITEM', '접착력',  NULL,   3.00,  4.00, 0.70, NULL, '미정', TRUE,  'N/mm'),
+  -- `FQ-FM`(외관 이물 검출)이 FQC 에서 난다 — 그 단계에서 쓸 수 있는 코드인데
+  -- 기준이 없으면 무엇을 보고 판정하는지 표가 말하지 못한다.
+  ('PROCESS', '적층경화', 'INSP_ITEM', '외관이물', NULL,  NULL,  NULL, 0.70, NULL, '미정', FALSE, NULL);
 
 -- ── 출하 (OQC) ─────────────────────────────────────────────────────────────
--- FQC 와 **같은 항목을 다시 본다.** 시점과 대상이 다르기 때문이다 — FQC 는
+-- FQC 와 **같은 다섯을 다시 본다.** 시점과 대상이 다르기 때문이다 — FQC 는
 -- 배치를 보고 OQC 는 출하 로트를 본다. 같은 코드가 어느 단계에서 났는지를
 -- 셀 수 있게 되는 것이 코드화의 진짜 이득이다.
+--
+-- **설계도 공정표는 여기에 「치수」를 넣었다.** 뺀 이유는 그것을 가리키는 OQC
+-- 불합격 코드가 없기 때문이다 — 잴 수는 있어도 불합격을 적을 수 없는 항목이라,
+-- 「폭」을 뺀 것과 같은 자리다. 치수를 따로 재기로 하면 항목과 코드를 함께 더한다.
 INSERT INTO process_inspection_standards
   (process_group, process_code, item_group, item_code,
    upper_spec_limit, lower_spec_limit, center_line, warning_ratio, sigma, sigma_source, time_variant, unit) VALUES
-  ('PROCESS', '출하', 'INSP_ITEM', '두께',     105.0,  95.0,  100.0, 0.70, NULL, '미정', FALSE, 'µm'),
-  ('PROCESS', '출하', 'INSP_ITEM', '광택',      95.0,  80.0,   88.0, 0.70, NULL, '미정', TRUE,  'GU'),
-  ('PROCESS', '출하', 'INSP_ITEM', '치수',    1005.0, 995.0, 1000.0, 0.70, NULL, '미정', FALSE, 'mm'),
-  ('PROCESS', '출하', 'INSP_ITEM', '외관이물',  NULL,  NULL,   NULL, 0.70, NULL, '미정', FALSE, NULL);
+  ('PROCESS', '출하', 'INSP_ITEM', '두께',     105.0,  95.0, 100.0, 0.70, NULL, '미정', FALSE, 'µm'),
+  ('PROCESS', '출하', 'INSP_ITEM', '광택',      95.0,  80.0,  88.0, 0.70, NULL, '미정', TRUE,  'GU'),
+  ('PROCESS', '출하', 'INSP_ITEM', '색차',       1.00, NULL,   0.30, 0.70, NULL, '미정', TRUE,  'ΔE'),
+  ('PROCESS', '출하', 'INSP_ITEM', '접착력',    NULL,   3.00,  4.00, 0.70, NULL, '미정', TRUE,  'N/mm'),
+  ('PROCESS', '출하', 'INSP_ITEM', '외관이물',  NULL,  NULL,  NULL, 0.70, NULL, '미정', FALSE, NULL);

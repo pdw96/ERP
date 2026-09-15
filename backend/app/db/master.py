@@ -10,7 +10,6 @@ from sqlalchemy import (
     Boolean,
     CheckConstraint,
     Float,
-    ForeignKey,
     ForeignKeyConstraint,
     Integer,
     String,
@@ -209,8 +208,14 @@ class BomComponent(Base):
 class Partner(Base):
     """거래처 — 공급사와 고객사.
 
-    한 표에 둔다. 같은 회사가 양쪽인 경우가 있고, 무엇보다 **거래처라는 사실이
-    하나**이기 때문이다. 유형은 그 거래처가 어느 흐름에 서는가를 말한다.
+    한 표에 둔다. **거래처라는 사실이 하나**이기 때문이다. 유형은 그 거래처가
+    어느 흐름에 서는가를 말한다 — 공급사는 발주와 반품에, 고객사는 수주와
+    출하에 선다.
+
+    **한 거래처는 역할 하나를 갖는다.** 같은 회사가 양쪽이면 코드를 달리해 두
+    줄로 둔다. 역할을 여러 개 갖게 하려면 관계 표가 하나 더 필요한데, 그것이
+    필요해지는 자리(같은 회사에 팔면서 사는 거래)가 이 설계에 아직 없다 —
+    생기는 날 바꾼다.
     """
 
     __tablename__ = "partners"
@@ -257,6 +262,18 @@ class SupplierItem(Base):
         CheckConstraint(
             f"partner_type = '{codes.SUPPLIER}'", name="ck_supplier_item_is_supplier"
         ),
+        # **공급사에게 사는 것은 원자재뿐이다.** 반제품과 완제품은 우리가 만든다
+        # — 로트가 그것을 이미 강제한다(공급사 출처 로트는 원자재여야 한다).
+        # 여기를 열어 두면 **받을 수 없는 구매 마스터**가 선다: 발주는 되는데
+        # 입고에서 로트를 만들 수 없는 품목이다.
+        ForeignKeyConstraint(
+            ["item_id", "item_type"],
+            ["items.id", "items.item_type"],
+            name="fk_supplier_item_item",
+        ),
+        CheckConstraint(
+            f"item_type = '{codes.RAW_MATERIAL}'", name="ck_supplier_item_is_raw_material"
+        ),
         *code_reference(
             group_column="purchase_uom_group",
             code_column="purchase_uom",
@@ -273,7 +290,11 @@ class SupplierItem(Base):
     partner_type: Mapped[str] = mapped_column(
         String(10), default=codes.SUPPLIER, server_default=codes.SUPPLIER
     )
-    item_id: Mapped[int] = mapped_column(ForeignKey("items.id"), primary_key=True)
+    # 복합 외래키로만 가리킨다 — 컬럼에도 걸면 같은 관계가 두 번 생긴다.
+    item_id: Mapped[int] = mapped_column(primary_key=True)
+    item_type: Mapped[str] = mapped_column(
+        String(20), default=codes.RAW_MATERIAL, server_default=codes.RAW_MATERIAL
+    )
 
     lead_time_hours: Mapped[float] = mapped_column(Float)
     purchase_uom: Mapped[str] = mapped_column(String(30))
@@ -284,4 +305,4 @@ class SupplierItem(Base):
     conversion_factor: Mapped[float] = mapped_column(Float, default=1.0, server_default="1.0")
 
     partner: Mapped[Partner] = relationship(back_populates="supplied_items")
-    item: Mapped[Item] = relationship()
+    item: Mapped[Item] = relationship(foreign_keys=[item_id, item_type])

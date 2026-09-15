@@ -53,10 +53,10 @@ class ProcessInspectionStandard(Base):
             name="ck_inspection_standard_sigma_matches_source",
         ),
         CheckConstraint("sigma IS NULL OR sigma > 0", name="ck_inspection_standard_sigma"),
-        # 경고선은 규격 안쪽에 긋는 선이다. 1 이면 규격과 같아 경고가 아니고,
-        # 0 이하면 중심선 반대편에 선다.
+        # 경고선은 **규격 안쪽에** 긋는 선이다. 1 이면 규격과 겹쳐 「규격에
+        # 가까워졌는가」를 미리 말하지 못하고, 0 이하면 중심선 반대편에 선다.
         CheckConstraint(
-            "warning_ratio > 0 AND warning_ratio <= 1",
+            "warning_ratio > 0 AND warning_ratio < 1",
             name="ck_inspection_standard_warning_ratio",
         ),
         CheckConstraint(

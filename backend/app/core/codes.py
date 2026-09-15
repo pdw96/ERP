@@ -242,3 +242,19 @@ LOT_ORIGIN_ITEM_TYPES: dict[str, tuple[str, ...]] = {
     LOT_FROM_SUPPLIER: (RAW_MATERIAL,),
     LOT_FROM_OWN: (SEMI_FINISHED, FINISHED_GOODS),
 }
+
+
+# ── 검사 단계가 어느 공정의 기준을 쓰는가 ──────────────────────────────────
+# 품목의 `process` 는 그 품목이 **산출되는** 공정이고, 검사 기준을 실제로
+# 고르는 것은 **단계**다. 완제품은 적층경화(FQC)와 출하(OQC) 두 번 검사받는데
+# 품목이 가진 공정은 하나뿐이므로, 그 대응을 여기 둔다.
+#
+# **재검사는 빠져 있다.** 원 단계의 기준을 다시 쓰되 경시 변화 항목만 보므로
+# 단계 하나에 공정 하나가 붙지 않는다.
+STAGE_PROCESSES: dict[str, tuple[str, ...]] = {
+    "IQC": ("수입",),
+    "IPQC": ("배합", "코팅"),
+    "FQC": ("적층경화",),
+    "OQC": ("출하",),
+}
+RETEST_STAGE = "재검사"

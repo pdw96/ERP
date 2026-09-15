@@ -23,7 +23,10 @@ if config.config_file_name is not None:
 # 이름의 DB 가 있으면 **성공한 것처럼 보인다** — 실제로 그렇게 지나갔고 CI 가
 # 잡았다. 설정은 아무도 주지 않았을 때의 기본값이지 우선값이 아니다.
 if not config.get_main_option("sqlalchemy.url", None):
-    config.set_main_option("sqlalchemy.url", get_settings().database_url)
+    # **퍼센트를 두 번 적는다.** Alembic 설정은 configparser 이고 거기서 `%` 는
+    # 보간 구문이다. 비밀번호에 `@` 가 하나만 있어도 URL 인코딩이 `%40` 을
+    # 만들고, 그대로 넣으면 붙어 보기도 전에 터진다.
+    config.set_main_option("sqlalchemy.url", get_settings().database_url.replace("%", "%%"))
 
 # `app.db` 를 위에서 불러들였으므로 metadata 가 표를 전부 알고 있다.
 target_metadata = Base.metadata

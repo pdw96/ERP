@@ -321,3 +321,51 @@ def test_a_lot_quantity_cannot_be_negative(prepared: Session) -> None:
     prepared.add(_lot(raw, quantity=-1.0))
     with pytest.raises(IntegrityError):
         prepared.flush()
+
+
+def test_a_lot_cannot_pass_before_it_arrives(prepared: Session) -> None:
+    """들어오기 전에 합격할 수 없다.
+
+    이 날짜가 FIFO 와 만료 판정에 그대로 쓰이므로, 거꾸로 선 줄은 터지지 않고
+    **조용히 틀린 재고**를 만든다.
+    """
+    raw = make_item(codes.RAW_MATERIAL)
+    prepared.add(raw)
+    prepared.flush()
+
+    prepared.add(_lot(raw, received_date=date(2026, 9, 10), passed_date=date(2026, 9, 1)))
+    with pytest.raises(IntegrityError):
+        prepared.flush()
+
+
+def test_a_lot_cannot_expire_before_it_exists(prepared: Session) -> None:
+    """생기기 전에 만료될 수 없다."""
+    raw = make_item(codes.RAW_MATERIAL)
+    prepared.add(raw)
+    prepared.flush()
+
+    prepared.add(
+        _lot(
+            raw,
+            received_date=date(2026, 9, 10),
+            passed_date=date(2026, 9, 11),
+            expiry_date=date(2026, 9, 5),
+        )
+    )
+    with pytest.raises(IntegrityError):
+        prepared.flush()
+
+
+def test_a_baseline_lot_still_takes_null_dates(prepared: Session) -> None:
+    """날짜 순서를 걸어도 **기초재고의 빈 합격일은 그대로 통과한다.**
+
+    제약이 사실을 막으면 안 된다 — 과거를 소급하지 않기로 했으므로 이월로
+    깔리는 로트에는 적을 날짜가 없다.
+    """
+    raw = make_item(codes.RAW_MATERIAL)
+    prepared.add(raw)
+    prepared.flush()
+
+    prepared.add(_lot(raw, passed_date=None, expiry_date=date(2027, 1, 1)))
+
+    prepared.flush()

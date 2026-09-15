@@ -159,3 +159,20 @@ def test_the_same_supplier_cannot_list_an_item_twice(prepared: Session) -> None:
 
     with pytest.raises(IntegrityError):
         prepared.flush()
+
+
+def test_only_raw_materials_can_be_purchased(prepared: Session) -> None:
+    """**공급사에게 사는 것은 원자재뿐이다.**
+
+    완제품에 공급사를 붙이면 발주는 되는데 입고에서 로트를 만들 수 없다 —
+    로트가 「공급사 출처는 원자재」를 이미 강제하기 때문이다. 받을 수 없는
+    구매 마스터가 서는 것을 여기서 막는다.
+    """
+    supplier = make_partner(codes.SUPPLIER)
+    finished = make_item(codes.FINISHED_GOODS, stock_uom="EA")
+    prepared.add_all([supplier, finished])
+    prepared.flush()
+
+    prepared.add(make_supplier_item(supplier, finished, purchase_uom="EA"))
+    with pytest.raises(IntegrityError):
+        prepared.flush()

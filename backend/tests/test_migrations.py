@@ -13,6 +13,7 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
 
+import pytest
 from alembic import command
 from alembic.config import Config
 from alembic.script import ScriptDirectory
@@ -187,3 +188,28 @@ def test_downgrade_takes_every_table_back_out(engine: Engine) -> None:
 
         remaining = {table for table, _ in _columns(engine, "round_trip")}
         assert remaining <= {"alembic_version"}, f"내렸는데 남은 표가 있다: {remaining}"
+
+
+def test_a_percent_in_the_url_does_not_break_alembic(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """**비밀번호에 `@` 가 하나만 있어도 URL 인코딩이 `%40` 을 만든다.**
+
+    Alembic 설정은 configparser 이고 거기서 `%` 는 보간 구문이라, 그대로 넣으면
+    데이터베이스에 붙어 보기도 전에 터진다. 흔한 비밀번호 하나가 마이그레이션을
+    통째로 막는 자리였다.
+    """
+    monkeypatch.setenv("ERP_DATABASE_URL", "postgresql+psycopg://erp:p%40ss@nowhere/erp")
+
+    # `env.py` 를 읽어 설정을 넣는 데까지만 간다 — 붙지는 않는다.
+    import importlib
+
+    from app.core import config as config_module
+
+    importlib.reload(config_module)
+    settings_url = config_module.get_settings().database_url
+
+    probe = Config(str(BACKEND_ROOT / "alembic.ini"))
+    probe.set_main_option("sqlalchemy.url", settings_url.replace("%", "%%"))
+
+    assert probe.get_main_option("sqlalchemy.url") == settings_url

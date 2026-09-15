@@ -13,6 +13,26 @@ from app.db.code_attributes import (
 )
 from tests.factories import add_code
 
+
+def _usable_reason(session: Session, code: str, name: str, item: str | None = None) -> None:
+    """단계에 걸 수 있는 사유 하나 — **속성 줄까지** 세운다.
+
+    코드만 있고 속성이 없는 사유는 단계에 걸 수 없다. 그것이 제약이다.
+    """
+    add_code(session, codes.NC_REASON, code, name)
+    if item is not None:
+        add_code(session, codes.INSP_ITEM, item)
+    session.flush()
+    session.add(
+        NonconformityAttribute(
+            code=code,
+            measure_kind=codes.MEASURED_KIND if item else codes.COUNTED_KIND,
+            inspection_item_code=item,
+        )
+    )
+    session.flush()
+
+
 # ── 그룹이 고정되는가 ───────────────────────────────────────────────────────
 
 
@@ -218,7 +238,7 @@ def test_the_same_reason_disposes_differently_by_stage(session: Session) -> None
     두께 규격 이탈은 FQC 에서 나면 재작업이고 OQC 에서 나면 등급 하향이다.
     처분을 코드에 붙였다면 이 두 줄을 적을 수 없다.
     """
-    add_code(session, codes.NC_REASON, "FQ-THK", "두께 규격 이탈")
+    _usable_reason(session, "FQ-THK", "두께 규격 이탈", item="두께")
     add_code(session, codes.INSP_STAGE, "FQC")
     add_code(session, codes.INSP_STAGE, "OQC")
     session.flush()
@@ -243,7 +263,7 @@ def test_a_row_is_what_makes_a_reason_usable_in_a_stage(session: Session) -> Non
     그래서 「적용 단계」 칸이 따로 없다 — 검사 대기를 기록의 부재로 표현하는
     것과 같은 방식이다.
     """
-    add_code(session, codes.NC_REASON, "IQ-FM", "이물 혼입")
+    _usable_reason(session, "IQ-FM", "이물 혼입")
     add_code(session, codes.INSP_STAGE, "IQC")
     add_code(session, codes.INSP_STAGE, "OQC")
     session.flush()
@@ -263,7 +283,7 @@ def test_a_row_is_what_makes_a_reason_usable_in_a_stage(session: Session) -> Non
 
 def test_special_acceptance_is_off_unless_someone_allows_it(session: Session) -> None:
     """특채는 「불합격인데 쓰기로 한 결정」이다 — 기본이 허용이면 결정이 아니다."""
-    add_code(session, codes.NC_REASON, "IQ-FM", "이물 혼입")
+    _usable_reason(session, "IQ-FM", "이물 혼입")
     add_code(session, codes.INSP_STAGE, "IQC")
     session.flush()
 
@@ -276,7 +296,7 @@ def test_special_acceptance_is_off_unless_someone_allows_it(session: Session) ->
 
 def test_an_unknown_disposition_is_refused(session: Session) -> None:
     """처분은 다섯뿐이다 — 검사원의 다음 화면이 이 값으로 갈린다."""
-    add_code(session, codes.NC_REASON, "IQ-FM", "이물 혼입")
+    _usable_reason(session, "IQ-FM", "이물 혼입")
     add_code(session, codes.INSP_STAGE, "IQC")
     session.flush()
 
@@ -330,6 +350,45 @@ def test_an_unknown_scorecard_axis_is_refused(session: Session) -> None:
             responsibility="공급사",
             scorecard_axis="친절도",
             reorder_default="필요",
+        )
+    )
+    with pytest.raises(IntegrityError):
+        session.flush()
+
+
+def test_a_reason_without_attributes_cannot_be_used_in_a_stage(session: Session) -> None:
+    """**속성 줄이 없는 사유는 단계에 걸 수 없다.**
+
+    공통코드를 가리키면 「그 코드가 있다」까지만 증명된다 — `measure_kind` 도
+    검사 항목도 없는 사유가 단계에서 쓸 수 있게 되고, 검사원이 그것을 고르면
+    다음 화면이 무엇을 할지 모른다.
+    """
+    add_code(session, codes.NC_REASON, "ZZ-TMP", "속성 없는 사유")
+    add_code(session, codes.INSP_STAGE, "IQC")
+    session.flush()
+
+    session.add(
+        NonconformityStageRule(reason_code="ZZ-TMP", stage_code="IQC", disposition="반품")
+    )
+    with pytest.raises(IntegrityError):
+        session.flush()
+
+
+def test_a_scorecard_axis_needs_the_supplier_to_be_responsible(session: Session) -> None:
+    """자사 사유에 성적 축이 달리면 **공급사가 우리 탓으로 벌점을 받는다.**
+
+    계획이 줄어 종결한 것까지 성적에 섞이면 성적이 망가진다. 반대는 열려 있다 —
+    공급사 책임이어도 축이 없을 수 있다(단종).
+    """
+    add_code(session, codes.PO_CLOSE, "PO-CHG", "소요량 감소")
+    session.flush()
+
+    session.add(
+        PurchaseCloseAttribute(
+            code="PO-CHG",
+            responsibility="자사",
+            scorecard_axis="수량 준수율",
+            reorder_default="불필요",
         )
     )
     with pytest.raises(IntegrityError):

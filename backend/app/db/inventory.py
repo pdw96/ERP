@@ -103,6 +103,20 @@ class Lot(Base):
             f"item_type <> '{codes.SEMI_FINISHED}' OR expiry_date IS NULL",
             name="ck_lot_semi_finished_has_no_expiry",
         ),
+        # **날짜가 거꾸로 선 로트는 없다.** 들어오기 전에 합격할 수 없고, 생기기
+        # 전에 만료될 수 없다. 이 값들이 FIFO 와 만료 판정에 그대로 쓰이므로,
+        # 거꾸로 된 줄은 터지지 않고 **조용히 틀린 재고**를 만든다.
+        #
+        # 비는 것은 그대로 허용한다 — 기초재고에는 적을 합격일이 없다.
+        CheckConstraint(
+            "passed_date IS NULL" " OR passed_date >= COALESCE(received_date, produced_date)",
+            name="ck_lot_passed_after_arrival",
+        ),
+        CheckConstraint(
+            "expiry_date IS NULL"
+            " OR expiry_date >= COALESCE(passed_date, received_date, produced_date)",
+            name="ck_lot_expires_after_it_exists",
+        ),
     )
 
     id: Mapped[int] = mapped_column(primary_key=True)
