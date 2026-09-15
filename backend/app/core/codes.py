@@ -152,3 +152,93 @@ BOM_LEVEL_TYPES: dict[int, tuple[str, str]] = {
     1: (FINISHED_GOODS, SEMI_FINISHED),
     2: (SEMI_FINISHED, RAW_MATERIAL),
 }
+
+
+# ── 수불유형의 총량 영향 ────────────────────────────────────────────────────
+# 「불변」은 재고구분 대체다 — 총량은 그대로이고 양품재고만 준다. 「기준점」은
+# 전기이월이며, 잔량은 그 줄부터 더한다.
+EFFECT_INCREASE = "증가"
+EFFECT_DECREASE = "감소"
+EFFECT_BOTH = "양방향"
+EFFECT_NONE = "불변"
+EFFECT_BASELINE = "기준점"
+TOTAL_EFFECTS = (
+    EFFECT_INCREASE,
+    EFFECT_DECREASE,
+    EFFECT_BOTH,
+    EFFECT_NONE,
+    EFFECT_BASELINE,
+)
+
+# ── 불합격 처분 ─────────────────────────────────────────────────────────────
+# 「고칠 수 있는가」가 처분을 가른다 — 고칠 수 없는 것(이물 · 접착력 · 배합비)은
+# 폐기, 쓸 수는 있는 것(치수 · 광택 · 색차 · 점도)은 등급 하향이나 특채,
+# 물건이 아니라 조건이 틀린 것(온도 · 속도 · 두께)은 재작업이다.
+DISPOSITIONS = ("반품", "환불", "재작업", "폐기", "등급 하향")
+
+# ── 검사 항목의 성질 ────────────────────────────────────────────────────────
+MEASURED_KIND = "계량"
+COUNTED_KIND = "계수"
+MEASURE_KINDS = (MEASURED_KIND, COUNTED_KIND)
+
+# ── 미납 종결 ───────────────────────────────────────────────────────────────
+# 성적 축이 **비어 있으면 공급사 성적에 잡히지 않는다.** 따로 「반영 여부」 칸을
+# 두면 둘이 어긋날 수 있고, 어긋나면 단종처럼 예외인 줄에서 어긋난다.
+SCORECARD_AXES = ("수량 준수율", "납기 준수율", "공급 가능성")
+REORDER_DEFAULTS = ("필요", "불필요", "건별")
+RESPONSIBILITIES = ("공급사", "자사")
+
+
+# ── 거래처 ──────────────────────────────────────────────────────────────────
+# 공급사(반품 · 환불)와 고객사(수주 · 출하). 없으면 구간 1과 5가 성립하지 않는다.
+SUPPLIER = "공급사"
+CUSTOMER = "고객사"
+PARTNER_TYPES = (SUPPLIER, CUSTOMER)
+
+
+# ── σ 와 세 개의 선 ─────────────────────────────────────────────────────────
+# σ 출처가 없으면 **화면의 Cpk 가 진짜인지 자리표시자인지 아무도 모른다.**
+# 「미정」이면 숫자를 내지 않는다 — 규격에서 뽑은 σ 는 어떤 계수를 쓰든 Cpk 를
+# 그 계수의 역수로 못박기 때문이다.
+SIGMA_UNDECIDED = "미정"
+SIGMA_ASSUMED = "임의"
+SIGMA_OBSERVED = "실측"
+SIGMA_SOURCES = (SIGMA_UNDECIDED, SIGMA_ASSUMED, SIGMA_OBSERVED)
+
+# 경고선의 기본 계수. 규격에서 긋는 **사내 기준**이며 사내만 본다 — 더 이르게
+# 알고 싶으면 조여도 고객에게 알릴 일이 아니다. 항목마다 다르게 둘 수 있도록
+# 상수가 아니라 칸으로 만든다.
+DEFAULT_WARNING_RATIO = 0.70
+
+
+# ── 재고가 사는 곳 ──────────────────────────────────────────────────────────
+WAREHOUSE_RAW = "원재료"
+WAREHOUSE_PRODUCTION = "생산"
+WAREHOUSE_FINISHED = "제품"
+WAREHOUSES = (WAREHOUSE_RAW, WAREHOUSE_PRODUCTION, WAREHOUSE_FINISHED)
+
+# 제품창고 **안에서** 갈린다. 불합격품은 재고가 되지 않으므로 앞의 두 창고에는
+# 불량품이 없다 — OQC 에서 떨어져 양불이동된 것만 불량품이 된다.
+STOCK_GOOD = "양품"
+STOCK_DEFECTIVE = "불량품"
+STOCK_TYPES = (STOCK_GOOD, STOCK_DEFECTIVE)
+
+# 어느 창고가 어느 품목을 담는가. 생산창고만 셋 다 담는다 — 투입 대기 자재와
+# 반제품과 완제품이 함께 있기 때문이다.
+WAREHOUSE_ITEM_TYPES: dict[str, tuple[str, ...]] = {
+    WAREHOUSE_RAW: (RAW_MATERIAL,),
+    WAREHOUSE_PRODUCTION: (RAW_MATERIAL, SEMI_FINISHED, FINISHED_GOODS),
+    WAREHOUSE_FINISHED: (FINISHED_GOODS,),
+}
+
+# ── 로트 번호의 출처 ────────────────────────────────────────────────────────
+# 원칙 ① — 재고 로트는 언제나 합격 후에 생긴다. **번호의 출처만 다르다.**
+LOT_FROM_SUPPLIER = "공급사"
+LOT_FROM_OWN = "자사"
+LOT_ORIGINS = (LOT_FROM_SUPPLIER, LOT_FROM_OWN)
+
+# 자재는 사서 들어오고 반제품과 완제품은 만들어 나온다.
+LOT_ORIGIN_ITEM_TYPES: dict[str, tuple[str, ...]] = {
+    LOT_FROM_SUPPLIER: (RAW_MATERIAL,),
+    LOT_FROM_OWN: (SEMI_FINISHED, FINISHED_GOODS),
+}

@@ -7,7 +7,18 @@
 조각이 하나 설 때마다 여기 한 줄이 는다.
 """
 
+from app.db import code_attributes as code_attributes
 from app.db import common_codes as common_codes
+from app.db import inventory as inventory
 from app.db import master as master
+from app.db import production as production
+from app.db import quality as quality
 
-__all__ = ["common_codes", "master"]
+__all__ = [
+    "code_attributes",
+    "common_codes",
+    "inventory",
+    "master",
+    "production",
+    "quality",
+]

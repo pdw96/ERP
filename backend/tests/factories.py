@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session
 
 from app.core import codes
 from app.db.common_codes import CodeGroup, CommonCode
-from app.db.master import BomComponent, Item
+from app.db.master import BomComponent, Item, Partner, SupplierItem
 
 _DEFINITIONS = {group.group_code: group for group in codes.CODE_GROUPS}
 
@@ -77,4 +77,31 @@ def make_bom(parent: Item, child: Item, level: int, unit_quantity: float = 2.0) 
         child_item_type=child.item_type,
         level=level,
         unit_quantity=unit_quantity,
+    )
+
+
+def make_partner(
+    partner_type: str = codes.SUPPLIER, *, code: str = "SUP-01", name: str = "시험 거래처"
+) -> Partner:
+    """제약을 통과하는 거래처 하나."""
+    return Partner(code=code, name=name, partner_type=partner_type)
+
+
+def make_supplier_item(
+    partner: Partner,
+    item: Item,
+    *,
+    lead_time_hours: float = 72.0,
+    purchase_uom: str = "KG",
+    conversion_factor: float = 1.0,
+) -> SupplierItem:
+    """공급사별 품목 한 줄."""
+    return SupplierItem(
+        partner_id=partner.id,
+        partner_type=partner.partner_type,
+        item_id=item.id,
+        lead_time_hours=lead_time_hours,
+        purchase_uom=purchase_uom,
+        purchase_uom_group=codes.UOM,
+        conversion_factor=conversion_factor,
     )

@@ -1,0 +1,105 @@
+"""품질 기준정보 — 공정별 검사 기준.
+
+한 항목이 값 여섯을 갖는다 — 규격(상·하한) · 중심선 · 경고선 계수 · σ ·
+σ 출처 · 경시 변화 여부. 품목 코드를 고르면 그 품목의 공정이 정해지고, 공정이
+항목 목록을 정하고, 항목을 고르면 여섯 값이 딸려 온다. **사람이 넣는 것은
+측정값 하나뿐이다.**
+"""
+
+from sqlalchemy import Boolean, CheckConstraint, Float, String
+from sqlalchemy.orm import Mapped, mapped_column
+
+from app.core import codes
+from app.db.base import Base
+from app.db.constraints import code_reference
+
+
+def _quoted(values: tuple[str, ...]) -> str:
+    return ", ".join(f"'{value}'" for value in values)
+
+
+class ProcessInspectionStandard(Base):
+    """(공정 × 검사항목) 한 줄.
+
+    **σ 를 비워 둔다.** 규격에서 뽑은 σ 는 어떤 계수를 쓰든 Cpk 를 그 계수의
+    역수로 못박아, 어떤 공정에서든 같은 숫자가 나온다. 경고선과 WE 규칙 4 는
+    σ 없이 그대로 도므로 비워 두는 편이 안전하다 — **없는 값을 지어내면
+    화면에서는 있는 것처럼 보인다.**
+    """
+
+    __tablename__ = "process_inspection_standards"
+    __table_args__ = (
+        *code_reference(
+            group_column="process_group",
+            code_column="process_code",
+            group_code=codes.PROCESS,
+            name="inspection_standard_process",
+        ),
+        *code_reference(
+            group_column="item_group",
+            code_column="item_code",
+            group_code=codes.INSP_ITEM,
+            name="inspection_standard_item",
+        ),
+        CheckConstraint(
+            f"sigma_source IN ({_quoted(codes.SIGMA_SOURCES)})",
+            name="ck_inspection_standard_sigma_source",
+        ),
+        # **양방향이다.** σ 가 있는데 출처가 「미정」이면 그 숫자가 어디서 왔는지
+        # 아무도 모르고, 출처가 「실측」인데 σ 가 없으면 잰 적 없는 것을 쟀다고
+        # 적은 것이다. 한쪽만 걸면 다른 쪽으로 새는 줄이 선다.
+        CheckConstraint(
+            f"(sigma IS NULL) = (sigma_source = '{codes.SIGMA_UNDECIDED}')",
+            name="ck_inspection_standard_sigma_matches_source",
+        ),
+        CheckConstraint("sigma IS NULL OR sigma > 0", name="ck_inspection_standard_sigma"),
+        # 경고선은 규격 안쪽에 긋는 선이다. 1 이면 규격과 같아 경고가 아니고,
+        # 0 이하면 중심선 반대편에 선다.
+        CheckConstraint(
+            "warning_ratio > 0 AND warning_ratio <= 1",
+            name="ck_inspection_standard_warning_ratio",
+        ),
+        CheckConstraint(
+            "upper_spec_limit IS NULL"
+            " OR lower_spec_limit IS NULL"
+            " OR upper_spec_limit > lower_spec_limit",
+            name="ck_inspection_standard_spec_order",
+        ),
+        # 중심선이 규격 밖에 있으면 「정상으로 돌아가는 목표」가 불합격 구간이다.
+        CheckConstraint(
+            "center_line IS NULL"
+            " OR ((upper_spec_limit IS NULL OR center_line <= upper_spec_limit)"
+            " AND (lower_spec_limit IS NULL OR center_line >= lower_spec_limit))",
+            name="ck_inspection_standard_center_within_spec",
+        ),
+    )
+
+    process_code: Mapped[str] = mapped_column(String(30), primary_key=True)
+    process_group: Mapped[str] = mapped_column(
+        String(20), default=codes.PROCESS, server_default=codes.PROCESS
+    )
+    item_code: Mapped[str] = mapped_column(String(30), primary_key=True)
+    item_group: Mapped[str] = mapped_column(
+        String(20), default=codes.INSP_ITEM, server_default=codes.INSP_ITEM
+    )
+
+    # 규격은 고객이 정한다 — 지금은 임의 설정이다.
+    upper_spec_limit: Mapped[float | None] = mapped_column(Float, nullable=True)
+    lower_spec_limit: Mapped[float | None] = mapped_column(Float, nullable=True)
+    center_line: Mapped[float | None] = mapped_column(Float, nullable=True)
+
+    warning_ratio: Mapped[float] = mapped_column(
+        Float, default=codes.DEFAULT_WARNING_RATIO, server_default="0.70"
+    )
+    sigma: Mapped[float | None] = mapped_column(Float, nullable=True)
+    sigma_source: Mapped[str] = mapped_column(
+        String(10), default=codes.SIGMA_UNDECIDED, server_default=codes.SIGMA_UNDECIDED
+    )
+
+    # 「시간이 이 값을 바꿀 수 있는가.」 만료 재검사가 다시 보는 항목은 이 칸이
+    # 켜진 것뿐이다 — 재검사는 시간이 바꾸는 것만 본다.
+    time_variant: Mapped[bool] = mapped_column(Boolean, default=False)
+
+    # mm · cP · ΔE 처럼 재는 단위. 재고 단위(`UOM`)와 다른 축이라 공통코드를
+    # 가리키지 않는다 — 섞으면 「킬로그램으로 재는 색차」가 적힌다.
+    unit: Mapped[str | None] = mapped_column(String(20), nullable=True)

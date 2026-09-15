@@ -1,9 +1,11 @@
-"""제약에 쓰는 식 — **모델과 마이그레이션이 같은 것을 부른다.**
+"""제약에 쓰는 식과 참조 — **모델과 마이그레이션이 같은 것을 부른다.**
 
 Alembic 자동 생성은 CHECK 제약을 실행 시점 방언으로 **문자열로** 구워 박는다.
 모델이 쓰는 식을 마이그레이션이 그대로 부르지 않으면 둘이 갈리고, 갈린 쪽은
 조용히 규칙을 잃는다. 그래서 식을 여기 한 곳에 두고 양쪽이 이것을 부른다.
 """
+
+from sqlalchemy import CheckConstraint, ForeignKeyConstraint
 
 # `btrim` 의 기본은 **스페이스만** 깎는다. 탭도 전각 공백도 남으므로
 # `btrim(x) <> ''` 는 「눈에는 비어 보이는데 비어 있지 않은」 값을 통과시킨다.
@@ -20,3 +22,29 @@ def is_present(column: str) -> str:
     `NOT NULL` 은 「값이 있는가」만 본다. 「그 값이 뜻이 있는가」는 이것이 본다.
     """
     return f"btrim({column}, E'{BLANK_CHARACTERS}') <> ''"
+
+
+def code_reference(
+    *,
+    group_column: str,
+    code_column: str,
+    group_code: str,
+    name: str,
+) -> tuple[ForeignKeyConstraint, CheckConstraint]:
+    """그 칸이 **특정 그룹의 공통코드만** 가리키게 한다.
+
+    공통코드로 모으면 타입이 사라진다 — `common_codes.code` 를 가리키는 칸은
+    어느 그룹의 코드든 받는다. 「이 칸에는 불합격사유 그룹만」을 문서가 아니라
+    **제약으로** 강제하려면 복합 외래키와 그룹 고정 CHECK 가 함께 서야 한다.
+
+    그룹 칸은 데이터가 아니라 **구조**다. 값이 언제나 같으므로 모델은 기본값을
+    두고 CHECK 가 그것을 못박는다.
+    """
+    return (
+        ForeignKeyConstraint(
+            [group_column, code_column],
+            ["common_codes.group_code", "common_codes.code"],
+            name=f"fk_{name}",
+        ),
+        CheckConstraint(f"{group_column} = '{group_code}'", name=f"ck_{name}_group"),
+    )

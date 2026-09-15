@@ -7,6 +7,7 @@
 """
 
 from sqlalchemy import (
+    Boolean,
     CheckConstraint,
     Float,
     ForeignKey,
@@ -19,7 +20,7 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core import codes
 from app.db.base import Base
-from app.db.constraints import is_present
+from app.db.constraints import code_reference, is_present
 
 
 def _quoted(values: tuple[str, ...]) -> str:
@@ -144,11 +145,11 @@ class Item(Base):
 
     components: Mapped[list["BomComponent"]] = relationship(
         back_populates="parent_item",
-        foreign_keys="[BomComponent.parent_item_id]",
+        foreign_keys="[BomComponent.parent_item_id, BomComponent.parent_item_type]",
     )
     used_in: Mapped[list["BomComponent"]] = relationship(
         back_populates="child_item",
-        foreign_keys="[BomComponent.child_item_id]",
+        foreign_keys="[BomComponent.child_item_id, BomComponent.child_item_type]",
     )
 
 
@@ -187,16 +188,98 @@ class BomComponent(Base):
     )
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    parent_item_id: Mapped[int] = mapped_column(ForeignKey("items.id"))
+    # 복합 외래키로만 가리킨다 — 컬럼에도 걸면 같은 관계가 두 번 생긴다.
+    parent_item_id: Mapped[int] = mapped_column()
     parent_item_type: Mapped[str] = mapped_column(String(20))
-    child_item_id: Mapped[int] = mapped_column(ForeignKey("items.id"))
+    child_item_id: Mapped[int] = mapped_column()
     child_item_type: Mapped[str] = mapped_column(String(20))
     level: Mapped[int] = mapped_column(Integer)
     unit_quantity: Mapped[float] = mapped_column(Float)
 
     parent_item: Mapped[Item] = relationship(
-        back_populates="components", foreign_keys=[parent_item_id]
+        back_populates="components", foreign_keys=[parent_item_id, parent_item_type]
     )
     child_item: Mapped[Item] = relationship(
-        back_populates="used_in", foreign_keys=[child_item_id]
+        back_populates="used_in", foreign_keys=[child_item_id, child_item_type]
     )
+
+
+class Partner(Base):
+    """거래처 — 공급사와 고객사.
+
+    한 표에 둔다. 같은 회사가 양쪽인 경우가 있고, 무엇보다 **거래처라는 사실이
+    하나**이기 때문이다. 유형은 그 거래처가 어느 흐름에 서는가를 말한다.
+    """
+
+    __tablename__ = "partners"
+    __table_args__ = (
+        CheckConstraint(
+            f"partner_type IN ({_quoted(codes.PARTNER_TYPES)})", name="ck_partner_type"
+        ),
+        CheckConstraint(is_present("code"), name="ck_partner_code_is_present"),
+        CheckConstraint(is_present("name"), name="ck_partner_name_is_present"),
+        # 품목과 같은 이유다 — 「이 줄의 거래처는 공급사여야 한다」를 거는 쪽이
+        # `(id, 유형)` 쌍을 가리킬 수 있어야 한다.
+        UniqueConstraint("id", "partner_type", name="uq_partner_id_type"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    code: Mapped[str] = mapped_column(String(20), unique=True, index=True)
+    name: Mapped[str] = mapped_column(String(100))
+    partner_type: Mapped[str] = mapped_column(String(10), index=True)
+    # 거래가 끝난 거래처도 지우지 않는다 — 과거 발주와 출하가 이것을 가리킨다.
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+
+    supplied_items: Mapped[list["SupplierItem"]] = relationship(back_populates="partner")
+
+
+class SupplierItem(Base):
+    """공급사별 품목 — 구매 리드타임과 단위 환산.
+
+    **단위를 바꾸는 경계는 여기 하나뿐이다.** 구매 단위로 발주하고 재고 단위로
+    저장한다. 경계가 둘이면 어느 쪽이 진실인지 알 수 없어지고, 원장의 합이
+    성립하지 않는다.
+
+    리드타임이 시간인 것은 생산 리드타임과 단위를 맞추기 위해서다 — 역산이
+    두 겹을 같은 자로 재야 「지금 발주해야 늦지 않는다」를 말할 수 있다.
+    """
+
+    __tablename__ = "supplier_items"
+    __table_args__ = (
+        # 공급사여야 한다. 고객사에게 발주할 수는 없다.
+        ForeignKeyConstraint(
+            ["partner_id", "partner_type"],
+            ["partners.id", "partners.partner_type"],
+            name="fk_supplier_item_partner",
+        ),
+        CheckConstraint(
+            f"partner_type = '{codes.SUPPLIER}'", name="ck_supplier_item_is_supplier"
+        ),
+        *code_reference(
+            group_column="purchase_uom_group",
+            code_column="purchase_uom",
+            group_code=codes.UOM,
+            name="supplier_item_uom",
+        ),
+        # 환산 계수가 0 이거나 음수면 발주 수량이 재고 수량으로 바뀌지 않는다 —
+        # 0 이면 아무리 발주해도 0 이 들어오고, 음수면 재고가 줄어든다.
+        CheckConstraint("conversion_factor > 0", name="ck_supplier_item_conversion"),
+        CheckConstraint("lead_time_hours >= 0", name="ck_supplier_item_lead_time"),
+    )
+
+    partner_id: Mapped[int] = mapped_column(primary_key=True)
+    partner_type: Mapped[str] = mapped_column(
+        String(10), default=codes.SUPPLIER, server_default=codes.SUPPLIER
+    )
+    item_id: Mapped[int] = mapped_column(ForeignKey("items.id"), primary_key=True)
+
+    lead_time_hours: Mapped[float] = mapped_column(Float)
+    purchase_uom: Mapped[str] = mapped_column(String(30))
+    purchase_uom_group: Mapped[str] = mapped_column(
+        String(20), default=codes.UOM, server_default=codes.UOM
+    )
+    # 구매 단위 하나가 재고 단위로 몇인가. 같은 단위면 1 이다.
+    conversion_factor: Mapped[float] = mapped_column(Float, default=1.0)
+
+    partner: Mapped[Partner] = relationship(back_populates="supplied_items")
+    item: Mapped[Item] = relationship()
