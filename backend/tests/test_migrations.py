@@ -1,21 +1,26 @@
-"""마이그레이션 파이프가 도는가.
+"""마이그레이션이 모델과 같은 표를 만드는가.
 
-**표가 아직 없어도 이 테스트는 값이 있다.** 「스키마 변경에 마이그레이션이
-있다」를 지키려면 마이그레이션이 실제로 도는 길이 처음부터 서 있어야 하고,
-첫 표를 만들 때 이 길이 막혀 있으면 재시드가 유일한 수단이 된다.
+자동 생성은 CHECK 식을 **실행 시점 방언으로 문자열로 구워 박는다.** 그래서
+모델을 고치고 마이그레이션을 다시 내지 않으면, 또는 마이그레이션을 손으로
+고치면, 둘이 조용히 갈린다. 갈린 쪽은 규칙을 잃는데 아무도 모른다.
 
-다만 가설공사가 책임지는 것은 **파이프가 뚫려 있는가**까지다. 모델과
-마이그레이션이 같은 표를 만드는지, 되돌리는 길이 실제로 도는지는 첫 표가
-서는 본 공사의 일이며, 그때 이 파일이 강화되어야 한다 — 아래 마지막 테스트가
-그 시점에 실패해서 알려 준다.
+그래서 **두 스키마를 실제로 만들어 견준다** — 하나는 마이그레이션으로, 하나는
+모델로. 컬럼과 제약 정의가 한 글자라도 다르면 여기서 걸린다. 읽기 좋으라고
+CHECK 식을 줄바꿈하는 것조차 이 테스트가 잡는다.
 """
 
+from collections.abc import Iterator
+from contextlib import contextmanager
 from pathlib import Path
 
 from alembic import command
 from alembic.config import Config
 from alembic.script import ScriptDirectory
+from sqlalchemy import create_engine, text
 from sqlalchemy.engine import Engine
+from sqlalchemy.pool import NullPool
+
+from app.db.base import Base
 
 BACKEND_ROOT = Path(__file__).resolve().parents[1]
 
@@ -57,28 +62,128 @@ def test_alembic_connects_to_the_url_it_is_given(engine: Engine) -> None:
     로컬에서도 드러낸다 — 앱 기본 URL 은 닿을 수 없는 값으로 덮여 있으므로,
     이 테스트가 그리로 붙으면 곧바로 터진다.
 
-    오류 없이 끝나는 것 자체가 확인이다. 리비전이 없으므로 아무 표도 만들지
-    않는다.
+    오류 없이 끝나는 것 자체가 확인이다 — 붙지 못하면 마이그레이션이 돌 수 없다.
     """
-    command.upgrade(_alembic_config(engine.url.render_as_string(hide_password=False)), "head")
+    with _schema(engine, "url_probe"):
+        command.upgrade(_config_for_schema(engine, "url_probe"), "head")
 
 
-def test_the_first_revision_has_not_landed_yet() -> None:
-    """첫 리비전이 서는 순간 이 파일을 강화하라는 표식.
+# ── 마이그레이션과 모델을 견준다 ────────────────────────────────────────────
 
-    지금은 리비전이 0개라 위 테스트가 「명령이 돈다」까지만 본다. 첫 표가
-    서면 확인해야 할 것이 둘 늘어난다 — **마이그레이션이 모델과 같은 표를
-    만드는가**(자료형 · 널 허용 · 기본키 · 외래키 · 유일키 · CHECK)와
-    **한 엔진의 방언이 마이그레이션에 굽히지 않았는가**.
 
-    미룬다는 사실 자체를 코드가 알고 있게 한다. 이 테스트가 실패하면 그것은
-    고장이 아니라 **다음 할 일의 알림**이다.
-    """
-    revisions = list(_script_directory().walk_revisions())
-
-    assert revisions == [], (
-        f"첫 리비전 {len(revisions)}개가 섰다 — 이 파일을 왕복 검증으로 바꿔라.\n"
-        "  ① 마이그레이션이 모델과 같은 표를 만드는지 견주는 테스트\n"
-        "  ② 마이그레이션에 한 엔진의 방언이 문자열로 박히지 않았는지 보는 테스트\n"
-        "  그리고 이 테스트를 지운다."
+def _columns(engine: Engine, schema: str) -> dict[tuple[str, str], tuple[object, ...]]:
+    """그 스키마의 컬럼 전부 — 이름 · 자료형 · 널 허용 · 기본값 · 길이."""
+    sql = text(
+        "SELECT table_name, column_name, data_type, is_nullable,"
+        "       column_default, character_maximum_length, numeric_precision"
+        "  FROM information_schema.columns"
+        " WHERE table_schema = :schema"
     )
+    with engine.connect() as conn:
+        rows = conn.execute(sql, {"schema": schema}).all()
+
+    def _normalise(value: object) -> object:
+        # 기본값에 시퀀스 이름이 스키마째 들어간다 — 비교할 것은 구조다.
+        if isinstance(value, str):
+            return value.replace(f"{schema}.", "")
+        return value
+
+    return {(row[0], row[1]): tuple(_normalise(value) for value in row[2:]) for row in rows}
+
+
+def _constraints(engine: Engine, schema: str) -> dict[tuple[str, str], str]:
+    """그 스키마의 제약 전부 — 기본키 · 외래키 · 유일키 · CHECK 의 **정의까지**.
+
+    `pg_get_constraintdef` 는 데이터베이스가 실제로 강제하는 식을 돌려준다.
+    모델이 무엇을 적었는지가 아니라 **무엇이 걸렸는지**를 견주는 것이 요점이다.
+    """
+    sql = text(
+        "SELECT c.relname, con.conname, pg_get_constraintdef(con.oid)"
+        "  FROM pg_constraint con"
+        "  JOIN pg_class c ON c.oid = con.conrelid"
+        "  JOIN pg_namespace n ON n.oid = c.relnamespace"
+        " WHERE n.nspname = :schema"
+    )
+    with engine.connect() as conn:
+        rows = conn.execute(sql, {"schema": schema}).all()
+    # 외래키 정의에 스키마 이름이 섞이므로 지운다 — 비교할 것은 구조다.
+    return {
+        (row[0], row[1]): row[2].replace(f"{schema}.", "")
+        for row in rows
+        if row[0] != "alembic_version"
+    }
+
+
+@contextmanager
+def _schema(engine: Engine, name: str) -> Iterator[None]:
+    """빈 스키마 하나를 만들고 쓰고 지운다."""
+    with engine.begin() as conn:
+        conn.execute(text(f'DROP SCHEMA IF EXISTS "{name}" CASCADE'))
+        conn.execute(text(f'CREATE SCHEMA "{name}"'))
+    try:
+        yield
+    finally:
+        with engine.begin() as conn:
+            conn.execute(text(f'DROP SCHEMA IF EXISTS "{name}" CASCADE'))
+
+
+def _engine_for_schema(engine: Engine, schema: str) -> Engine:
+    """그 스키마만 보는 엔진."""
+    return create_engine(
+        engine.url,
+        connect_args={"options": f"-csearch_path={schema}"},
+        poolclass=NullPool,
+    )
+
+
+def _config_for_schema(engine: Engine, schema: str) -> Config:
+    url = engine.url.render_as_string(hide_password=False)
+    joiner = "&" if "?" in url else "?"
+    # `%` 를 두 번 적는다 — Alembic 설정은 configparser 이고, 거기서 `%` 는
+    # 보간 구문이라 한 번만 적으면 URL 을 넣는 순간 터진다.
+    return _alembic_config(f"{url}{joiner}options=-csearch_path%%3D{schema}")
+
+
+def test_the_migration_builds_the_same_tables_as_the_models(engine: Engine) -> None:
+    """**마이그레이션으로 만든 표와 모델로 만든 표가 같아야 한다.**
+
+    자동 생성이 CHECK 식을 문자열로 구워 박으므로 둘은 조용히 갈릴 수 있다 —
+    모델을 고치고 리비전을 내지 않거나, 마이그레이션을 손으로 손보거나, 긴 식을
+    읽기 좋게 줄바꿈하는 것만으로도. 갈린 쪽은 규칙을 잃고, 잃은 줄 아무도
+    모른다.
+
+    그래서 두 스키마를 실제로 만들어 **데이터베이스가 강제하는 정의**를
+    견준다.
+    """
+    with _schema(engine, "from_migration"), _schema(engine, "from_models"):
+        command.upgrade(_config_for_schema(engine, "from_migration"), "head")
+
+        model_engine = _engine_for_schema(engine, "from_models")
+        try:
+            Base.metadata.create_all(model_engine)
+        finally:
+            model_engine.dispose()
+
+        migrated_columns = _columns(engine, "from_migration")
+        model_columns = _columns(engine, "from_models")
+        # `alembic_version` 은 마이그레이션 쪽에만 있다 — 표가 아니라 기록이다.
+        migrated_columns = {
+            key: value for key, value in migrated_columns.items() if key[0] != "alembic_version"
+        }
+
+        assert migrated_columns == model_columns
+
+        assert _constraints(engine, "from_migration") == _constraints(engine, "from_models")
+
+
+def test_downgrade_takes_every_table_back_out(engine: Engine) -> None:
+    """되돌리는 방법이 있어야 한다 — 그리고 실제로 돌아야 한다."""
+    with _schema(engine, "round_trip"):
+        config = _config_for_schema(engine, "round_trip")
+        command.upgrade(config, "head")
+        assert _columns(engine, "round_trip"), "올렸는데 표가 하나도 없다"
+
+        command.downgrade(config, "base")
+
+        remaining = {table for table, _ in _columns(engine, "round_trip")}
+        assert remaining <= {"alembic_version"}, f"내렸는데 남은 표가 있다: {remaining}"
