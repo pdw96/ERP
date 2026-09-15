@@ -39,7 +39,9 @@ def run_migrations_offline() -> None:
         target_metadata=target_metadata,
         literal_binds=True,
         dialect_opts={"paramstyle": "named"},
-        # CHECK 제약을 이름으로 비교할 수 있어야 마이그레이션과 모델을 견줄 수 있다.
+        # 컬럼 **타입** 변경을 autogenerate 가 감지하게 한다. CHECK 제약 비교와는
+        # 무관하며, Alembic 은 CHECK 변경을 자동으로 감지하지 않는다 — 그쪽은
+        # `tests/test_migrations.py` 가 두 스키마를 실제로 만들어 견준다.
         compare_type=True,
     )
     with context.begin_transaction():

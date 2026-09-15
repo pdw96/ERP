@@ -12,7 +12,7 @@ import os
 from collections.abc import Iterator
 
 import pytest
-from sqlalchemy import text
+from sqlalchemy import make_url, text
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session, sessionmaker
 
@@ -24,6 +24,19 @@ TEST_DATABASE_URL = os.environ.get(
     "ERP_TEST_DATABASE_URL",
     "postgresql+psycopg://erp:erp@localhost:5432/erp_test",
 )
+
+# **이름이 `_test` 로 끝나지 않으면 아예 시작하지 않는다.**
+#
+# `tables` 픽스처가 이 데이터베이스에서 `drop_all()` 을 돌린다. 환경변수를 한 번
+# 잘못 두면 개발용이나 운영 데이터베이스의 표가 통째로 사라지고, 그때는 되돌릴
+# 방법이 없다 — 앞의 가드가 「앱 DB 로 새는 것」을 막는다면 이것은 **엉뚱한 DB 를
+# 지우는 것**을 막는다.
+_test_database = make_url(TEST_DATABASE_URL).database or ""
+if not _test_database.endswith("_test"):
+    raise RuntimeError(
+        f"테스트 데이터베이스 이름이 `_test` 로 끝나야 한다: {_test_database!r}\n"
+        "  이 데이터베이스의 표는 테스트가 통째로 지운다."
+    )
 
 
 @pytest.fixture(autouse=True)

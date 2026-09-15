@@ -42,11 +42,17 @@ def test_a_semi_finished_item_finally_has_a_seat(prepared: Session) -> None:
     assert rows[1].child_item.item_type == codes.RAW_MATERIAL
 
 
-def test_the_expansion_stops_after_two_levels(prepared: Session) -> None:
+@pytest.mark.parametrize("level", codes.BOM_LEVELS)
+def test_the_expansion_stops_after_two_levels(prepared: Session, level: int) -> None:
     """3단은 **적을 수가 없다** — 단계가 양쪽 유형을 정하기 때문이다.
 
     재귀를 막는 것이 규칙이 아니라 구조다. 원자재를 상위로 둔 줄은 어느
     단계로도 설 수 없다.
+
+    단계마다 **세션을 새로 받는다.** 한 테스트 안에서 돌리면 첫 실패 뒤의
+    롤백이 품목 삽입까지 되돌려, 다음 단계가 「단계 제약」이 아니라 「없는
+    품목」 때문에 실패할 수 있다 — 지금은 CHECK 가 외래키보다 먼저 평가되어
+    우연히 맞는 이유로 걸리지만, 그 우연에 기대지 않는다.
     """
     semi = make_item(codes.SEMI_FINISHED, stock_uom="KG")
     raw = make_item(codes.RAW_MATERIAL, code="RM-01", stock_uom="KG")
@@ -54,12 +60,9 @@ def test_the_expansion_stops_after_two_levels(prepared: Session) -> None:
     prepared.add_all([semi, raw, other_raw])
     prepared.flush()
 
-    for level in codes.BOM_LEVELS:
-        prepared.add(make_bom(raw, other_raw, level=level))
-        with pytest.raises(IntegrityError):
-            prepared.flush()
-        prepared.rollback()
-        prepare_item_codes(prepared)
+    prepared.add(make_bom(raw, other_raw, level=level))
+    with pytest.raises(IntegrityError):
+        prepared.flush()
 
 
 def test_a_level_cannot_pair_the_wrong_types(prepared: Session) -> None:

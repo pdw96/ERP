@@ -115,6 +115,25 @@ def _constraints(engine: Engine, schema: str) -> dict[tuple[str, str], str]:
     }
 
 
+def _indexes(engine: Engine, schema: str) -> dict[tuple[str, str], str]:
+    """그 스키마의 인덱스 전부 — **제약이 만들지 않은 것까지.**
+
+    `pg_constraint` 는 기본키와 유일키가 만든 인덱스만 안다. `index=True` 로
+    붙인 일반 인덱스는 거기 없으므로, 컬럼과 제약이 같아도 인덱스가 다른 두
+    스키마가 통과할 수 있다.
+    """
+    sql = text(
+        "SELECT tablename, indexname, indexdef FROM pg_indexes WHERE schemaname = :schema"
+    )
+    with engine.connect() as conn:
+        rows = conn.execute(sql, {"schema": schema}).all()
+    return {
+        (str(row[0]), str(row[1])): str(row[2]).replace(f"{schema}.", "")
+        for row in rows
+        if row[0] != "alembic_version"
+    }
+
+
 @contextmanager
 def _schema(engine: Engine, name: str) -> Iterator[None]:
     """빈 스키마 하나를 만들고 쓰고 지운다."""
@@ -175,6 +194,7 @@ def test_the_migration_builds_the_same_tables_as_the_models(engine: Engine) -> N
         assert migrated_columns == model_columns
 
         assert _constraints(engine, "from_migration") == _constraints(engine, "from_models")
+        assert _indexes(engine, "from_migration") == _indexes(engine, "from_models")
 
 
 def test_downgrade_takes_every_table_back_out(engine: Engine) -> None:
