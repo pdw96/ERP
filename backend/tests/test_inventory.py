@@ -323,6 +323,27 @@ def test_a_lot_quantity_cannot_be_negative(prepared: Session) -> None:
         prepared.flush()
 
 
+@pytest.mark.parametrize("quantity", [float("nan"), float("inf"), float("-inf")])
+def test_a_lot_quantity_must_be_a_number_you_can_count(
+    prepared: Session, quantity: float
+) -> None:
+    """**`NaN` 은 `quantity >= 0` 을 통과한다.**
+
+    PostgreSQL 이 정렬에서 `NaN` 을 모든 수보다 크게 두기 때문이다 — 하한만
+    걸어 둔 칸은 「음수가 아니다」까지만 보고 **셀 수 없는 값을 받아들인다.**
+
+    들어오고 나면 되돌릴 수 없다. 그 로트 하나가 이후의 모든 합계를 `NaN` 으로
+    만들고, `NaN` 과의 비교는 전부 거짓이라 재고 조회에서 **조용히 사라진다.**
+    """
+    raw = make_item(codes.RAW_MATERIAL)
+    prepared.add(raw)
+    prepared.flush()
+
+    prepared.add(_lot(raw, quantity=quantity))
+    with pytest.raises(IntegrityError):
+        prepared.flush()
+
+
 def test_a_lot_cannot_pass_before_it_arrives(prepared: Session) -> None:
     """들어오기 전에 합격할 수 없다.
 

@@ -31,7 +31,15 @@ TEST_DATABASE_URL = os.environ.get(
 # 잘못 두면 개발용이나 운영 데이터베이스의 표가 통째로 사라지고, 그때는 되돌릴
 # 방법이 없다 — 앞의 가드가 「앱 DB 로 새는 것」을 막는다면 이것은 **엉뚱한 DB 를
 # 지우는 것**을 막는다.
-_test_database = make_url(TEST_DATABASE_URL).database or ""
+_test_url = make_url(TEST_DATABASE_URL)
+
+# **비밀번호를 로그에 흘리지 않는다.** 붙지 못한 이유를 말하려면 URL 을 보여야
+# 하는데, 그 URL 에는 비밀번호가 들어 있고 pytest 의 실패 메시지는 CI 로그에
+# 그대로 남는다. 진단에 필요한 것은 호스트와 데이터베이스 이름이지 비밀번호가
+# 아니다.
+REDACTED_TEST_DATABASE_URL = _test_url.render_as_string(hide_password=True)
+
+_test_database = _test_url.database or ""
 if not _test_database.endswith("_test"):
     raise RuntimeError(
         f"테스트 데이터베이스 이름이 `_test` 로 끝나야 한다: {_test_database!r}\n"
@@ -67,7 +75,7 @@ def engine() -> Iterator[Engine]:
             conn.execute(text("SELECT 1"))
     except Exception as exc:  # pragma: no cover - 환경 문제이지 코드 문제가 아니다
         pytest.fail(
-            f"테스트 데이터베이스에 붙지 못했다: {TEST_DATABASE_URL}\n"
+            f"테스트 데이터베이스에 붙지 못했다: {REDACTED_TEST_DATABASE_URL}\n"
             f"  {type(exc).__name__}: {exc}\n"
             "  `docker compose up -d postgres` 로 띄우고 erp_test 를 만든다.",
             pytrace=False,

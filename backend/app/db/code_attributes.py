@@ -47,8 +47,11 @@ class TxnTypeAttribute(Base):
         #
         # **서로를 가리키는지까지는 제약이 보지 못한다.** A 가 B 를 적고 B 가 C 를
         # 적어도 두 줄 다 통과한다 — 같은 표의 다른 줄을 보는 조건은 CHECK 로
-        # 적을 수 없다. 지금은 시드가 유일한 쓰기 경로라 정합 테스트가 지키고,
-        # 화면에서 코드를 만드는 길이 생기는 날 쓰기 시점 검증이 함께 서야 한다.
+        # 적을 수 없다. 지금은 시드가 유일한 쓰기 경로라
+        # `tests/test_seed.py::test_every_pair_in_the_seed_points_back` 가 심긴
+        # 줄에서 그것을 지키고, 화면에서 코드를 만드는 길이 생기는 날 쓰기 시점
+        # 검증이 함께 서야 한다. **이름을 적어 둔다** — 「테스트가 지킨다」고만
+        # 적힌 규칙은 그 테스트가 없어도 읽는 사람이 알아채지 못한다.
         ForeignKeyConstraint(
             ["group_code", "paired_code"],
             ["txn_type_attributes.group_code", "txn_type_attributes.code"],

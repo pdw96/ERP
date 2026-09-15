@@ -21,6 +21,8 @@ from sqlalchemy import create_engine, text
 from sqlalchemy.engine import Engine
 from sqlalchemy.pool import NullPool
 
+from app.core.alembic_url import apply_database_url, escaped_for_configparser
+from app.core.config import get_settings
 from app.db.base import Base
 
 BACKEND_ROOT = Path(__file__).resolve().parents[1]
@@ -159,9 +161,11 @@ def _engine_for_schema(engine: Engine, schema: str) -> Engine:
 def _config_for_schema(engine: Engine, schema: str) -> Config:
     url = engine.url.render_as_string(hide_password=False)
     joiner = "&" if "?" in url else "?"
-    # `%` 를 두 번 적는다 — Alembic 설정은 configparser 이고, 거기서 `%` 는
-    # 보간 구문이라 한 번만 적으면 URL 을 넣는 순간 터진다.
-    return _alembic_config(f"{url}{joiner}options=-csearch_path%%3D{schema}")
+    # `%` 를 두 번 적는 것은 프로덕션과 같은 함수에 맡긴다 — Alembic 설정은
+    # configparser 이고, 거기서 `%` 는 보간 구문이라 한 번만 적으면 터진다.
+    return _alembic_config(
+        escaped_for_configparser(f"{url}{joiner}options=-csearch_path%3D{schema}")
+    )
 
 
 def test_the_migration_builds_the_same_tables_as_the_models(engine: Engine) -> None:
@@ -218,18 +222,34 @@ def test_a_percent_in_the_url_does_not_break_alembic(
     Alembic 설정은 configparser 이고 거기서 `%` 는 보간 구문이라, 그대로 넣으면
     데이터베이스에 붙어 보기도 전에 터진다. 흔한 비밀번호 하나가 마이그레이션을
     통째로 막는 자리였다.
+
+    **`env.py` 가 부르는 함수를 그대로 부른다.** 앞서 이 테스트는 이스케이프를
+    자기가 다시 적어 견주고 있었다 — 그러면 프로덕션에서 이스케이프를 지워도
+    테스트는 초록으로 남는다. 지키는 척만 하는 테스트다.
     """
     monkeypatch.setenv("ERP_DATABASE_URL", "postgresql+psycopg://erp:p%40ss@nowhere/erp")
 
-    # `env.py` 를 읽어 설정을 넣는 데까지만 간다 — 붙지는 않는다.
-    import importlib
-
-    from app.core import config as config_module
-
-    importlib.reload(config_module)
-    settings_url = config_module.get_settings().database_url
-
     probe = Config(str(BACKEND_ROOT / "alembic.ini"))
-    probe.set_main_option("sqlalchemy.url", settings_url.replace("%", "%%"))
+    apply_database_url(probe)
 
-    assert probe.get_main_option("sqlalchemy.url") == settings_url
+    # 넣을 때 두 번 적은 `%` 가 읽을 때 한 번으로 돌아온다 — 설정에 붙어 보기도
+    # 전에 터지지 않고, 붙을 때는 원래의 비밀번호가 나온다.
+    assert probe.get_main_option("sqlalchemy.url") == get_settings().database_url
+
+
+def test_the_url_the_caller_gives_is_not_escaped_again(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """부르는 쪽이 이미 넣어 둔 URL 을 **건드리지 않는다.**
+
+    테스트와 `docker-entrypoint.sh` 가 URL 을 직접 주는 길이며, 여기서 한 번 더
+    이스케이프하면 그 URL 이 조용히 달라진다.
+    """
+    monkeypatch.setenv("ERP_DATABASE_URL", "postgresql+psycopg://erp:p%40ss@nowhere/erp")
+
+    given = "postgresql+psycopg://caller:caller@127.0.0.1:5432/erp_test"
+    probe = Config(str(BACKEND_ROOT / "alembic.ini"))
+    probe.set_main_option("sqlalchemy.url", given)
+    apply_database_url(probe)
+
+    assert probe.get_main_option("sqlalchemy.url") == given

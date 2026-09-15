@@ -216,6 +216,44 @@ def test_the_same_reason_disposes_differently_by_stage_in_the_seed(blank: Engine
     assert rows["OQC"] == "등급 하향"
 
 
+def test_every_pair_in_the_seed_points_back(blank: Engine) -> None:
+    """**짝은 서로를 가리켜야 한다.**
+
+    제약은 여기까지 보지 못한다 — 같은 표의 다른 줄을 보는 조건은 CHECK 로
+    적을 수 없어서, 외래키는 「짝으로 적은 줄이 있다」까지만 증명한다. A 가 B 를
+    적고 B 가 C 를 적어도 두 줄 다 통과한다.
+
+    그러면 창고를 건너는 이동에서 **한쪽만 나는 줄**이 선다: 나간 창고에서
+    빠지는 줄이 없거나, 들어온 창고에 더해지는 줄이 없다. 어느 쪽이든 원장은
+    맞는 것처럼 보이고 재고만 틀린다.
+
+    지금 쓰기 경로는 시드뿐이므로 여기서 지킨다. 화면에서 코드를 만드는 길이
+    생기는 날 쓰기 시점 검증이 함께 서야 한다 — `app/db/code_attributes.py` 가
+    그렇게 적어 두었고, 이 테스트가 그 약속의 지금 몫이다.
+    """
+    seed_module.seed(blank)
+
+    with blank.connect() as conn:
+        pairs = dict(
+            conn.execute(
+                text(
+                    "SELECT code, paired_code FROM txn_type_attributes"
+                    " WHERE paired_code IS NOT NULL"
+                )
+            ).all()
+        )
+
+    assert pairs, "짝이 적힌 줄이 하나도 없다 — 시드가 비었거나 짝이 사라졌다"
+
+    one_way = [
+        f"{code} → {partner}({pairs.get(partner, '없음')})"
+        for code, partner in pairs.items()
+        if pairs.get(partner) != code
+    ]
+
+    assert not one_way, "짝이 서로를 가리키지 않는다: " + ", ".join(sorted(one_way))
+
+
 # ── 기준과 코드가 맞물리는가 ────────────────────────────────────────────────
 #
 # 검사원이 코드를 고르면 그 항목의 기준(규격 · 중심선 · 경고선)이 딸려 와야

@@ -19,7 +19,7 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core import codes
 from app.db.base import Base
-from app.db.constraints import code_reference, is_present
+from app.db.constraints import code_reference, is_finite, is_present
 
 
 def _quoted(values: tuple[str, ...]) -> str:
@@ -69,15 +69,21 @@ class Item(Base):
         ),
         # 음수를 넣으면 소요 시간이 음수가 되고 착수를 **완료보다 뒤에** 잡는다
         # — 계획이 시간을 거꾸로 흐르게 한다.
-        CheckConstraint("setup_hours IS NULL OR setup_hours >= 0", name="ck_item_setup_hours"),
         CheckConstraint(
-            "hours_per_unit IS NULL OR hours_per_unit >= 0", name="ck_item_hours_per_unit"
+            f"setup_hours IS NULL OR (setup_hours >= 0 AND {is_finite('setup_hours')})",
+            name="ck_item_setup_hours",
+        ),
+        CheckConstraint(
+            f"hours_per_unit IS NULL"
+            f" OR (hours_per_unit >= 0 AND {is_finite('hours_per_unit')})",
+            name="ck_item_hours_per_unit",
         ),
         CheckConstraint(
             "shelf_life_days IS NULL OR shelf_life_days > 0", name="ck_item_shelf_life"
         ),
         CheckConstraint(
-            "safety_stock IS NULL OR safety_stock >= 0", name="ck_item_safety_stock"
+            f"safety_stock IS NULL OR (safety_stock >= 0 AND {is_finite('safety_stock')})",
+            name="ck_item_safety_stock",
         ),
         # `id` 는 이미 기본키라 이 유일키가 행을 더 좁히지 않는다. 두는 이유는
         # **복합 외래키의 상대가 되기 위해서**다 — 「이 BOM 줄의 상위는
@@ -175,7 +181,10 @@ class BomComponent(Base):
         CheckConstraint("parent_item_id <> child_item_id", name="ck_bom_component_not_self"),
         # 수량은 음수가 될 수 없다. 음수가 섞이면 서로 다른 줄이 0 으로 상쇄되어
         # 합계를 읽는 쪽이 **혼재를 빈 것으로** 읽는다.
-        CheckConstraint("unit_quantity >= 0", name="ck_bom_component_quantity"),
+        CheckConstraint(
+            f"unit_quantity >= 0 AND {is_finite('unit_quantity')}",
+            name="ck_bom_component_quantity",
+        ),
         ForeignKeyConstraint(
             ["parent_item_id", "parent_item_type"],
             ["items.id", "items.item_type"],
@@ -282,8 +291,14 @@ class SupplierItem(Base):
         ),
         # 환산 계수가 0 이거나 음수면 발주 수량이 재고 수량으로 바뀌지 않는다 —
         # 0 이면 아무리 발주해도 0 이 들어오고, 음수면 재고가 줄어든다.
-        CheckConstraint("conversion_factor > 0", name="ck_supplier_item_conversion"),
-        CheckConstraint("lead_time_hours >= 0", name="ck_supplier_item_lead_time"),
+        CheckConstraint(
+            f"conversion_factor > 0 AND {is_finite('conversion_factor')}",
+            name="ck_supplier_item_conversion",
+        ),
+        CheckConstraint(
+            f"lead_time_hours >= 0 AND {is_finite('lead_time_hours')}",
+            name="ck_supplier_item_lead_time",
+        ),
     )
 
     partner_id: Mapped[int] = mapped_column(primary_key=True)

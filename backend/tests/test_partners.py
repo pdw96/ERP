@@ -82,6 +82,26 @@ def test_the_conversion_factor_cannot_be_negative(prepared: Session) -> None:
         prepared.flush()
 
 
+@pytest.mark.parametrize("factor", [float("nan"), float("inf")])
+def test_the_conversion_factor_must_be_a_number_you_can_multiply_by(
+    prepared: Session, factor: float
+) -> None:
+    """**`NaN > 0` 은 참이다** — PostgreSQL 이 `NaN` 을 모든 수보다 크게 둔다.
+
+    그래서 `> 0` 하나만 걸린 칸은 셀 수 없는 값을 받는다. 이 계수는 발주
+    수량이 재고 수량으로 바뀌는 **경계 하나**이므로, 여기가 `NaN` 이면 그
+    공급사에서 들어오는 모든 입고 수량이 `NaN` 이 된다.
+    """
+    supplier = make_partner(codes.SUPPLIER)
+    raw = make_item(codes.RAW_MATERIAL)
+    prepared.add_all([supplier, raw])
+    prepared.flush()
+
+    prepared.add(make_supplier_item(supplier, raw, conversion_factor=factor))
+    with pytest.raises(IntegrityError):
+        prepared.flush()
+
+
 def test_a_purchase_unit_may_differ_from_the_stock_unit(prepared: Session) -> None:
     """포대로 사서 킬로그램으로 센다 — 경계가 여기 하나뿐이다."""
     add_code(prepared, codes.UOM, "BAG", "포대")

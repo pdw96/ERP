@@ -25,7 +25,7 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core import codes
 from app.db.base import Base
-from app.db.constraints import is_present
+from app.db.constraints import is_finite, is_present
 from app.db.master import Item
 
 
@@ -68,7 +68,7 @@ class Lot(Base):
         CheckConstraint(f"lot_origin IN ({_quoted(codes.LOT_ORIGINS)})", name="ck_lot_origin"),
         CheckConstraint(_WAREHOUSE_HOLDS_ITEM_TYPE, name="ck_lot_warehouse_holds_type"),
         CheckConstraint(_ORIGIN_MATCHES_ITEM_TYPE, name="ck_lot_origin_matches_type"),
-        CheckConstraint("quantity >= 0", name="ck_lot_quantity"),
+        CheckConstraint(f"quantity >= 0 AND {is_finite('quantity')}", name="ck_lot_quantity"),
         # **단방향이다.** 불량품은 제품창고에만 있다 — 불합격품은 재고가 되지
         # 않으므로 앞의 두 창고에서 생길 수 없고, OQC 에서 떨어져 양불이동된
         # 것만 불량품이 된다.
@@ -156,5 +156,17 @@ class Lot(Base):
     # 생기므로, 재작업분이 재검사에서 또 떨어지면 로트가 아예 만들어지지 않고
     # 폐기된다.
     reworked: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
+
+    # **특채로 들어온 로트에는 아직 표식이 없다.** 원칙 ①의 예외 하나가 특채이고
+    # 거기에는 표식이 남아야 하는데, 그것을 담을 자리가 이 표에 없다.
+    # `nonconformity_stage_rules.special_acceptance_allowed` 는 **그 사유가 특채를
+    # 허용하는가**를 말할 뿐, 이 로트가 실제로 그 길로 들어왔는지는 말하지 않는다.
+    #
+    # 칸 하나로 둘지, 로트가 **자기를 만든 검사를 가리키게** 해서 구조로 답할지는
+    # 검사 표가 서는 2단계에서 정한다. 지금 칸을 두면 2단계가 검사를 가리키게 하는
+    # 순간 같은 사실이 두 곳에 살고, 두 벌은 반드시 갈린다.
+    #
+    # 1단계에 쓰기 경로가 없으므로 아직 틀린 데이터가 들어올 자리는 아니다 —
+    # **로트를 만드는 길이 서는 바로 그 단계에서 함께 선다.**
 
     item: Mapped[Item] = relationship(foreign_keys=[item_id, item_type])

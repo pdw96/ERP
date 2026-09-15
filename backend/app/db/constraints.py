@@ -48,3 +48,23 @@ def code_reference(
         ),
         CheckConstraint(f"{group_column} = '{group_code}'", name=f"ck_{name}_group"),
     )
+
+
+def is_finite(column: str) -> str:
+    """그 칸이 **셀 수 있는 수인가.**
+
+    PostgreSQL 의 `double precision` 은 `NaN` 과 `Infinity` 를 값으로 받고,
+    정렬에서 **`NaN` 을 모든 수보다 크게** 둔다. 그래서 `quantity >= 0` 은
+    `NaN` 을 그대로 통과시킨다 — 터지지 않고 들어온다.
+
+    들어오고 나면 되돌릴 수 없다. 그 로트 하나가 이후의 모든 합계를 `NaN` 으로
+    만들고, `NaN` 과의 비교는 전부 거짓이라 **재고가 조용히 사라진다.** 무한대도
+    같은 이유로 막는다 — 더하면 남는 것은 무한대뿐이다.
+
+    하한 비교(`>= 0`)와 **함께** 건다. 이것만으로는 음수를 막지 못하고, 하한만
+    으로는 `NaN` 을 막지 못한다.
+    """
+    return (
+        f"{column} > '-Infinity'::double precision"
+        f" AND {column} < 'Infinity'::double precision"
+    )

@@ -132,13 +132,16 @@ def upgrade() -> None:
         sa.CheckConstraint("process_group = 'PROCESS'", name="ck_item_process_group"),
         sa.CheckConstraint("stock_uom_group = 'UOM'", name="ck_item_stock_uom_group"),
         sa.CheckConstraint(
-            "hours_per_unit IS NULL OR hours_per_unit >= 0", name="ck_item_hours_per_unit"
+            "hours_per_unit IS NULL OR (hours_per_unit >= 0 AND hours_per_unit > '-Infinity'::double precision AND hours_per_unit < 'Infinity'::double precision)",
+            name="ck_item_hours_per_unit",
         ),
         sa.CheckConstraint(
-            "safety_stock IS NULL OR safety_stock >= 0", name="ck_item_safety_stock"
+            "safety_stock IS NULL OR (safety_stock >= 0 AND safety_stock > '-Infinity'::double precision AND safety_stock < 'Infinity'::double precision)",
+            name="ck_item_safety_stock",
         ),
         sa.CheckConstraint(
-            "setup_hours IS NULL OR setup_hours >= 0", name="ck_item_setup_hours"
+            "setup_hours IS NULL OR (setup_hours >= 0 AND setup_hours > '-Infinity'::double precision AND setup_hours < 'Infinity'::double precision)",
+            name="ck_item_setup_hours",
         ),
         sa.CheckConstraint(
             "shelf_life_days IS NULL OR shelf_life_days > 0", name="ck_item_shelf_life"
@@ -231,7 +234,10 @@ def upgrade() -> None:
             "center_line IS NULL OR ((upper_spec_limit IS NULL OR center_line <= upper_spec_limit) AND (lower_spec_limit IS NULL OR center_line >= lower_spec_limit))",
             name="ck_inspection_standard_center_within_spec",
         ),
-        sa.CheckConstraint("sigma IS NULL OR sigma > 0", name="ck_inspection_standard_sigma"),
+        sa.CheckConstraint(
+            "sigma IS NULL OR (sigma > 0 AND sigma > '-Infinity'::double precision AND sigma < 'Infinity'::double precision)",
+            name="ck_inspection_standard_sigma",
+        ),
         sa.CheckConstraint(
             "upper_spec_limit IS NULL OR lower_spec_limit IS NULL OR upper_spec_limit > lower_spec_limit",
             name="ck_inspection_standard_spec_order",
@@ -342,7 +348,10 @@ def upgrade() -> None:
             name="ck_bom_component_level_types",
         ),
         sa.CheckConstraint("parent_item_id <> child_item_id", name="ck_bom_component_not_self"),
-        sa.CheckConstraint("unit_quantity >= 0", name="ck_bom_component_quantity"),
+        sa.CheckConstraint(
+            "unit_quantity >= 0 AND unit_quantity > '-Infinity'::double precision AND unit_quantity < 'Infinity'::double precision",
+            name="ck_bom_component_quantity",
+        ),
         sa.ForeignKeyConstraint(
             ["child_item_id", "child_item_type"],
             ["items.id", "items.item_type"],
@@ -413,7 +422,10 @@ def upgrade() -> None:
             "passed_date IS NULL OR passed_date >= COALESCE(received_date, produced_date)",
             name="ck_lot_passed_after_arrival",
         ),
-        sa.CheckConstraint("quantity >= 0", name="ck_lot_quantity"),
+        sa.CheckConstraint(
+            "quantity >= 0 AND quantity > '-Infinity'::double precision AND quantity < 'Infinity'::double precision",
+            name="ck_lot_quantity",
+        ),
         sa.ForeignKeyConstraint(
             ["item_id", "item_type"], ["items.id", "items.item_type"], name="fk_lot_item"
         ),
@@ -475,8 +487,14 @@ def upgrade() -> None:
         sa.CheckConstraint("item_type = '원자재'", name="ck_supplier_item_is_raw_material"),
         sa.CheckConstraint("partner_type = '공급사'", name="ck_supplier_item_is_supplier"),
         sa.CheckConstraint("purchase_uom_group = 'UOM'", name="ck_supplier_item_uom_group"),
-        sa.CheckConstraint("conversion_factor > 0", name="ck_supplier_item_conversion"),
-        sa.CheckConstraint("lead_time_hours >= 0", name="ck_supplier_item_lead_time"),
+        sa.CheckConstraint(
+            "conversion_factor > 0 AND conversion_factor > '-Infinity'::double precision AND conversion_factor < 'Infinity'::double precision",
+            name="ck_supplier_item_conversion",
+        ),
+        sa.CheckConstraint(
+            "lead_time_hours >= 0 AND lead_time_hours > '-Infinity'::double precision AND lead_time_hours < 'Infinity'::double precision",
+            name="ck_supplier_item_lead_time",
+        ),
         sa.ForeignKeyConstraint(
             ["item_id", "item_type"],
             ["items.id", "items.item_type"],
