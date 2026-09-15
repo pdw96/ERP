@@ -163,7 +163,9 @@ class NonconformityStageRule(Base):
     stage_code: Mapped[str] = mapped_column(String(30), primary_key=True)
 
     disposition: Mapped[str] = mapped_column(String(20))
-    special_acceptance_allowed: Mapped[bool] = mapped_column(Boolean, default=False)
+    special_acceptance_allowed: Mapped[bool] = mapped_column(
+        Boolean, default=False, server_default="false"
+    )
 
 
 class PurchaseCloseAttribute(Base):

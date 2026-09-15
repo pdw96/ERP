@@ -98,7 +98,7 @@ class ProcessInspectionStandard(Base):
 
     # 「시간이 이 값을 바꿀 수 있는가.」 만료 재검사가 다시 보는 항목은 이 칸이
     # 켜진 것뿐이다 — 재검사는 시간이 바꾸는 것만 본다.
-    time_variant: Mapped[bool] = mapped_column(Boolean, default=False)
+    time_variant: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
 
     # mm · cP · ΔE 처럼 재는 단위. 재고 단위(`UOM`)와 다른 축이라 공통코드를
     # 가리키지 않는다 — 섞으면 「킬로그램으로 재는 색차」가 적힌다.

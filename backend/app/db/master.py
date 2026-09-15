@@ -131,7 +131,9 @@ class Item(Base):
     )
 
     # 초기 · 양산. 게이트와 지표가 다르다 (Ppk 1.67 / Cpk 1.33).
-    phase: Mapped[str] = mapped_column(String(10), default=codes.PHASE_INITIAL)
+    phase: Mapped[str] = mapped_column(
+        String(10), default=codes.PHASE_INITIAL, server_default=codes.PHASE_INITIAL
+    )
 
     # 사내가 정한 유효기간 설정기간(일). 로트의 유효기간은 이 값에서 파생된다.
     shelf_life_days: Mapped[int | None] = mapped_column(Integer, nullable=True)
@@ -228,7 +230,7 @@ class Partner(Base):
     name: Mapped[str] = mapped_column(String(100))
     partner_type: Mapped[str] = mapped_column(String(10), index=True)
     # 거래가 끝난 거래처도 지우지 않는다 — 과거 발주와 출하가 이것을 가리킨다.
-    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True, server_default="true")
 
     supplied_items: Mapped[list["SupplierItem"]] = relationship(back_populates="partner")
 
@@ -279,7 +281,7 @@ class SupplierItem(Base):
         String(20), default=codes.UOM, server_default=codes.UOM
     )
     # 구매 단위 하나가 재고 단위로 몇인가. 같은 단위면 1 이다.
-    conversion_factor: Mapped[float] = mapped_column(Float, default=1.0)
+    conversion_factor: Mapped[float] = mapped_column(Float, default=1.0, server_default="1.0")
 
     partner: Mapped[Partner] = relationship(back_populates="supplied_items")
     item: Mapped[Item] = relationship()

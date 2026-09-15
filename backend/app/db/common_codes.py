@@ -62,8 +62,8 @@ class CommonCode(Base):
     name: Mapped[str] = mapped_column(String(100))
     description: Mapped[str | None] = mapped_column(String(300), nullable=True)
     # 드롭다운에 뜨는 차례.
-    sort_order: Mapped[int] = mapped_column(Integer, default=0)
+    sort_order: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
     # 삭제 대신 이것을 끈다. 본체에만 있고 확장 표에는 없다.
-    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True, server_default="true")
 
     group: Mapped[CodeGroup] = relationship(back_populates="codes")

@@ -69,3 +69,31 @@
 - **월 비용 한도**: 0원
 - **외부 API와 쿼터**: 없음. 1단계는 순수 DB 작업이다.
 - **테넌시**: 단일 테넌트. `tenant_id` 를 두지 않는다.
+
+## 시드 값은 전부 시연용 임의값이다
+
+`app/seed_data/` 의 숫자 — 검사 규격 상·하한 · 중심선 · 준비시간 · 개당 시간 ·
+유효기간 · 안전재고 · 구매 리드타임 — 는 **어느 것도 실제 공정에서 잰 값이
+아니다.** 설계도가 「규격은 고객이 정한다 — 지금은 임의 설정」이라 적어 둔
+그대로이며, 실제 값은 고객 도면과 공급사 거래에서 나온다.
+
+각 SQL 파일 머리에 그 사실을 적어 두었다. 값이 그럴듯해 보인다는 것이 위험한
+지점이라 — 화면에 뜨면 진짜로 보인다 — 파일을 열면 먼저 읽히도록 두었다.
+
+실제 값이 생기면 해당 열만 고치면 된다. 코드를 몰라도 고칠 수 있게 SQL 에 둔
+이유가 그것이다.
+
+## 성공 기준 — 결과
+
+여덟 전부 충족. `pytest` 114개가 이것을 지킨다 (PostgreSQL 16).
+
+| 기준 | 어디서 지켜지는가 |
+|---|---|
+| ① 마이그레이션이 끝까지 돈다 | `test_downgrade_takes_every_table_back_out` |
+| ② 방언이 마이그레이션에 박히지 않는다 | `test_the_migration_builds_the_same_tables_as_the_models` |
+| ③ 시드가 트랜잭션 하나다 | `test_a_failure_halfway_leaves_nothing_behind` |
+| ④ 시드 판단 세 조건 | `test_nothing_is_planted_while_the_switch_is_off` · `test_a_second_run_changes_nothing` |
+| ⑤ 반제품과 2단 BOM | `test_the_bom_actually_goes_two_levels_deep` · `test_the_expansion_stops_after_two_levels` |
+| ⑥ 23그룹과 확장 표 셋 | `test_an_extension_row_cannot_point_at_another_group` |
+| ⑦ 로트 한 표 | `test_all_three_item_types_share_one_lot_table` |
+| ⑧ 화면 0 · API 0 | 프론트엔드 디렉터리가 없고 FastAPI 를 설치하지 않았다 |

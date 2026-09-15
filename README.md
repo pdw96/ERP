@@ -10,8 +10,11 @@
 
 ## 지금 어디인가
 
-**가설공사가 섰고 본 공사는 아직이다.** 도구(린트 · 타입체크 · 테스트 러너 ·
-마이그레이션 · DB)가 돌고, 표는 하나도 없다.
+**1단계가 끝났다** — 기준정보 표 열셋과 로트 표 하나, 마이그레이션, 시드.
+테스트 114개가 PostgreSQL 16 위에서 돈다.
+
+`app/seed_data/` 의 숫자는 **전부 시연용 임의값**이다. 실제 규격은 고객 도면이
+있어야 나온다 — 각 파일 머리에 그 사실을 적어 두었다.
 
 1단계에는 **공개 API 도 화면도 없다.** 뜨는 것은 데이터베이스뿐이고 backend 는
 마이그레이션과 시드를 돌리고 끝나는 일회성 잡이다. 웹 서버는 2단계에 들어온다.
@@ -36,7 +39,7 @@ python3 -m venv .venv && .venv/bin/pip install -r requirements-dev.txt
 ERP_TEST_DATABASE_URL="postgresql+psycopg://erp:erp@127.0.0.1:5432/erp_test" .venv/bin/pytest
 ```
 
-마이그레이션과 시드까지 컨테이너에서 돌리려면:
+마이그레이션과 기준정보를 넣으려면:
 
 ```sh
 docker compose run --rm migrate
@@ -55,8 +58,18 @@ docker compose run --rm migrate
 ```
 backend/
   app/core/config.py     환경에서 읽는 설정
+  app/core/codes.py      공통코드 그룹 스물셋 — 프로그램이 아는 이름
   app/db/base.py         SQLAlchemy 뿌리 · 엔진 · 트랜잭션 하나
-  migrations/            Alembic — 리비전은 아직 0개
-  tests/                 실제 PostgreSQL 에 붙는다
+  app/db/constraints.py  모델과 마이그레이션이 함께 부르는 제약 식
+  app/db/common_codes.py 공통코드 본체 두 표
+  app/db/code_attributes.py  확장 표 셋과 「코드 × 단계」
+  app/db/master.py       품목 · 2단 BOM · 거래처 · 공급사별 품목
+  app/db/production.py   근무형태 · 비가동 구간
+  app/db/quality.py      공정별 검사 기준
+  app/db/inventory.py    로트 한 표
+  app/seed.py            세 조건 · 트랜잭션 하나
+  app/seed_data/*.sql    기준정보 — 사람이 읽고 고치는 표
+  migrations/            Alembic — 리비전 하나
+  tests/                 실제 PostgreSQL 에 붙는다 (114개)
 compose.yaml             postgres + 일회성 migrate 잡
 ```

@@ -1,16 +1,15 @@
 """초기 스키마 — 기준정보 열셋과 로트
 
-표 열넷을 한 번에 굽는다. 조각 1~6 에서 모델을 나눠 세우고 여기서 한 리비전으로
-묶는 이유는 **재시드를 한 번으로 끝내기 위해서**다 — 조각마다 리비전을 내면
-같은 표를 여러 번 다시 만들게 된다.
+표 열넷을 한 번에 굽는다. 조각마다 리비전을 내면 같은 표를 여러 번 다시 만들게
+되므로 **재시드가 한 번으로 끝나지 않는다.**
 
-자동 생성이 CHECK 식을 문자열로 구워 박으므로, 이 파일과 모델이 갈릴 수 있다.
-**실제로 갈렸다** — 자동 생성이 `LIKE 'FG-%'` 의 퍼센트를 `%%` 로 이스케이프해
-박았고, 그 이스케이프가 데이터베이스까지 그대로 들어갔다. 손으로 되돌렸다.
-`tests/test_migrations.py` 가 **두 스키마를 실제로 만들어 견준다** — 컬럼과
-제약 정의가 한 글자라도 다르면 거기서 걸린다.
+자동 생성이 CHECK 식을 문자열로 구워 박으므로 이 파일과 모델은 갈릴 수 있다.
+**실제로 갈렸다** — 자동 생성이 `LIKE 'FG-%'` 의 퍼센트를 두 번 적어 박았고,
+그 이스케이프가 데이터베이스까지 들어갔다. 손으로 되돌렸다.
+`tests/test_migrations.py` 가 두 스키마를 실제로 만들어 견주므로, 이 파일을
+손보든 다시 생성하든 **그 테스트를 돌려 보고 나서** 믿는다.
 
-Revision ID: 88b96535c9c0
+Revision ID: eebf10fc77f6
 Revises:
 Create Date: 2026-09-15
 """
@@ -20,7 +19,7 @@ from collections.abc import Sequence
 import sqlalchemy as sa
 from alembic import op
 
-revision: str = "88b96535c9c0"
+revision: str = "eebf10fc77f6"
 down_revision: str | None = None
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
@@ -54,7 +53,7 @@ def upgrade() -> None:
         sa.Column("code", sa.String(length=20), nullable=False),
         sa.Column("name", sa.String(length=100), nullable=False),
         sa.Column("partner_type", sa.String(length=10), nullable=False),
-        sa.Column("is_active", sa.Boolean(), nullable=False),
+        sa.Column("is_active", sa.Boolean(), server_default="true", nullable=False),
         sa.CheckConstraint(
             "btrim(code, E' \\t\\n\\r\\u3000\\u00a0') <> ''", name="ck_partner_code_is_present"
         ),
@@ -75,8 +74,8 @@ def upgrade() -> None:
         sa.Column("code", sa.String(length=30), nullable=False),
         sa.Column("name", sa.String(length=100), nullable=False),
         sa.Column("description", sa.String(length=300), nullable=True),
-        sa.Column("sort_order", sa.Integer(), nullable=False),
-        sa.Column("is_active", sa.Boolean(), nullable=False),
+        sa.Column("sort_order", sa.Integer(), server_default="0", nullable=False),
+        sa.Column("is_active", sa.Boolean(), server_default="true", nullable=False),
         sa.CheckConstraint(
             "btrim(code, E' \\t\\n\\r\\u3000\\u00a0') <> ''",
             name="ck_common_code_code_is_present",
@@ -105,7 +104,7 @@ def upgrade() -> None:
         sa.Column(
             "stock_uom_group", sa.String(length=20), server_default="UOM", nullable=False
         ),
-        sa.Column("phase", sa.String(length=10), nullable=False),
+        sa.Column("phase", sa.String(length=10), server_default="초기", nullable=False),
         sa.Column("shelf_life_days", sa.Integer(), nullable=True),
         sa.Column("safety_stock", sa.Float(), nullable=True),
         sa.Column("setup_hours", sa.Float(), nullable=True),
@@ -207,7 +206,9 @@ def upgrade() -> None:
         ),
         sa.Column("stage_code", sa.String(length=30), nullable=False),
         sa.Column("disposition", sa.String(length=20), nullable=False),
-        sa.Column("special_acceptance_allowed", sa.Boolean(), nullable=False),
+        sa.Column(
+            "special_acceptance_allowed", sa.Boolean(), server_default="false", nullable=False
+        ),
         sa.CheckConstraint(
             "disposition IN ('반품', '환불', '재작업', '폐기', '등급 하향')",
             name="ck_nonconformity_stage_rule_disposition",
@@ -246,7 +247,7 @@ def upgrade() -> None:
         sa.Column("warning_ratio", sa.Float(), server_default="0.70", nullable=False),
         sa.Column("sigma", sa.Float(), nullable=True),
         sa.Column("sigma_source", sa.String(length=10), server_default="미정", nullable=False),
-        sa.Column("time_variant", sa.Boolean(), nullable=False),
+        sa.Column("time_variant", sa.Boolean(), server_default="false", nullable=False),
         sa.Column("unit", sa.String(length=20), nullable=True),
         sa.CheckConstraint(
             "(sigma IS NULL) = (sigma_source = '미정')",
@@ -397,13 +398,13 @@ def upgrade() -> None:
         sa.Column("lot_number", sa.String(length=50), nullable=False),
         sa.Column("lot_origin", sa.String(length=10), nullable=False),
         sa.Column("warehouse", sa.String(length=20), nullable=False),
-        sa.Column("stock_type", sa.String(length=10), nullable=False),
+        sa.Column("stock_type", sa.String(length=10), server_default="양품", nullable=False),
         sa.Column("quantity", sa.Float(), nullable=False),
         sa.Column("received_date", sa.Date(), nullable=True),
         sa.Column("produced_date", sa.Date(), nullable=True),
         sa.Column("passed_date", sa.Date(), nullable=True),
         sa.Column("expiry_date", sa.Date(), nullable=True),
-        sa.Column("reworked", sa.Boolean(), nullable=False),
+        sa.Column("reworked", sa.Boolean(), server_default="false", nullable=False),
         sa.CheckConstraint(
             "(lot_origin = '공급사' AND item_type IN ('원자재')) OR (lot_origin = '자사' AND item_type IN ('반제품', '완제품'))",
             name="ck_lot_origin_matches_type",
@@ -457,7 +458,7 @@ def upgrade() -> None:
         sa.Column(
             "purchase_uom_group", sa.String(length=20), server_default="UOM", nullable=False
         ),
-        sa.Column("conversion_factor", sa.Float(), nullable=False),
+        sa.Column("conversion_factor", sa.Float(), server_default="1.0", nullable=False),
         sa.CheckConstraint("partner_type = '공급사'", name="ck_supplier_item_is_supplier"),
         sa.CheckConstraint("purchase_uom_group = 'UOM'", name="ck_supplier_item_uom_group"),
         sa.CheckConstraint("conversion_factor > 0", name="ck_supplier_item_conversion"),

@@ -118,7 +118,9 @@ class Lot(Base):
     lot_origin: Mapped[str] = mapped_column(String(10))
 
     warehouse: Mapped[str] = mapped_column(String(20), index=True)
-    stock_type: Mapped[str] = mapped_column(String(10), default=codes.STOCK_GOOD)
+    stock_type: Mapped[str] = mapped_column(
+        String(10), default=codes.STOCK_GOOD, server_default=codes.STOCK_GOOD
+    )
     quantity: Mapped[float] = mapped_column(Float)
 
     received_date: Mapped[date | None] = mapped_column(Date, nullable=True)
@@ -139,6 +141,6 @@ class Lot(Base):
     # 예/아니오다. **재작업 2회인 로트는 존재할 수 없다** — 로트는 합격 후에만
     # 생기므로, 재작업분이 재검사에서 또 떨어지면 로트가 아예 만들어지지 않고
     # 폐기된다.
-    reworked: Mapped[bool] = mapped_column(Boolean, default=False)
+    reworked: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
 
     item: Mapped[Item] = relationship(foreign_keys=[item_id, item_type])
