@@ -101,9 +101,13 @@ class ProcessInspectionStandard(Base):
     # 말한다(KG 아홉 · L 둘 · M2 넷) — 분말에 점도를, 라이너에 입도를 재라고
     # 내미는 셈이다.
     #
-    # 품목 축을 더할지 자재군을 둘지는 **읽는 쪽(IQC 화면)이 서는 2단계에서**
-    # 정한다. 지금 축을 더하면 쓰지 않는 칸에 값을 채우게 되고, 그 값은 화면에
-    # 뜨는 순간 진짜로 보인다. `docs/schema.md` 의 미결에 적어 두었다.
+    # **2단계 착공에서 정해졌다 — 자재군을 둔다.** 품목 축을 더하면 원자재 15 ×
+    # 검사항목만큼의 실측값을 누군가 정해야 하고, 그 값이 없으면 빈 기준정보가
+    # 된다. 자재군은 재고단위가 이미 경계를 말하고 있어 지어낼 값이 없다.
+    #
+    # **아직 이 표는 바뀌지 않았다.** 자재군 축이 PK 에 붙는 것은 마이그레이션이
+    # 있는 조각의 일이다 — 이미 심긴 표라 재시드가 닿지 않는다. 초안은
+    # `docs/schema-2단계.md` 15번에 있다.
     process_code: Mapped[str] = mapped_column(String(30), primary_key=True)
     process_group: Mapped[str] = mapped_column(
         String(20), default=codes.PROCESS, server_default=codes.PROCESS
