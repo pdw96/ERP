@@ -16,6 +16,10 @@ htmlcov/
 .env
 .env.local
 
+# 감사 — 감사자는 격리된 워크트리에서 돈다. 돌연변이로 파일을 어긋내며
+# 재는 자리라 그 사본이 저장소에 들어오면 「고치지 않는다」가 깨진다.
+.claude/worktrees/
+
 # 편집기
 .vscode/
 .idea/
