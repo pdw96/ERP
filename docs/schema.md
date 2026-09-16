@@ -49,6 +49,7 @@
 | `item_type` | str(20) | `ITEM_TYPE` — 완제품 · 반제품 · 원자재 |
 | `process` | str(30) NULL | `PROCESS` 참조. 검사 기준을 끌어오는 라벨. 접두가 아니라 명시적인 열 |
 | `stock_uom` | str(30) | `UOM` 참조. **모든 수량이 이 단위로 저장된다** |
+| `material_group` | str(30) NULL | `MATERIAL_GROUP` 참조. 자재군 — **원자재만 갖는다.** 수입 검사 기준이 걸리는 축 |
 | `phase` | str(10) | `ITEM_PHASE` — 초기 · 양산 |
 | `shelf_life_days` | int NULL | 설정기간. NULL 이면 무기한. **반제품은 NULL 이어야 한다** |
 | `safety_stock` | float NULL | **원자재는 NOT NULL 이어야 한다** |
@@ -60,6 +61,10 @@
 - `UNIQUE (id, item_type)` — 복합 외래키의 상대가 되기 위해. 「이 로트의 품목은
   원자재여야 한다」를 거는 쪽이 `(id, 유형)` 쌍을 가리킬 수 있어야 한다
 - `FK (process_group, process) → common_codes` — `process_group` 은 상수 `PROCESS`
+- `FK (material_group_group, material_group) → common_codes` — 같은 꼴
+- **`CHECK (item_type = '원자재') = (material_group IS NOT NULL)`** — 양방향이다.
+  원자재인데 자재군이 없으면 수입 기준을 끌어올 축이 없고, 원자재가 아닌데
+  자재군이 있으면 만들어져 나온 것에 「무슨 자재인가」가 적힌 것이다
 - `FK (stock_uom_group, stock_uom) → common_codes` — 같은 모양
 - `CHECK item_type='반제품' → shelf_life_days IS NULL`
 - `CHECK item_type='원자재' → safety_stock IS NOT NULL`
@@ -147,10 +152,14 @@ OR
 `ITEM_PHASE`(2) · `MEAS_KIND`(2) · `SIGMA_SRC`(3) · `WE_RULE`(4) · `SHIFT`(3) ·
 `SETTLE_TYPE`(2) · `RISK_STATUS`(3)
 
-### 값이 늘 수 있는 그룹 여덟 — 세기만 한다
+### 값이 늘 수 있는 그룹 아홉 — 세기만 한다
 
 `NC_REASON`(19) · `PO_CLOSE`(7) · `SP_REASON`(5) · `ADJ_REASON`(0) ·
-`PROCESS`(5) · `INSP_ITEM`(16) · `DEPT`(5) · `UOM`(7)
+`PROCESS`(5) · `INSP_ITEM`(16) · `DEPT`(5) · `UOM`(7) · `MATERIAL_GROUP`(3)
+
+`MATERIAL_GROUP` 은 2단계에서 섰다 — 분체 · 액상수지 · 시트필름. 프로그램이
+자재군을 보고 분기하지 않고 기준을 찾는 주소로만 쓰므로 무리가 늘어도 고장 나는
+코드가 없다.
 
 `ADJ_REASON` 이 0인 것은 빠진 것이 아니다 — 실제로 조정을 내 보아야 목록이
 나온다.
@@ -215,9 +224,30 @@ OR
 > **시드하지 않는다** — 비가동 구간은 날짜를 가지므로 기준정보 SQL 에 넣을 수
 > 없다(「오늘」이 나오면 파이썬). 표만 선다.
 
-## 12. `process_inspection_standards` — 공정 × 검사항목
+## 12. `process_inspection_standards` — 공정 × 검사항목 × 자재군
 
-`(process_code, item_code)` PK, 둘 다 복합 외래키로 `common_codes` 참조
+대리키 `id` 가 PK 이고, **정체성은 유일키가 말한다** —
+`UNIQUE NULLS NOT DISTINCT (process_code, item_code, material_group)`.
+공정 · 검사항목 · 자재군 셋 다 복합 외래키로 `common_codes` 를 참조한다.
+
+### 왜 자연키가 아니라 대리키인가
+
+이 표에는 수입만 있는 것이 아니다 — 배합 셋 · 코팅 둘 · 적층경화 다섯 · 출하
+다섯이 함께 있고, 그것들은 반제품과 완제품을 보므로 **자재군이 없다.** 스물셋
+중 여덟(수입)만 자재군을 갖는다.
+
+PostgreSQL 의 기본키는 `NULL` 을 받지 않으므로 자재군을 PK 에 넣으면 나머지
+열다섯에 「해당없음」 같은 값을 지어내야 하고, 그것은 빈 기준정보다. 그래서
+자리만 맡는 `id` 를 두었다.
+
+`NULLS NOT DISTINCT` 가 없으면 PostgreSQL 은 `NULL` 을 서로 다른 값으로 보아
+**자재군이 비어 있는 공정검사 줄이 몇 줄이든 선다** — 「코팅 · 두께」가 둘이 되면
+어느 기준으로 판정했는지 표가 말하지 못한다. PostgreSQL 15 부터 쓸 수 있다.
+
+**`CHECK (process_code IN ('수입')) = (material_group IS NOT NULL)`** — 양방향이다.
+수입인데 자재군이 없으면 기준 여덟이 원자재 열다섯 전부에 걸리던 옛 자리로
+돌아가고, 수입이 아닌데 자재군이 있으면 반제품·완제품 기준에 「무슨 자재인가」가
+적힌 것이다.
 
 | 칸 | 누가 정하는가 |
 |---|---|

@@ -24,6 +24,7 @@ from sqlalchemy import create_engine, text
 from sqlalchemy.engine import Engine
 from sqlalchemy.pool import NullPool
 
+from app import seed as seed_module
 from app.core.alembic_url import apply_database_url, escaped_for_configparser
 from app.core.config import get_settings
 from app.db.base import Base
@@ -78,7 +79,17 @@ def test_alembic_connects_to_the_url_it_is_given(engine: Engine) -> None:
 
 
 def _columns(engine: Engine, schema: str) -> dict[tuple[str, str], tuple[object, ...]]:
-    """그 스키마의 컬럼 전부 — 이름 · 자료형 · 널 허용 · 기본값 · 길이."""
+    """그 스키마의 컬럼 전부 — 이름 · 자료형 · 널 허용 · 기본값 · 길이.
+
+    **칸 순서는 견주지 않는다.** `ordinal_position` 을 뽑지 않으므로 두 길의
+    칸 차례가 달라도 여기서는 같다고 나온다 — 마이그레이션의 `add_column` 은
+    끝에 붙이고 모델은 선언한 자리에 두기 때문에 실제로 다르다.
+
+    **그것을 허용한다.** 맞추려면 칸을 더할 때마다 표를 다시 만드는 리비전이
+    필요한데, 얻는 것이 없다. 시드와 마이그레이션의 `INSERT` 는 전부 칸 이름을
+    적고 `SELECT *` 의 순서에 기대는 코드가 없다. 이 테스트를 「두 스키마가
+    완전히 같다」로 읽지 않기 위해 적어 둔다.
+    """
     sql = text(
         "SELECT table_name, column_name, data_type, is_nullable,"
         "       column_default, character_maximum_length, numeric_precision"
@@ -300,3 +311,238 @@ def test_the_url_the_caller_gives_is_not_escaped_again(
     apply_database_url(probe)
 
     assert probe.get_main_option("sqlalchemy.url") == given
+
+
+# ── 데이터 단계 — 이미 심긴 데이터베이스에서만 도는 길 ──────────────────────
+#
+# 위의 대조 테스트는 **빈 스키마**에 올린다. 그래서 자재군 리비전의 데이터
+# 단계(`WHERE EXISTS (SELECT 1 FROM items)`)는 통째로 건너뛰어진다 — 저장소에서
+# 처음으로 **데이터를 옮기는** 마이그레이션인데 그 부분만 아무 검사도 받지 않는
+# 자리였다. 아래 둘이 그 자리를 덮는다.
+
+_BEFORE_MATERIAL_GROUP = """
+INSERT INTO code_groups (group_code, name, value_fixed, description) VALUES
+  ('PROCESS', '공정', FALSE, '시험'),
+  ('UOM', '단위', FALSE, '시험'),
+  ('INSP_ITEM', '검사항목', FALSE, '시험');
+
+INSERT INTO common_codes (group_code, code, name) VALUES
+  ('PROCESS', '수입', '수입'),
+  ('UOM', 'KG', '킬로그램'), ('UOM', 'L', '리터'), ('UOM', 'M2', '제곱미터'),
+  ('INSP_ITEM', '입도', '입도'), ('INSP_ITEM', '수분', '수분'),
+  ('INSP_ITEM', '점도', '점도'), ('INSP_ITEM', '두께', '두께'),
+  ('INSP_ITEM', '색차', '색차'), ('INSP_ITEM', '이물', '이물'),
+  ('INSP_ITEM', '포장', '포장'), ('INSP_ITEM', '성적서', '성적서');
+
+INSERT INTO items
+  (code, name, item_type, process, process_group, stock_uom, stock_uom_group,
+   phase, safety_stock)
+VALUES
+  ('RM-01','폴리머 베이스','원자재','수입','PROCESS','KG','UOM','양산',800),
+  ('RM-02','세라믹 분말','원자재','수입','PROCESS','KG','UOM','양산',400),
+  ('RM-03','광학 안료','원자재','수입','PROCESS','KG','UOM','양산',150),
+  ('RM-04','보강 섬유','원자재','수입','PROCESS','M2','UOM','양산',600),
+  ('RM-05','접착 수지','원자재','수입','PROCESS','KG','UOM','양산',250),
+  ('RM-06','방열 첨가제','원자재','수입','PROCESS','KG','UOM','양산',200),
+  ('RM-07','차단 필름','원자재','수입','PROCESS','M2','UOM','양산',500),
+  ('RM-08','표면 코팅제','원자재','수입','PROCESS','L','UOM','양산',300),
+  ('RM-09','미세 충전재','원자재','수입','PROCESS','KG','UOM','양산',350),
+  ('RM-10','유연 가소제','원자재','수입','PROCESS','L','UOM','양산',280),
+  ('RM-11','보호 라이너','원자재','수입','PROCESS','M2','UOM','양산',450),
+  ('RM-12','안정화 첨가제','원자재','수입','PROCESS','KG','UOM','양산',180),
+  ('RM-13','전도성 페이스트','원자재','수입','PROCESS','KG','UOM','양산',120),
+  ('RM-14','기능성 염료','원자재','수입','PROCESS','KG','UOM','양산',100),
+  ('RM-15','포장 라미네이트','원자재','수입','PROCESS','M2','UOM','양산',700);
+
+INSERT INTO process_inspection_standards
+  (process_group, process_code, item_group, item_code, upper_spec_limit, lower_spec_limit,
+   center_line, unit)
+VALUES
+  ('PROCESS','수입','INSP_ITEM','입도',   50.0,   10.0,   30.0, 'µm'),
+  ('PROCESS','수입','INSP_ITEM','수분',    0.50,  NULL,    0.20, '%'),
+  ('PROCESS','수입','INSP_ITEM','점도', 4000.0, 2000.0, 3000.0, 'cP'),
+  ('PROCESS','수입','INSP_ITEM','두께',  105.0,   95.0,  100.0, 'µm'),
+  ('PROCESS','수입','INSP_ITEM','색차',    1.00,  NULL,    0.30, 'ΔE'),
+  ('PROCESS','수입','INSP_ITEM','이물',   NULL,   NULL,   NULL, NULL),
+  ('PROCESS','수입','INSP_ITEM','포장',   NULL,   NULL,   NULL, NULL),
+  ('PROCESS','수입','INSP_ITEM','성적서', NULL,   NULL,   NULL, NULL);
+"""
+
+
+def _material_groups(engine: Engine) -> dict[str, str]:
+    """품목 코드마다 어느 무리인가."""
+    with engine.connect() as conn:
+        rows = conn.execute(
+            text("SELECT code, material_group FROM items WHERE material_group IS NOT NULL")
+        ).all()
+    return {str(row[0]): str(row[1]) for row in rows}
+
+
+def _incoming_standards(engine: Engine) -> set[tuple[str, str]]:
+    """수입 기준이 (검사항목, 자재군) 으로 어떻게 서 있는가."""
+    with engine.connect() as conn:
+        rows = conn.execute(
+            text(
+                "SELECT item_code, material_group FROM process_inspection_standards"
+                " WHERE process_code = '수입'"
+            )
+        ).all()
+    return {(str(row[0]), str(row[1])) for row in rows}
+
+
+def _upgrade_over_the_old_seed(engine: Engine, schema: str) -> Engine:
+    """옛 리비전까지 올리고 **옛 모양으로 심은 뒤** `head` 로 올린다."""
+    config = _config_for_schema(engine, schema)
+    command.upgrade(config, "3c602ffaebc3")
+
+    scoped = _engine_for_schema(engine, schema)
+    with scoped.begin() as conn:
+        for statement in _BEFORE_MATERIAL_GROUP.strip().split(";"):
+            if statement.strip():
+                conn.execute(text(statement))
+
+    command.upgrade(config, "head")
+    return scoped
+
+
+def test_both_roads_reach_the_same_material_groups(
+    engine: Engine, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """**두 길이 같은 곳에 닿는다.**
+
+    자재군 배정은 마이그레이션(`_ITEM_GROUPS` · `_FIRST_GROUP`)과 시드
+    SQL(`03_items.sql` · `05_quality.sql`) **양쪽에 적혀 있다.** 목록이 두 벌이면
+    반드시 갈리므로, 갈리는 순간을 여기서 잡는다 — 한쪽만 고치면 빈 데이터베이스와
+    이미 심긴 데이터베이스가 서로 다른 기준을 갖게 되고, 갈린 줄 아무도 모른다.
+
+    견주는 것은 **값이 아니라 배정**이다. 규격 숫자는 옛 줄에서 따라오므로
+    두 길이 같을 이유가 없고, 갈려서 문제가 되는 것은 어느 자재가 어느 무리인가다.
+    """
+    monkeypatch.setenv("ERP_SEED_ENABLED", "true")
+    with _schema(engine, "road_seed"), _schema(engine, "road_migration"):
+        # 길 A — 빈 데이터베이스에 올리고 시드가 채운다.
+        command.upgrade(_config_for_schema(engine, "road_seed"), "head")
+        seeded = _engine_for_schema(engine, "road_seed")
+        assert seed_module.seed(seeded), "시드가 돌지 않았다"
+
+        # 길 B — 옛 모양으로 심긴 데이터베이스를 마이그레이션이 옮긴다.
+        migrated = _upgrade_over_the_old_seed(engine, "road_migration")
+
+        assert _material_groups(migrated) == _material_groups(seeded)
+        assert _incoming_standards(migrated) == _incoming_standards(seeded)
+
+
+def test_the_data_step_moves_the_old_rows_instead_of_replacing_them(engine: Engine) -> None:
+    """**사람이 고친 값이 마이그레이션을 건너간다.**
+
+    이 리비전이 존재하는 근거가 「사람이 고친 값을 재시드가 덮어쓰는 쪽이 더 큰
+    사고다」인데, 지우고 다시 심으면 그 재시드와 같은 일을 하게 된다. 옛 줄을
+    옮겨 쓰는지 여기서 지킨다.
+
+    **σ 는 따라가지 않는다** — 규격은 고객이 정하는 것이라 같은 항목이면 무리가
+    달라도 쓸 수 있지만, σ 는 잰 값이고 새 무리에서는 잰 적이 없다.
+    """
+    with _schema(engine, "kept_values"):
+        config = _config_for_schema(engine, "kept_values")
+        command.upgrade(config, "3c602ffaebc3")
+
+        scoped = _engine_for_schema(engine, "kept_values")
+        with scoped.begin() as conn:
+            for statement in _BEFORE_MATERIAL_GROUP.strip().split(";"):
+                if statement.strip():
+                    conn.execute(text(statement))
+            # 사람이 고친 값 — 실측 σ 와 좁힌 규격.
+            conn.execute(
+                text(
+                    "UPDATE process_inspection_standards"
+                    "   SET sigma = 0.05, sigma_source = '실측', upper_spec_limit = 0.40"
+                    " WHERE process_code = '수입' AND item_code = '수분'"
+                )
+            )
+
+        command.upgrade(config, "head")
+
+        with scoped.connect() as conn:
+            kept = conn.execute(
+                text(
+                    "SELECT sigma, sigma_source, upper_spec_limit"
+                    "  FROM process_inspection_standards"
+                    " WHERE process_code = '수입' AND item_code = '수분'"
+                    "   AND material_group = '분체'"
+                )
+            ).one()
+            copied = conn.execute(
+                text(
+                    "SELECT sigma, sigma_source, upper_spec_limit"
+                    "  FROM process_inspection_standards"
+                    " WHERE process_code = '수입' AND item_code = '수분'"
+                    "   AND material_group = '액상수지'"
+                )
+            ).one()
+
+        # 옮겨 쓴 줄은 사람이 고친 값을 그대로 들고 있다.
+        assert (kept[0], kept[1], kept[2]) == (0.05, "실측", 0.40)
+        # 베낀 줄은 규격만 따라오고 σ 는 「미정」이다 — 그 무리에서는 잰 적이 없다.
+        assert (copied[0], copied[1], copied[2]) == (None, "미정", 0.40)
+
+
+def test_downgrade_keeps_the_values_it_moved(engine: Engine) -> None:
+    """되돌려도 사람이 고친 값이 남는다 — 베낀 줄만 지운다."""
+    with _schema(engine, "down_values"):
+        config = _config_for_schema(engine, "down_values")
+        command.upgrade(config, "3c602ffaebc3")
+
+        scoped = _engine_for_schema(engine, "down_values")
+        with scoped.begin() as conn:
+            for statement in _BEFORE_MATERIAL_GROUP.strip().split(";"):
+                if statement.strip():
+                    conn.execute(text(statement))
+            conn.execute(
+                text(
+                    "UPDATE process_inspection_standards SET upper_spec_limit = 0.40"
+                    " WHERE process_code = '수입' AND item_code = '수분'"
+                )
+            )
+
+        command.upgrade(config, "head")
+        command.downgrade(config, "3c602ffaebc3")
+
+        with scoped.connect() as conn:
+            rows = conn.execute(
+                text(
+                    "SELECT item_code, upper_spec_limit FROM process_inspection_standards"
+                    " WHERE process_code = '수입' ORDER BY item_code"
+                )
+            ).all()
+
+        assert len(rows) == 8, "되돌린 뒤에도 항목마다 한 줄이어야 한다"
+        assert dict(rows)["수분"] == 0.40, "사람이 고친 규격이 되돌리기에서 사라졌다"
+
+
+def test_a_raw_material_the_revision_does_not_know_stops_it(engine: Engine) -> None:
+    """**모르는 원자재가 있으면 무엇이 남았는지 말하고 멈춘다.**
+
+    그냥 두면 바로 뒤의 양방향 CHECK 가 대신 터지는데, 그 오류는 「제약 위반」일
+    뿐이라 원인이 리비전의 목록에 있다는 것을 말해 주지 않는다. 트랜잭션 하나라
+    멈추면 아무것도 남지 않는다 — **조용히 틀린 값이 들어가지 않는다.**
+    """
+    with _schema(engine, "unknown_material"):
+        config = _config_for_schema(engine, "unknown_material")
+        command.upgrade(config, "3c602ffaebc3")
+
+        scoped = _engine_for_schema(engine, "unknown_material")
+        with scoped.begin() as conn:
+            for statement in _BEFORE_MATERIAL_GROUP.strip().split(";"):
+                if statement.strip():
+                    conn.execute(text(statement))
+            conn.execute(
+                text(
+                    "INSERT INTO items"
+                    " (code, name, item_type, process, process_group, stock_uom,"
+                    "  stock_uom_group, phase, safety_stock)"
+                    " VALUES ('RM-99','새 자재','원자재','수입','PROCESS','KG','UOM','양산',10)"
+                )
+            )
+
+        with pytest.raises(Exception, match="RM-99"):
+            command.upgrade(config, "head")

@@ -13,6 +13,13 @@
 옮긴다 — `CLAUDE.md` 가 「기준정보 값을 고쳐야 하면 시드가 아니라
 마이그레이션으로 낸다」고 적은 그 자리다.
 
+**지우지 않고 옮긴다.** 이 마이그레이션이 존재하는 근거가 「사람이 고친 값을
+재시드가 덮어쓰는 쪽이 더 큰 사고다」인데, 지우고 다시 심으면 그 재시드와 같은
+일을 하게 된다. 그래서 옛 여덟 줄을 `UPDATE` 로 첫 무리에 옮기고, 두 무리
+이상에 걸치는 항목만 **그 줄을 베껴** 나머지 무리에 세운다. 실측 σ 나 고객이
+준 규격이 들어 있었다면 그대로 따라간다. 되돌릴 때도 같다 — 베낀 줄만 지우고
+남은 줄의 값은 건드리지 않는다.
+
 **데이터 단계는 이미 심긴 데이터베이스에서만 돈다.** 조건은 시드의 조건 ③ 을
 뒤집은 것이다 — 시드는 품목 표가 **비어 있을 때** 돌고 이것은 **비어 있지 않을
 때** 돈다. 둘은 같은 데이터베이스에서 함께 돌 수 없으므로 값이 두 번 들어가지
@@ -38,46 +45,49 @@ depends_on: str | Sequence[str] | None = None
 _ALREADY_SEEDED = "WHERE EXISTS (SELECT 1 FROM items)"
 
 # 원자재 열다섯이 어느 무리인가. 재고단위가 경계를 말한다 — KG 아홉 · L 둘 · M2 넷.
+# **시드 SQL 과 같은 것을 말한다.** 둘이 갈리지 않는지는
+# `test_both_roads_reach_the_same_material_groups` 가 두 길을 실제로 돌려 견준다.
 _ITEM_GROUPS = """('RM-01','액상수지'),('RM-02','분체'),('RM-03','분체'),('RM-04','시트필름'),
        ('RM-05','액상수지'),('RM-06','분체'),('RM-07','시트필름'),('RM-08','액상수지'),
        ('RM-09','분체'),('RM-10','액상수지'),('RM-11','시트필름'),('RM-12','분체'),
        ('RM-13','액상수지'),('RM-14','액상수지'),('RM-15','시트필름')"""
 
-# **첫 줄에 형을 박는 이유.** `VALUES` 목록에서 PostgreSQL 은 전부 `NULL` 인 열을
-# `text` 로 추론하고, `sigma` 가 그것이다 — 박지 않으면 「double precision 인데
-# text 가 왔다」로 마이그레이션이 멈춘다. 첫 줄만 박으면 나머지가 따라온다.
-# 자재군이 선 뒤의 수입 기준 열여섯. 규격 숫자는 옛 여덟 줄에서 그대로 옮겼다 —
-# 상·하한은 항목이 갖는 것이지 무리가 갖는 것이 아니다.
-_INCOMING_STANDARDS = """
-  ('PROCESS','수입','INSP_ITEM','입도',  '분체',    'MATERIAL_GROUP',   50.0::double precision,   10.0::double precision,   30.0::double precision, 0.70::double precision, NULL::double precision, '미정', FALSE, 'µm'),
-  ('PROCESS','수입','INSP_ITEM','수분',  '분체',    'MATERIAL_GROUP',    0.50,  NULL,    0.20, 0.70, NULL, '미정', TRUE,  '%'),
-  ('PROCESS','수입','INSP_ITEM','이물',  '분체',    'MATERIAL_GROUP',   NULL,   NULL,   NULL, 0.70, NULL, '미정', FALSE, NULL),
-  ('PROCESS','수입','INSP_ITEM','포장',  '분체',    'MATERIAL_GROUP',   NULL,   NULL,   NULL, 0.70, NULL, '미정', TRUE,  NULL),
-  ('PROCESS','수입','INSP_ITEM','성적서','분체',    'MATERIAL_GROUP',   NULL,   NULL,   NULL, 0.70, NULL, '미정', FALSE, NULL),
-  ('PROCESS','수입','INSP_ITEM','점도',  '액상수지','MATERIAL_GROUP', 4000.0, 2000.0, 3000.0, 0.70, NULL, '미정', TRUE,  'cP'),
-  ('PROCESS','수입','INSP_ITEM','수분',  '액상수지','MATERIAL_GROUP',    0.50,  NULL,    0.20, 0.70, NULL, '미정', TRUE,  '%'),
-  ('PROCESS','수입','INSP_ITEM','색차',  '액상수지','MATERIAL_GROUP',    1.00,  NULL,    0.30, 0.70, NULL, '미정', TRUE,  'ΔE'),
-  ('PROCESS','수입','INSP_ITEM','이물',  '액상수지','MATERIAL_GROUP',   NULL,   NULL,   NULL, 0.70, NULL, '미정', FALSE, NULL),
-  ('PROCESS','수입','INSP_ITEM','포장',  '액상수지','MATERIAL_GROUP',   NULL,   NULL,   NULL, 0.70, NULL, '미정', TRUE,  NULL),
-  ('PROCESS','수입','INSP_ITEM','성적서','액상수지','MATERIAL_GROUP',   NULL,   NULL,   NULL, 0.70, NULL, '미정', FALSE, NULL),
-  ('PROCESS','수입','INSP_ITEM','두께',  '시트필름','MATERIAL_GROUP',  105.0,   95.0,  100.0, 0.70, NULL, '미정', FALSE, 'µm'),
-  ('PROCESS','수입','INSP_ITEM','색차',  '시트필름','MATERIAL_GROUP',    1.00,  NULL,    0.30, 0.70, NULL, '미정', TRUE,  'ΔE'),
-  ('PROCESS','수입','INSP_ITEM','이물',  '시트필름','MATERIAL_GROUP',   NULL,   NULL,   NULL, 0.70, NULL, '미정', FALSE, NULL),
-  ('PROCESS','수입','INSP_ITEM','포장',  '시트필름','MATERIAL_GROUP',   NULL,   NULL,   NULL, 0.70, NULL, '미정', TRUE,  NULL),
-  ('PROCESS','수입','INSP_ITEM','성적서','시트필름','MATERIAL_GROUP',   NULL,   NULL,   NULL, 0.70, NULL, '미정', FALSE, NULL)
+# 검사항목이 **처음** 서는 무리. 옛 줄을 이 무리로 옮기므로 그 줄의 값이 따라간다.
+_FIRST_GROUP = """('입도','분체'),('수분','분체'),('점도','액상수지'),('색차','액상수지'),
+       ('두께','시트필름'),('이물','분체'),('포장','분체'),('성적서','분체')"""
+
+# 두 무리 이상에 걸치는 항목의 **나머지** 무리. 첫 무리의 줄을 베껴 세운다.
+# 계수 셋(이물 · 포장 · 성적서)은 재는 것이 아니라 세는 것이라 무리를 가리지 않는다.
+_EXTRA_GROUPS = """('수분','액상수지'),('색차','시트필름'),
+       ('이물','액상수지'),('이물','시트필름'),
+       ('포장','액상수지'),('포장','시트필름'),
+       ('성적서','액상수지'),('성적서','시트필름')"""
+
+# 옮기지 못한 줄이 있으면 **무엇이 남았는지 말하고 멈춘다.** 그냥 두면 바로 뒤의
+# 양방향 CHECK 가 대신 터지는데, 그 오류는 「제약 위반」일 뿐이라 원인이 위의 두
+# 목록에 있다는 것을 말해 주지 않는다. 트랜잭션 하나이므로 멈추면 아무것도 남지 않는다.
+_STOP_IF_ANYTHING_WAS_LEFT_BEHIND = """
+DO $$
+DECLARE leftover text;
+BEGIN
+  SELECT string_agg(DISTINCT code, ', ') INTO leftover
+    FROM items WHERE item_type = '원자재' AND material_group IS NULL;
+  IF leftover IS NOT NULL THEN
+    RAISE EXCEPTION '자재군을 정하지 못한 원자재가 있다: % — 이 리비전의 _ITEM_GROUPS 에 더해야 한다', leftover;
+  END IF;
+
+  SELECT string_agg(DISTINCT item_code, ', ') INTO leftover
+    FROM process_inspection_standards WHERE process_code = '수입' AND material_group IS NULL;
+  IF leftover IS NOT NULL THEN
+    RAISE EXCEPTION '자재군을 정하지 못한 수입 검사항목이 있다: % — 이 리비전의 _FIRST_GROUP 에 더해야 한다', leftover;
+  END IF;
+END $$;
 """
 
-# 자재군이 서기 전의 수입 기준 여덟. 되돌릴 때 쓴다.
-_INCOMING_STANDARDS_BEFORE = """
-  ('PROCESS','수입','INSP_ITEM','입도',   50.0::double precision,   10.0::double precision,   30.0::double precision, 0.70::double precision, NULL::double precision, '미정', FALSE, 'µm'),
-  ('PROCESS','수입','INSP_ITEM','수분',    0.50,  NULL,    0.20, 0.70, NULL, '미정', TRUE,  '%'),
-  ('PROCESS','수입','INSP_ITEM','점도', 4000.0, 2000.0, 3000.0, 0.70, NULL, '미정', TRUE,  'cP'),
-  ('PROCESS','수입','INSP_ITEM','두께',  105.0,   95.0,  100.0, 0.70, NULL, '미정', FALSE, 'µm'),
-  ('PROCESS','수입','INSP_ITEM','색차',    1.00,  NULL,    0.30, 0.70, NULL, '미정', TRUE,  'ΔE'),
-  ('PROCESS','수입','INSP_ITEM','이물',   NULL,   NULL,   NULL, 0.70, NULL, '미정', FALSE, NULL),
-  ('PROCESS','수입','INSP_ITEM','포장',   NULL,   NULL,   NULL, 0.70, NULL, '미정', TRUE,  NULL),
-  ('PROCESS','수입','INSP_ITEM','성적서', NULL,   NULL,   NULL, 0.70, NULL, '미정', FALSE, NULL)
-"""
+_STANDARD_VALUE_COLUMNS = (
+    "upper_spec_limit, lower_spec_limit, center_line, warning_ratio,"
+    " sigma, sigma_source, time_variant, unit"
+)
 
 
 def upgrade() -> None:
@@ -159,17 +169,31 @@ def upgrade() -> None:
         f" FROM (VALUES {_ITEM_GROUPS}) AS m(code, grp)"
         " WHERE items.code = m.code"
     )
-    # 옛 여덟 줄은 자재군을 가질 수 없다 — 셋으로 갈려야 뜻이 생긴다. 지우고 다시 심는다.
-    op.execute("DELETE FROM process_inspection_standards WHERE process_code = '수입'")
+    # 옛 줄을 **옮긴다.** 지우지 않으므로 그 줄에 들어 있던 값이 따라간다.
+    op.execute(
+        "UPDATE process_inspection_standards s SET material_group = m.grp"
+        f" FROM (VALUES {_FIRST_GROUP}) AS m(item, grp)"
+        " WHERE s.process_code = '수입' AND s.item_code = m.item"
+    )
+    # 두 무리 이상에 걸치는 항목만 **그 줄을 베껴** 나머지 무리에 세운다.
+    #
+    # **규격은 따라가고 σ 는 따라가지 않는다.** 규격 상·하한과 중심선은 고객이
+    # 정하는 것이라 같은 항목이면 무리가 달라도 그대로 쓸 수 있다. σ 는 **잰
+    # 값**이고 새 무리에서는 잰 적이 없다 — 베껴 오면 재지 않은 것을 쟀다고
+    # 적는 것이 된다. 그래서 「미정」으로 세운다(σ 와 출처를 묶는 양방향 CHECK
+    # 가 그 짝을 지킨다).
     op.execute(
         "INSERT INTO process_inspection_standards"
-        " (process_group, process_code, item_group, item_code, material_group, material_group_group,"
-        "  upper_spec_limit, lower_spec_limit, center_line, warning_ratio, sigma, sigma_source, time_variant, unit)"
-        f" SELECT v.* FROM (VALUES {_INCOMING_STANDARDS}) AS v"
-        " (process_group, process_code, item_group, item_code, material_group, material_group_group,"
-        "  upper_spec_limit, lower_spec_limit, center_line, warning_ratio, sigma, sigma_source, time_variant, unit)"
-        f" {_ALREADY_SEEDED}"
+        " (process_group, process_code, item_group, item_code, material_group,"
+        f"  material_group_group, {_STANDARD_VALUE_COLUMNS})"
+        " SELECT s.process_group, s.process_code, s.item_group, s.item_code, m.grp,"
+        "        s.material_group_group, s.upper_spec_limit, s.lower_spec_limit, s.center_line,"
+        "        s.warning_ratio, NULL, '미정', s.time_variant, s.unit"
+        "   FROM process_inspection_standards s"
+        f"   JOIN (VALUES {_EXTRA_GROUPS}) AS m(item, grp) ON s.item_code = m.item"
+        "  WHERE s.process_code = '수입' AND s.material_group IS NOT NULL"
     )
+    op.execute(_STOP_IF_ANYTHING_WAS_LEFT_BEHIND)
 
     # ── 데이터가 자리를 잡은 뒤에 규칙을 건다 ───────────────────────────────
     # 순서가 뒤집히면 옛 줄이 새 CHECK 에 걸려 마이그레이션이 멈춘다.
@@ -200,17 +224,17 @@ def downgrade() -> None:
     op.drop_constraint("uq_inspection_standard", "process_inspection_standards", type_="unique")
     op.drop_constraint("ck_item_material_group_matches_type", "items", type_="check")
 
-    # 열여섯 줄을 그냥 두면 자재군을 뺀 순간 (공정 × 검사항목)이 겹쳐 옛 기본키가
-    # 서지 못한다 — 수분과 색차가 두 무리에 걸쳐 있기 때문이다. 지우고 옛 여덟을 심는다.
-    op.execute("DELETE FROM process_inspection_standards WHERE process_code = '수입'")
+    # **베낀 줄만 지운다.** 항목마다 가장 먼저 선 줄 하나를 남기는데, 그것이 옮겨
+    # 쓴 옛 줄이다 — 사람이 고친 값이 거기 있다. 남기지 않고 전부 지운 뒤 기본값을
+    # 다시 심으면 되돌리기가 그 값을 잃는다.
     op.execute(
-        "INSERT INTO process_inspection_standards"
-        " (process_group, process_code, item_group, item_code,"
-        "  upper_spec_limit, lower_spec_limit, center_line, warning_ratio, sigma, sigma_source, time_variant, unit)"
-        f" SELECT v.* FROM (VALUES {_INCOMING_STANDARDS_BEFORE}) AS v"
-        " (process_group, process_code, item_group, item_code,"
-        "  upper_spec_limit, lower_spec_limit, center_line, warning_ratio, sigma, sigma_source, time_variant, unit)"
-        f" {_ALREADY_SEEDED}"
+        "DELETE FROM process_inspection_standards s"
+        " WHERE s.process_code = '수입'"
+        "   AND s.id <> (SELECT min(t.id) FROM process_inspection_standards t"
+        "                 WHERE t.process_code = '수입' AND t.item_code = s.item_code)"
+    )
+    op.execute(
+        "UPDATE process_inspection_standards SET material_group = NULL WHERE process_code = '수입'"
     )
 
     op.execute(
@@ -239,8 +263,17 @@ def downgrade() -> None:
     op.drop_column("items", "material_group_group")
     op.drop_column("items", "material_group")
 
-    # **코드는 맨 마지막에 지운다.** 품목과 기준이 아직 가리키고 있을 때 지우면
-    # 외래키가 막는다 — 실제로 여기서 한 번 막혔다. 가리키는 칸을 먼저 걷어낸
-    # 뒤라야 가리켜지던 줄을 지울 수 있다.
-    op.execute("DELETE FROM common_codes WHERE group_code = 'MATERIAL_GROUP'")
-    op.execute("DELETE FROM code_groups WHERE group_code = 'MATERIAL_GROUP'")
+    # **코드는 맨 마지막에, 심은 셋만 지운다.**
+    #
+    # 가리키는 칸을 먼저 걷어내야 지울 수 있다 — 순서를 바꾸면 외래키가 막는다.
+    # 그리고 자재군은 「값이 늘 수 있는 그룹」이므로 올린 뒤에 넷째 무리가 늘었을
+    # 수 있다. 그룹째 지우면 사람이 넣은 사실이 함께 사라지므로, 이 리비전이 심은
+    # 셋만 지우고 그룹은 **남은 값이 없을 때만** 지운다.
+    op.execute(
+        "DELETE FROM common_codes WHERE group_code = 'MATERIAL_GROUP'"
+        " AND code IN ('분체', '액상수지', '시트필름')"
+    )
+    op.execute(
+        "DELETE FROM code_groups WHERE group_code = 'MATERIAL_GROUP'"
+        " AND NOT EXISTS (SELECT 1 FROM common_codes WHERE group_code = 'MATERIAL_GROUP')"
+    )
