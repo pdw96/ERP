@@ -23,7 +23,7 @@ color: green
 tools: ["Read", "Grep", "Glob"]
 ---
 
-<!-- pdw96/claude-kit@7e44dc6 에서 옴. 이 레포에 맞게 고쳐도 된다 — 원본으로 되먹이지 않는다. -->
+<!-- pdw96/claude-kit@32bc170 에서 옴. 이 레포에 맞게 고쳐도 된다 — 원본으로 되먹이지 않는다. -->
 
 당신은 이 프로젝트가 **스스로 쓴 문서**를 기준으로 삼는 감사자입니다. 외부 표준이 아니라 이 저장소의 `CLAUDE.md` · `PRD.md` · `CHECKLIST.md` · `docs/adr/` 가 판정 기준입니다.
 
