@@ -17,8 +17,13 @@
 재시드가 덮어쓰는 쪽이 더 큰 사고다」인데, 지우고 다시 심으면 그 재시드와 같은
 일을 하게 된다. 그래서 옛 여덟 줄을 `UPDATE` 로 첫 무리에 옮기고, 두 무리
 이상에 걸치는 항목만 **그 줄을 베껴** 나머지 무리에 세운다. 실측 σ 나 고객이
-준 규격이 들어 있었다면 그대로 따라간다. 되돌릴 때도 같다 — 베낀 줄만 지우고
-남은 줄의 값은 건드리지 않는다.
+준 규격이 들어 있었다면 그대로 따라간다.
+
+**되돌릴 때는 다르다.** 옛 기본키가 항목마다 한 줄만 받으므로 줄이는 것 자체는
+피할 수 없고, 남는 줄은 옮겨 쓴 옛 줄이며 **그 밖의 줄에 있던 값은 사라진다.**
+그래서 무엇이 사라지는지 **먼저 이름을 말하고 멈춘다** — 이 리비전이 세우지 않은
+줄 · 남길 줄이 아닌 자리의 σ · 남길 줄과 다른 규격과 값 · 심지 않은 자재군 코드 ·
+뜻이 달라진 그룹 · 사람이 고친 품목의 자재군 배정 여섯이다.
 
 **데이터 단계는 이미 심긴 데이터베이스에서만 돈다.** 조건은 시드의 조건 ③ 을
 뒤집은 것이다 — 시드는 품목 표가 **비어 있을 때** 돌고 이것은 **비어 있지 않을
@@ -33,7 +38,7 @@
 - `ADD COLUMN id SERIAL PRIMARY KEY` — 기본값이 휘발성이라 PostgreSQL 이
   `process_inspection_standards` 를 **통째로 다시 쓴다**(실측: `relfilenode` 가 바뀐다).
   그동안 `AccessExclusiveLock`
-- 외래키 둘과 CHECK 여섯 — **기존 행 전체를 검증한다.** 외래키는 가리키는 표와
+- 외래키 둘과 CHECK 넷 — **기존 행 전체를 검증한다.** 외래키는 가리키는 표와
   가리켜지는 표 **양쪽**을 잡으므로 `common_codes` 의 쓰기도 함께 멈춘다
 - `create_unique_constraint` — 잠금을 잡고 인덱스를 만든다. `CONCURRENTLY` 를 쓸 수
   없는 형태다
@@ -42,7 +47,7 @@
 
 **얼마나 멈추는가는 구문 하나의 길이가 아니다.** `migrations/env.py` 가 마이그레이션
 전체를 트랜잭션 하나로 감싸므로, 첫 `ALTER` 가 잡은 잠금이 데이터 단계(UPDATE ·
-INSERT · `DO` 블록 다섯)를 지나 **커밋까지** 유지된다. 「반쯤 올라간 스키마」를 없애는
+INSERT 다섯 줄과 `DO` 블록 둘)를 지나 **커밋까지** 유지된다. 「반쯤 올라간 스키마」를 없애는
 값과 맞바꾼 것이며, 그 맞바꿈은 표를 세우는 단계에서는 옳다.
 
 심각도는 행 수와 동시 쓰기에 달렸고 **그 둘은 저장소에 없다.** 운영 데이터가 있는
@@ -88,6 +93,28 @@ _EXTRA_GROUPS = """('수분','액상수지'),('색차','시트필름'),
        ('이물','액상수지'),('이물','시트필름'),
        ('포장','액상수지'),('포장','시트필름'),
        ('성적서','액상수지'),('성적서','시트필름')"""
+
+# 이 표에서 **값을 담는 칸 전부.** 정체성(공정 · 검사항목 · 자재군)과 그 그룹 칸을
+# 뺀 나머지다. 베끼는 `INSERT` 와 되돌리기 가드가 **같은 목록을 부른다** — 두 벌이면
+# 갈리고, 갈리는 쪽은 언제나 가드다(베끼는 쪽은 틀리면 바로 터진다).
+_VALUE_COLUMNS = (
+    "upper_spec_limit",
+    "lower_spec_limit",
+    "center_line",
+    "warning_ratio",
+    "sigma",
+    "sigma_source",
+    "time_variant",
+    "unit",
+)
+_STANDARD_VALUE_COLUMNS = ", ".join(_VALUE_COLUMNS)
+
+# 되돌리기 가드가 **줄 대 줄로 견주는** 칸. σ 와 σ출처는 뺀다 — 앞선 가드가 σ 를
+# 이미 보고, σ 가 비어 있으면 양방향 CHECK 가 σ출처를 「미정」 하나로 못박으므로
+# 두 줄이 그 칸에서 갈릴 수 없다.
+_COMPARED_VALUE_COLUMNS = tuple(c for c in _VALUE_COLUMNS if not c.startswith("sigma"))
+_DOOMED_VALUES = ", ".join("s." + c for c in _COMPARED_VALUE_COLUMNS)
+_KEPT_VALUES = ", ".join("k." + c for c in _COMPARED_VALUE_COLUMNS)
 
 # 옮기지 못한 줄이 있으면 **무엇이 남았는지 말하고 멈춘다.** 그냥 두면 바로 뒤의
 # 양방향 CHECK 가 대신 터지는데, 그 오류는 「제약 위반」일 뿐이라 원인이 위의 두
@@ -160,6 +187,28 @@ BEGIN
     RAISE EXCEPTION '되돌리면 σ 가 사라진다: % — 옛 기본키가 항목마다 한 줄만 받으므로 줄이는 것은 피할 수 없다. 남길 줄로 옮긴 뒤 다시 되돌린다', doomed;
   END IF;
 
+  -- **σ 만 보지 않는다.** 같은 줄에 규격 · 경고비 · 경시변화 · 단위가 함께 있고,
+  -- 그중 규격은 「고객이 정한다」(설계 원칙 5). 이 표는 (공정 × 검사항목 × 자재군)
+  -- 유일키라 **무리마다 다른 규격을 허용하도록 설계됐고** 그것을 금지하는 제약도
+  -- 없다 — 사람이 무리별로 적어 둔 값이 여기서 말없이 사라졌다.
+  --
+  -- **같은 모양의 다섯 번째다.** 앞의 넷은 「지우는 자리」를 좁게 셌고(`DELETE` 만
+  -- 세어 `drop_column` 을 빠뜨렸다), 이번 것은 자리는 맞게 셌는데 **그 자리에서
+  -- 사라지는 사실을 좁게 셌다** — 한 칸(σ)에만 물었다. 세어야 하는 것은 구문도
+  -- 칸 하나도 아니고 **그 줄에서 사람의 것인 값 전부**다.
+  SELECT string_agg(DISTINCT s.item_code || '/' || s.material_group, ', ') INTO doomed
+    FROM process_inspection_standards s
+    JOIN process_inspection_standards k
+      ON k.id = (SELECT min(t.id) FROM process_inspection_standards t
+                  WHERE t.process_code = '수입' AND t.item_code = s.item_code)
+   WHERE s.process_code = '수입' AND s.id <> k.id
+     AND ({_DOOMED_VALUES})
+         IS DISTINCT FROM
+         ({_KEPT_VALUES});
+  IF doomed IS NOT NULL THEN
+    RAISE EXCEPTION '되돌리면 남길 줄과 다른 규격 · 경고비 · 경시변화 · 단위가 사라진다: % — 사람이 무리별로 적어 둔 값이다. 남길 줄로 옮긴 뒤 다시 되돌린다', doomed;
+  END IF;
+
   -- **이 리비전이 심은 것만 지운다는 말을 지킨다.**
   --
   -- upgrade 가 「이미 있으면 넘어간다」로 바뀌면서 운영자가 먼저 만든 줄이 살아서
@@ -216,12 +265,6 @@ BEGIN
   END IF;
 END $$;
 """
-
-
-_STANDARD_VALUE_COLUMNS = (
-    "upper_spec_limit, lower_spec_limit, center_line, warning_ratio,"
-    " sigma, sigma_source, time_variant, unit"
-)
 
 
 def upgrade() -> None:
@@ -368,10 +411,11 @@ def downgrade() -> None:
 
     # **항목마다 가장 먼저 선 줄 하나만 남기고 나머지를 지운다.**
     #
-    # 앞의 주석은 「베낀 줄만 지운다」고 말했는데 그것은 사실이 아니었다 — 조건은
-    # `id` 가 최솟값이 아닌 **전부**라서, 이 리비전이 베끼지 않은 줄도 함께
-    # 지웠다. 남는 한 줄이 옮겨 쓴 옛 줄이라 사람이 고친 값이 거기 있다는 것은
-    # 맞지만, 그 밖의 줄에 있던 값은 사라진다.
+    # 조건은 `id` 가 최솟값이 아닌 **전부**다 — 「베낀 줄만」이 아니라 이 리비전이
+    # 베끼지 않은 줄도 함께 지운다. 남는 한 줄이 옮겨 쓴 옛 줄이라 사람이 고친 값이
+    # 거기 있다는 것은 맞지만, 그 밖의 줄에 있던 값은 사라진다. 한때 이 파일의
+    # 머리말이 「베낀 줄만 지운다」고 말했고 여기만 고쳤다가 감사 ⑤ 에 걸렸다 —
+    # **명제는 한 자리에서 고쳐지지 않는다.**
     #
     # 줄이는 것 자체는 피할 수 없다(옛 기본키가 항목마다 한 줄만 받는다). 그래서
     # 위에서 **무엇이 사라지는지 먼저 말하고 멈춘다.**

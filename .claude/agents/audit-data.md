@@ -89,19 +89,38 @@ LLM 을 품은 제품이면 한 항목을 더 봅니다.
 행 수와 동시 쓰기에 달렸고 그것은 저장소에 없다. 무엇을 하는가는 **구문만 읽고
 판정된다** — 이 다섯은 세 도구로 잰다.
 
-| 무엇을 보는가 | 어떤 구문이 걸리는가 |
-|---|---|
-| 표를 다시 쓰는가 | `ADD COLUMN ... SERIAL` · `GENERATED` · 휘발성 기본값, `ALTER COLUMN ... TYPE` |
-| 기존 행 **전체를 검증**하는가 | `ADD CONSTRAINT ... CHECK`, `SET NOT NULL`, 외래키 추가 |
-| 잠금을 잡고 인덱스를 만드는가 | `ADD CONSTRAINT ... UNIQUE` · `PRIMARY KEY`, `CONCURRENTLY` 없는 `CREATE INDEX` |
-| 그 사실이 **리비전에 적혀** 있는가 | 배포처가 생긴 뒤 이 자리는 다운타임이다. 안 적혀 있으면 배포하는 사람이 모르고 지나간다 |
-| 피할 수 있는 형태가 있는가 | `NOT VALID` + 뒤이은 `VALIDATE CONSTRAINT`, `CREATE INDEX CONCURRENTLY`, 기본값을 나중에 붙이는 단계적 백필 |
+**원시 SQL 만 찾으면 아무것도 안 나온다.** 마이그레이션 도구는 대개 파이썬 API 로
+같은 DDL 을 낸다 — 실제로 이 저장소에서 `ADD CONSTRAINT ... CHECK` 는 **0 건**이고
+`op.create_check_constraint` 는 넷이다. 둘 다 찾는다.
 
-앞 셋 중 하나라도 해당하면 **그 자리는 잰 것이다.** 남은 것은 심각도뿐이고,
+| 무엇을 보는가 | 원시 SQL | 파이썬 API (Alembic) |
+|---|---|---|
+| 표를 다시 쓰는가 | `ADD COLUMN ... SERIAL` · `GENERATED` · 휘발성 기본값, `ALTER COLUMN ... TYPE` | `op.add_column(... Identity/server_default=...)`, `op.alter_column(type_=...)` |
+| 기존 행 **전체를 검증**하는가 | `ADD CONSTRAINT ... CHECK`, `SET NOT NULL`, 외래키 추가 | `op.create_check_constraint`, `op.create_foreign_key`, `op.alter_column(nullable=False)` |
+| 잠금을 잡고 인덱스를 만드는가 | `ADD CONSTRAINT ... UNIQUE` · `PRIMARY KEY`, `CONCURRENTLY` 없는 `CREATE INDEX` | `op.create_unique_constraint`, `op.create_primary_key`, `op.create_index`(`postgresql_concurrently` 없이) |
+| 그 사실이 **리비전에 적혀** 있는가 | 배포처가 생긴 뒤 이 자리는 다운타임이다. 안 적혀 있으면 배포하는 사람이 모르고 지나간다 | 독스트링을 읽는다 |
+| 피할 수 있는 형태가 있는가 | `NOT VALID` + 뒤이은 `VALIDATE CONSTRAINT`, `CREATE INDEX CONCURRENTLY`, 기본값을 나중에 붙이는 단계적 백필 | 같다 |
+| **잠금이 언제 풀리는가** | — | 리비전 끝인가 마이그레이션 끝인가. `env.py` 가 전체를 트랜잭션 하나로 감싸면(`transaction_per_migration` 없이) 첫 `ALTER` 의 잠금이 데이터 단계를 지나 **커밋까지** 유지된다 |
+
+여섯째 눈이 다섯과 다른 이유는, 앞 다섯이 **구문 하나**를 보는데 이것은 그 구문들이
+**어디에 담겨 있는가**를 보기 때문이다. 이 저장소에서 가장 크게 작용하는 사실이
+그것인데 앞 다섯으로는 나오지 않았다.
+
+**판정 규칙 — 적합으로 가는 길이 있다.**
+
+앞 셋(또는 여섯째) 중 하나라도 해당하면 **그 자리는 잰 것이다.** 거기서 갈린다 —
+
+| 상태 | 판정 |
+|---|---|
+| 해당하는데 **넷째(리비전에 적혀 있는가)가 없다** | **부적합.** 고칠 수 있고, 고치는 것은 적는 것이다 |
+| 해당하고 넷째가 있다 | **적합 + 심각도 확인불가.** 다섯째(피할 형태)는 적합을 바꾸지 않고 정보를 더한다 |
+| 어느 것에도 해당하지 않는다 | 적합 |
+
 심각도는 트래픽과 행 수에 달렸으므로 대개 지금은 잴 수 없다. 그때는
 「판정은 넷이다」의 규칙대로 **전제를 먼저 적고 확인불가**로 둔다 — 「운영 데이터도
 배포처도 없음을 전제하면 낮음, 그 전제가 깨지면 이 구문은 표 전체를 잠근다」처럼.
-**「못 재니까 적합」은 없다.**
+**「못 재니까 적합」은 없다.** 그리고 **「적을 수 없으니 영원히 부적합」도 없다** —
+적으면 닫힌다.
 
 되돌릴 때도 같은 것을 본다. downgrade 의 DDL 도 잠근다.
 

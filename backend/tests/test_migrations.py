@@ -886,6 +886,67 @@ def test_downgrade_says_when_an_arbitrary_sigma_would_vanish(engine: Engine) -> 
             command.downgrade(config, "3c602ffaebc3")
 
 
+def test_downgrade_says_when_a_group_specific_spec_would_vanish(engine: Engine) -> None:
+    """**σ 만이 아니라 그 줄의 값 전부를 본다.**
+
+    가드가 σ 하나만 보던 시절, 사람이 무리별로 적어 둔 규격은 되돌리기에서 아무
+    말 없이 사라졌다. 이 표는 `(공정 × 검사항목 × 자재군)` 유일키라 **무리마다
+    다른 규격을 허용하도록 설계됐고**, 규격은 「고객이 정한다」(설계 원칙 5).
+
+    같은 모양의 다섯 번째였다 — 앞의 넷은 「지우는 자리」를 좁게 셌고 이것은 그
+    자리에서 **사라지는 사실**을 좁게 셌다.
+    """
+    for label, column, value in (
+        ("usl", "upper_spec_limit", "0.31"),
+        ("warn", "warning_ratio", "0.5"),
+        ("tv", "time_variant", "NOT time_variant"),
+        ("unit", "unit", "'ppm'"),
+    ):
+        with _schema(engine, f"down_spec_{label}"):
+            config, scoped = _plant_old_shape(engine, f"down_spec_{label}")
+            command.upgrade(config, "head")
+
+            # 베낀 줄(수분/액상수지)에만 고친 값을 넣는다. 남는 줄은 수분/분체다.
+            with scoped.begin() as conn:
+                conn.execute(
+                    text(
+                        f"UPDATE process_inspection_standards SET {column} = {value}"
+                        " WHERE process_code = '수입' AND item_code = '수분'"
+                        "   AND material_group = '액상수지'"
+                    )
+                )
+
+            with pytest.raises(Exception, match="수분/액상수지"):
+                command.downgrade(config, "3c602ffaebc3")
+
+
+def test_downgrade_says_when_the_group_someone_changed_would_vanish(engine: Engine) -> None:
+    """**그룹 가드도 검사가 지킨다.**
+
+    되돌리기 가드 다섯 중 이것 하나만 검사가 없었다 — 통째로 무력화해도 전부
+    초록이었다. 죽은 코드가 아니라 **검사되지 않는** 코드였고, 「닫힌 부적합이
+    검사 없이 닫혀 있으면 조용히 다시 열린다」가 NC-18 이 이미 낸 진단이다.
+    """
+    for label, column, value in (
+        ("name", "name", "'자재 무리'"),
+        ("desc", "description", "'운영자가 고쳐 적었다'"),
+    ):
+        with _schema(engine, f"down_group_{label}"):
+            config, scoped = _plant_old_shape(engine, f"down_group_{label}")
+            command.upgrade(config, "head")
+
+            with scoped.begin() as conn:
+                conn.execute(
+                    text(
+                        f"UPDATE code_groups SET {column} = {value}"
+                        " WHERE group_code = 'MATERIAL_GROUP'"
+                    )
+                )
+
+            with pytest.raises(Exception, match="MATERIAL_GROUP"):
+                command.downgrade(config, "3c602ffaebc3")
+
+
 def test_the_guard_compares_more_than_the_name(engine: Engine) -> None:
     """가드는 이름만 보지 않는다 — **정렬 · 설명 · 활성까지** 본다.
 
