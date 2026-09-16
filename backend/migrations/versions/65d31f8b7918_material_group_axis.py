@@ -84,6 +84,14 @@ BEGIN
 END $$;
 """
 
+# 이 리비전이 심는 자재군 코드 셋. **넣는 쪽과 되돌릴 때 지키는 쪽이 같은 것을
+# 부른다** — 두 벌이면 갈리고, 갈리면 「심은 것만 지운다」가 거짓이 된다.
+_MATERIAL_GROUP_CODES = (
+    "('MATERIAL_GROUP','분체','분체',1,'입도와 수분을 본다'),"
+    " ('MATERIAL_GROUP','액상수지','액상 · 수지',2,'점도와 색차를 본다'),"
+    " ('MATERIAL_GROUP','시트필름','시트 · 필름',3,'두께와 색차를 본다')"
+)
+
 # **되돌리기가 조용히 지우지 못하게 막는다.**
 #
 # 옛 기본키 `(공정, 검사항목)` 이 돌아오므로 항목마다 한 줄로 줄이는 것 **자체는
@@ -108,13 +116,39 @@ BEGIN
     RAISE EXCEPTION '되돌리면 이 리비전이 세우지 않은 수입 기준이 사라진다: % — 남이 더한 줄이다. 지울지 옮길지는 사람이 정한다', doomed;
   END IF;
 
+  -- **「실측」만 보지 않는다.** σ 출처는 미정 · 임의 · 실측 셋이고, 「임의」도 사람이
+  -- 넣은 값이다. 좁히면 그것이 다시 조용히 사라지므로 넓게 잡고 말을 맞춘다.
   SELECT string_agg(DISTINCT item_code || '/' || material_group, ', ') INTO doomed
     FROM process_inspection_standards s
    WHERE s.process_code = '수입' AND s.sigma IS NOT NULL
      AND s.id <> (SELECT min(t.id) FROM process_inspection_standards t
                    WHERE t.process_code = '수입' AND t.item_code = s.item_code);
   IF doomed IS NOT NULL THEN
-    RAISE EXCEPTION '되돌리면 실측 σ 가 사라진다: % — 옛 기본키가 항목마다 한 줄만 받으므로 줄이는 것은 피할 수 없다. 남길 줄로 옮긴 뒤 다시 되돌린다', doomed;
+    RAISE EXCEPTION '되돌리면 σ 가 사라진다: % — 옛 기본키가 항목마다 한 줄만 받으므로 줄이는 것은 피할 수 없다. 남길 줄로 옮긴 뒤 다시 되돌린다', doomed;
+  END IF;
+
+  -- **이 리비전이 심은 것만 지운다는 말을 지킨다.**
+  --
+  -- upgrade 가 「이미 있으면 넘어간다」로 바뀌면서 운영자가 먼저 만든 줄이 살아서
+  -- 건너오게 됐다. 그런데 downgrade 는 이름으로 셋을 지우므로 **심지 않은 것까지**
+  -- 지운다 — 고침 하나가 한 표 옆에 같은 자리를 새로 연 것이다.
+  SELECT string_agg(DISTINCT c.code, ', ') INTO doomed
+    FROM common_codes c
+    JOIN (VALUES {_MATERIAL_GROUP_CODES}) AS v(group_code, code, name, sort_order, description)
+      ON c.group_code = v.group_code AND c.code = v.code
+   WHERE (c.name, c.sort_order, c.description, c.is_active)
+         IS DISTINCT FROM (v.name, v.sort_order, v.description, TRUE);
+  IF doomed IS NOT NULL THEN
+    RAISE EXCEPTION '되돌리면 이 리비전이 심지 않은 자재군 코드가 사라진다: % — 사람이 먼저 만들었거나 고친 줄이다. 지울지는 사람이 정한다', doomed;
+  END IF;
+
+  IF EXISTS (
+    SELECT 1 FROM code_groups
+     WHERE group_code = 'MATERIAL_GROUP'
+       AND (name, value_fixed, description)
+           IS DISTINCT FROM ('자재군', FALSE, '수입 검사 기준이 걸리는 축이다.')
+  ) THEN
+    RAISE EXCEPTION 'MATERIAL_GROUP 그룹이 이 리비전이 심은 것과 다르다 — 되돌리면 사람이 적은 것이 사라진다. 지울지는 사람이 정한다';
   END IF;
 END $$;
 """
@@ -213,9 +247,7 @@ def upgrade() -> None:
     op.execute(
         "INSERT INTO common_codes (group_code, code, name, sort_order, description)"
         " SELECT v.group_code, v.code, v.name, v.sort_order, v.description FROM (VALUES"
-        " ('MATERIAL_GROUP','분체','분체',1,'입도와 수분을 본다'),"
-        " ('MATERIAL_GROUP','액상수지','액상 · 수지',2,'점도와 색차를 본다'),"
-        " ('MATERIAL_GROUP','시트필름','시트 · 필름',3,'두께와 색차를 본다')"
+        f" {_MATERIAL_GROUP_CODES}"
         " ) AS v(group_code, code, name, sort_order, description)"
         f" {_ALREADY_SEEDED}"
         "   AND NOT EXISTS (SELECT 1 FROM common_codes c"
@@ -334,6 +366,10 @@ def downgrade() -> None:
     # 그리고 자재군은 「값이 늘 수 있는 그룹」이므로 올린 뒤에 넷째 무리가 늘었을
     # 수 있다. 그룹째 지우면 사람이 넣은 사실이 함께 사라지므로, 이 리비전이 심은
     # 셋만 지우고 그룹은 **남은 값이 없을 때만** 지운다.
+    #
+    # 「심은 셋」인지는 위의 멈춤 검사가 지킨다 — 이름이 같아도 값이 다르면 남이
+    # 만든 줄이므로 거기서 멈춘다. 그 검사가 없으면 이 `DELETE` 는 이름만 보고
+    # 남의 것을 지운다.
     op.execute(
         "DELETE FROM common_codes WHERE group_code = 'MATERIAL_GROUP'"
         " AND code IN ('분체', '액상수지', '시트필름')"

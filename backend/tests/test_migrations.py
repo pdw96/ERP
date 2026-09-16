@@ -194,9 +194,12 @@ def test_the_migration_builds_the_same_tables_as_the_models(engine: Engine) -> N
     """**마이그레이션으로 만든 표와 모델로 만든 표가 같아야 한다.**
 
     자동 생성이 CHECK 식을 문자열로 구워 박으므로 둘은 조용히 갈릴 수 있다 —
-    모델을 고치고 리비전을 내지 않거나, 마이그레이션을 손으로 손보거나, 긴 식을
-    읽기 좋게 줄바꿈하는 것만으로도. 갈린 쪽은 규칙을 잃고, 잃은 줄 아무도
-    모른다.
+    모델을 고치고 리비전을 내지 않거나, 마이그레이션을 손으로 손보면서 **식의 뜻을
+    바꾸거나.** 갈린 쪽은 규칙을 잃고, 잃은 줄 아무도 모른다.
+
+    **줄바꿈만으로는 갈리지 않는다.** 예전에 여기 그렇게 적혀 있었으나 사실이
+    아니다 — `pg_get_constraintdef` 가 정규화하므로 공백은 비교 전에 사라진다.
+    위의 모듈 독스트링과 `_constraints()` 가 같은 것을 말한다.
 
     그래서 두 스키마를 실제로 만들어 **데이터베이스가 강제하는 정의**를
     견준다.
@@ -413,6 +416,29 @@ def _incoming_standards(engine: Engine) -> set[tuple[object, ...]]:
     return {tuple(row) for row in rows}
 
 
+def _material_group_codes(engine: Engine) -> set[tuple[object, ...]]:
+    """자재군 그룹과 그 코드 셋 — **이름 · 정렬 · 설명까지.**
+
+    코드가 **존재하는지**는 외래키가 지키지만 그 코드가 **무엇이라고 불리는지**는
+    아무도 보지 않았다. 마이그레이션과 시드가 각각 적는 자리라, 한쪽만 고치면
+    이미 심긴 DB 와 새로 심은 DB 가 같은 주소를 다른 이름으로 보여 준다.
+    """
+    with engine.connect() as conn:
+        group = conn.execute(
+            text(
+                "SELECT name, value_fixed, description FROM code_groups"
+                " WHERE group_code = 'MATERIAL_GROUP'"
+            )
+        ).all()
+        codes = conn.execute(
+            text(
+                "SELECT code, name, sort_order, description, is_active FROM common_codes"
+                " WHERE group_code = 'MATERIAL_GROUP'"
+            )
+        ).all()
+    return {("그룹", *row) for row in group} | {("코드", *row) for row in codes}
+
+
 def _upgrade_over_the_old_seed(engine: Engine, schema: str) -> Engine:
     """옛 리비전까지 올리고 **옛 모양으로 심은 뒤** `head` 로 올린다."""
     config = _config_for_schema(engine, schema)
@@ -438,9 +464,13 @@ def test_both_roads_reach_the_same_material_groups(
     반드시 갈리므로, 갈리는 순간을 여기서 잡는다 — 한쪽만 고치면 빈 데이터베이스와
     이미 심긴 데이터베이스가 서로 다른 기준을 갖게 되고, 갈린 줄 아무도 모른다.
 
-    **배정과 값을 함께 견준다.** 마이그레이션이 옛 줄을 지우지 않고 옮기므로 두
-    길의 값도 같아야 한다 — 그리고 그 덕에 「옛 DB」 픽스처가 진짜 옛 DB 와 같은지도
-    여기서 지켜진다.
+    **배정과 값, 그리고 코드의 이름까지 견준다.** 마이그레이션이 옛 줄을 지우지 않고
+    옮기므로 두 길의 값도 같아야 한다 — 그리고 그 덕에 「옛 DB」 픽스처가 진짜 옛 DB
+    와 같은지도 여기서 지켜진다.
+
+    자재군 코드의 **이름 · 정렬 · 설명**도 두 벌로 적혀 있다(마이그레이션과
+    `01_common_codes.sql`). 코드가 있는지는 외래키가 지키지만 무엇이라 불리는지는
+    아무도 보지 않아, 한쪽만 고치면 같은 주소가 두 이름을 갖는다.
     """
     monkeypatch.setenv("ERP_SEED_ENABLED", "true")
     with _schema(engine, "road_seed"), _schema(engine, "road_migration"):
@@ -454,6 +484,7 @@ def test_both_roads_reach_the_same_material_groups(
 
         assert _material_groups(migrated) == _material_groups(seeded)
         assert _incoming_standards(migrated) == _incoming_standards(seeded)
+        assert _material_group_codes(migrated) == _material_group_codes(seeded)
 
 
 def test_the_data_step_moves_the_old_rows_instead_of_replacing_them(engine: Engine) -> None:
@@ -701,4 +732,39 @@ def test_downgrade_says_when_a_measured_sigma_would_vanish(engine: Engine) -> No
             )
 
         with pytest.raises(Exception, match="수분/액상수지"):
+            command.downgrade(config, "3c602ffaebc3")
+
+
+def test_downgrade_says_when_a_code_someone_else_made_would_vanish(engine: Engine) -> None:
+    """**올릴 때 넘어간 남의 줄을 되돌릴 때 지우지 않는다.**
+
+    「이미 있으면 넘어간다」를 넣으면서 운영자가 먼저 만든 줄이 살아서 upgrade 를
+    건너오게 됐는데, downgrade 는 이름으로 셋을 지우므로 **심지 않은 것까지**
+    지웠다 — 고침 하나가 한 표 옆에 같은 자리를 새로 연 것이다.
+    """
+    with _schema(engine, "down_others_code"):
+        config, scoped = _plant_old_shape(
+            engine,
+            "down_others_code",
+            extra=(
+                ";INSERT INTO code_groups (group_code, name, value_fixed, description)"
+                " VALUES ('MATERIAL_GROUP','자재군',FALSE,'수입 검사 기준이 걸리는 축이다.');"
+                "INSERT INTO common_codes (group_code, code, name, sort_order, description)"
+                " VALUES ('MATERIAL_GROUP','분체','운영자가 붙인 이름',1,'운영자가 적었다')"
+            ),
+        )
+        command.upgrade(config, "head")
+
+        # 올릴 때는 넘어간다 — 운영자의 이름이 그대로 남아 있어야 한다.
+        with scoped.connect() as conn:
+            kept = conn.execute(
+                text(
+                    "SELECT name FROM common_codes"
+                    " WHERE group_code = 'MATERIAL_GROUP' AND code = '분체'"
+                )
+            ).scalar_one()
+        assert kept == "운영자가 붙인 이름"
+
+        # 되돌릴 때는 그것을 지우려 하므로 이름을 말하고 멈춘다.
+        with pytest.raises(Exception, match="분체"):
             command.downgrade(config, "3c602ffaebc3")
