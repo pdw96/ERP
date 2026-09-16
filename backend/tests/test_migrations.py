@@ -768,3 +768,146 @@ def test_downgrade_says_when_a_code_someone_else_made_would_vanish(engine: Engin
         # 되돌릴 때는 그것을 지우려 하므로 이름을 말하고 멈춘다.
         with pytest.raises(Exception, match="분체"):
             command.downgrade(config, "3c602ffaebc3")
+
+
+def test_downgrade_says_when_someone_changed_an_item_group(engine: Engine) -> None:
+    """**칸을 떨어뜨리는 것도 지우는 것이다.**
+
+    멈춤 검사가 `DELETE` 세 자리만 보고 `drop_column("items","material_group")` 을
+    지나쳤다. 사람이 `RM-12` 의 무리를 고쳐 두어도 되돌리기는 아무 말 없이 칸을
+    가져갔고, 다시 올리면 `_ITEM_GROUPS` 의 값이 **사람의 판단을 덮었다.**
+
+    하필 `RM-12` 는 대장이 「코드로 판정할 수 없다, 사람이 본다」로 적어 둔 품목이다
+    — 사람이 보고 고칠 것을 전제한 칸인데 그 고침이 남지 않았다.
+    """
+    with _schema(engine, "down_item_group"):
+        config, scoped = _plant_old_shape(engine, "down_item_group")
+        command.upgrade(config, "head")
+
+        with scoped.begin() as conn:
+            conn.execute(
+                text("UPDATE items SET material_group = '액상수지' WHERE code = 'RM-12'")
+            )
+
+        with pytest.raises(Exception, match="RM-12"):
+            command.downgrade(config, "3c602ffaebc3")
+
+        # 멈췄으면 사람이 고친 값이 그대로 있어야 한다 — 트랜잭션 하나이므로 롤백된다.
+        assert _material_groups(scoped)["RM-12"] == "액상수지"
+
+
+def test_downgrade_says_when_someone_added_a_raw_material(engine: Engine) -> None:
+    """이 리비전이 **모르는** 원자재의 배정도 사라진다 — 고친 것과 같이 본다."""
+    with _schema(engine, "down_new_item"):
+        config, scoped = _plant_old_shape(engine, "down_new_item")
+        command.upgrade(config, "head")
+
+        with scoped.begin() as conn:
+            conn.execute(
+                text(
+                    "INSERT INTO items (code, name, item_type, process, process_group,"
+                    " stock_uom, stock_uom_group, phase, safety_stock,"
+                    " material_group, material_group_group)"
+                    " VALUES ('RM-16','운영자가 더한 자재','원자재','수입','PROCESS',"
+                    " 'KG','UOM','양산',120,'분체','MATERIAL_GROUP')"
+                )
+            )
+
+        with pytest.raises(Exception, match="RM-16"):
+            command.downgrade(config, "3c602ffaebc3")
+
+
+def test_downgrade_keeps_a_code_someone_else_made(engine: Engine) -> None:
+    """**넷째 무리를 사람이 만들었으면 되돌린 뒤에도 남는다.**
+
+    NC-8 이 고친 자리인데 탐침으로만 확인됐지 검사로 굳지 않았다. 그래서 지우는
+    쪽의 목록에 `'금속'` 을 한 글자 더해도 — 즉 NC-8 을 그대로 되돌려도 — 아무
+    테스트가 물지 않았다. 기존 테스트는 기준 줄 가드가 **먼저** 터져 코드 `DELETE`
+    까지 닿지 않기 때문이다. 여기서는 코드만 더해 그 자리까지 실제로 내려간다.
+    """
+    with _schema(engine, "down_keeps_code"):
+        config, scoped = _plant_old_shape(engine, "down_keeps_code")
+        command.upgrade(config, "head")
+
+        with scoped.begin() as conn:
+            conn.execute(
+                text(
+                    "INSERT INTO common_codes (group_code, code, name, sort_order, description)"
+                    " VALUES ('MATERIAL_GROUP','금속','금속',4,'운영자가 만들었다')"
+                )
+            )
+
+        command.downgrade(config, "3c602ffaebc3")
+
+        # 심은 셋은 사라지고 남의 것은 남는다. 그룹도 남는다 — 값이 남아 있으므로.
+        with scoped.connect() as conn:
+            left = (
+                conn.execute(
+                    text("SELECT code FROM common_codes WHERE group_code = 'MATERIAL_GROUP'")
+                )
+                .scalars()
+                .all()
+            )
+            groups = (
+                conn.execute(
+                    text(
+                        "SELECT group_code FROM code_groups WHERE group_code = 'MATERIAL_GROUP'"
+                    )
+                )
+                .scalars()
+                .all()
+            )
+        assert list(left) == ["금속"]
+        assert list(groups) == ["MATERIAL_GROUP"]
+
+
+def test_downgrade_says_when_an_arbitrary_sigma_would_vanish(engine: Engine) -> None:
+    """**「임의」 σ 도 사람이 넣은 값이다.**
+
+    조건을 `sigma_source = '실측'` 으로 되좁혀도 아무 테스트가 실패하지 않았다 —
+    「임의」를 밟는 줄이 한 줄도 없었기 때문이다. 좁히면 운영자가 넣은 값이 다시
+    조용히 사라진다. 말을 넓혔으면 그 넓힘을 지키는 것이 있어야 한다.
+    """
+    with _schema(engine, "down_sigma_arbitrary"):
+        config, scoped = _plant_old_shape(engine, "down_sigma_arbitrary")
+        command.upgrade(config, "head")
+
+        with scoped.begin() as conn:
+            conn.execute(
+                text(
+                    "UPDATE process_inspection_standards"
+                    "   SET sigma = 0.09, sigma_source = '임의'"
+                    " WHERE process_code = '수입' AND item_code = '수분'"
+                    "   AND material_group = '액상수지'"
+                )
+            )
+
+        with pytest.raises(Exception, match="수분/액상수지"):
+            command.downgrade(config, "3c602ffaebc3")
+
+
+def test_the_guard_compares_more_than_the_name(engine: Engine) -> None:
+    """가드는 이름만 보지 않는다 — **정렬 · 설명 · 활성까지** 본다.
+
+    가드가 넷을 견주는데 테스트는 이름 하나만 어긋냈다. 그래서 비교에서 셋을 빼도
+    초록이 떴다 — 가드의 **넓이**를 사람이 지키고 있었다는 뜻이다.
+    """
+    for label, column, value in (
+        ("sort", "sort_order", "9"),
+        ("desc", "description", "'운영자가 고쳐 적었다'"),
+        ("active", "is_active", "FALSE"),
+    ):
+        with _schema(engine, f"guard_{label}"):
+            config, scoped = _plant_old_shape(engine, f"guard_{label}")
+            command.upgrade(config, "head")
+
+            with scoped.begin() as conn:
+                conn.execute(
+                    text(
+                        f"UPDATE common_codes SET {column} = {value}"
+                        " WHERE group_code = 'MATERIAL_GROUP' AND code = '분체'"
+                    )
+                )
+
+            with pytest.raises(Exception, match="분체"):
+                command.downgrade(config, "3c602ffaebc3")

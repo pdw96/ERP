@@ -25,6 +25,32 @@
 때** 돈다. 둘은 같은 데이터베이스에서 함께 돌 수 없으므로 값이 두 번 들어가지
 않는다.
 
+**이 리비전은 표를 다시 쓰고, 도는 동안 네 표의 쓰기가 멈춘다.** 통과하는 것과
+멈추지 않는 것은 다르다 — 논리적으로는 깨끗이 통과하면서도 배타적 잠금으로 그동안의
+모든 쓰기를 세운다. 오늘은 운영 데이터도 배포처도 없어 무해하지만, 그 전제가 깨지는
+날 이 자리는 다운타임이고 **적혀 있지 않으면 배포하는 사람이 모르고 지나간다.**
+
+- `ADD COLUMN id SERIAL PRIMARY KEY` — 기본값이 휘발성이라 PostgreSQL 이
+  `process_inspection_standards` 를 **통째로 다시 쓴다**(실측: `relfilenode` 가 바뀐다).
+  그동안 `AccessExclusiveLock`
+- 외래키 둘과 CHECK 여섯 — **기존 행 전체를 검증한다.** 외래키는 가리키는 표와
+  가리켜지는 표 **양쪽**을 잡으므로 `common_codes` 의 쓰기도 함께 멈춘다
+- `create_unique_constraint` — 잠금을 잡고 인덱스를 만든다. `CONCURRENTLY` 를 쓸 수
+  없는 형태다
+- `downgrade()` 도 같다 — `ADD PRIMARY KEY (process_code, item_code)` 가 인덱스를
+  만들고 NOT NULL 을 검증한다
+
+**얼마나 멈추는가는 구문 하나의 길이가 아니다.** `migrations/env.py` 가 마이그레이션
+전체를 트랜잭션 하나로 감싸므로, 첫 `ALTER` 가 잡은 잠금이 데이터 단계(UPDATE ·
+INSERT · `DO` 블록 다섯)를 지나 **커밋까지** 유지된다. 「반쯤 올라간 스키마」를 없애는
+값과 맞바꾼 것이며, 그 맞바꿈은 표를 세우는 단계에서는 옳다.
+
+심각도는 행 수와 동시 쓰기에 달렸고 **그 둘은 저장소에 없다.** 운영 데이터가 있는
+곳에서 이것을 돌린다면 쓰기를 세우고 돌리거나, 그 전에 나누는 형태를 검토한다 —
+CHECK 와 외래키는 `NOT VALID` + 뒤이은 `VALIDATE CONSTRAINT`, 유일키는
+`CREATE INDEX CONCURRENTLY` 뒤 제약으로 승격, `id` 는 `bigint` 로 붙이고 기본값과
+시퀀스를 나중에 다는 단계적 백필.
+
 Revision ID: 65d31f8b7918
 Revises: 3c602ffaebc3
 Create Date: 2026-09-16
@@ -98,8 +124,15 @@ _MATERIAL_GROUP_CODES = (
 # 피할 수 없다.** 피할 수 있는 것은 **조용한 것**이다 — upgrade 가 멈출 때 이유를
 # 말하는데 downgrade 는 아무 말도 하지 않았다.
 #
-# 둘을 본다: 이 리비전이 세우지 않은 줄(남이 더한 것)과, 남길 한 줄이 아닌 자리에
-# 들어 있는 실측 σ(잰 사실). 둘 다 「일어난 일은 지우지 않는다」에 걸린다.
+# **다섯을 본다.** 이 리비전이 세우지 않은 수입 기준(남이 더한 것) · 남길 한 줄이
+# 아닌 자리의 σ(사람이 넣은 값 — 「임의」와 「실측」 둘 다다. 「미정」만 빈 값이다) ·
+# 이 리비전이 심지 않은 자재군 코드 · 뜻이 달라진 그룹 · **사람이 고친 품목의 자재군
+# 배정.** 다섯 다 「일어난 일은 지우지 않는다」에 걸린다.
+#
+# **세는 방식이 세 번 틀렸다.** 감사 ③ 은 「지우는 자리를 전부 다시 봤다 — 셋뿐이다」로
+# 닫았는데 그 셋은 `DELETE` 만 센 것이었다. **칸을 떨어뜨리는 것도 지우는 것이다** —
+# `drop_column("items","material_group")` 이 사람이 고친 배정을 말없이 가져갔다.
+# 여기서 세어야 하는 것은 구문이 아니라 **되돌릴 때 사라지는 사실**이다.
 _STOP_IF_DOWNGRADE_WOULD_LOSE_SOMETHING = f"""
 DO $$
 DECLARE doomed text;
@@ -149,6 +182,24 @@ BEGIN
            IS DISTINCT FROM ('자재군', FALSE, '수입 검사 기준이 걸리는 축이다.')
   ) THEN
     RAISE EXCEPTION 'MATERIAL_GROUP 그룹이 이 리비전이 심은 것과 다르다 — 되돌리면 사람이 적은 것이 사라진다. 지울지는 사람이 정한다';
+  END IF;
+
+  -- **칸을 떨어뜨리는 것도 지우는 것이다.**
+  --
+  -- `drop_column("items","material_group")` 은 `DELETE` 가 아니라 보이지 않았는데,
+  -- 사람이 고친 배정은 거기서 사라진다. 다시 올리면 `_ITEM_GROUPS` 의 값이 돌아와
+  -- **지어낸 값이 사람의 판단을 덮는다.** 하필 `RM-12` 는 「코드로 판정할 수 없다,
+  -- 사람이 본다」로 대장에 적어 둔 품목이다 — 사람이 보고 고칠 것을 전제한 칸인데
+  -- 그 고침이 남지 않았다.
+  --
+  -- 이 리비전이 심지 않은 배정을 전부 본다: 값을 고친 것과, 이 리비전이 모르는
+  -- 원자재를 사람이 더한 것 둘 다다.
+  SELECT string_agg(DISTINCT i.code || '/' || i.material_group, ', ') INTO doomed
+    FROM items i
+    LEFT JOIN (VALUES {_ITEM_GROUPS}) AS g(code, grp) ON i.code = g.code
+   WHERE i.material_group IS NOT NULL AND i.material_group IS DISTINCT FROM g.grp;
+  IF doomed IS NOT NULL THEN
+    RAISE EXCEPTION '되돌리면 사람이 고친 자재군 배정이 사라진다: % — 이 리비전이 심은 값이 아니다. 다시 올리면 _ITEM_GROUPS 의 값이 덮는다. 지울지는 사람이 정한다', doomed;
   END IF;
 END $$;
 """
@@ -370,9 +421,16 @@ def downgrade() -> None:
     # 「심은 셋」인지는 위의 멈춤 검사가 지킨다 — 이름이 같아도 값이 다르면 남이
     # 만든 줄이므로 거기서 멈춘다. 그 검사가 없으면 이 `DELETE` 는 이름만 보고
     # 남의 것을 지운다.
+    #
+    # **목록을 여기 다시 적지 않는다.** 이름 셋을 손으로 적어 두었더니 넣는 쪽과
+    # 지우는 쪽이 두 벌이 됐다 — `_MATERIAL_GROUP_CODES` 에 넷째를 더해도 이 줄은
+    # 모르고, 여기에 남의 코드를 하나 더해도 넣는 쪽은 모른다. 한쪽만 고치면
+    # 「심은 것만 지운다」가 조용히 거짓이 되는 그 길이다.
     op.execute(
-        "DELETE FROM common_codes WHERE group_code = 'MATERIAL_GROUP'"
-        " AND code IN ('분체', '액상수지', '시트필름')"
+        f"DELETE FROM common_codes c WHERE c.group_code = 'MATERIAL_GROUP'"
+        f" AND EXISTS (SELECT 1 FROM (VALUES {_MATERIAL_GROUP_CODES})"
+        f"              AS v(group_code, code, name, sort_order, description)"
+        f"             WHERE v.group_code = c.group_code AND v.code = c.code)"
     )
     op.execute(
         "DELETE FROM code_groups WHERE group_code = 'MATERIAL_GROUP'"
