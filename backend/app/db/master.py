@@ -105,6 +105,19 @@ class Item(Base):
         ),
         CheckConstraint(f"process_group = '{codes.PROCESS}'", name="ck_item_process_group"),
         CheckConstraint(f"stock_uom_group = '{codes.UOM}'", name="ck_item_stock_uom_group"),
+        *code_reference(
+            group_column="material_group_group",
+            code_column="material_group",
+            group_code=codes.MATERIAL_GROUP,
+            name="item_material_group",
+        ),
+        # **양방향이다.** 원자재인데 자재군이 없으면 수입 기준을 끌어올 수 없고,
+        # 원자재가 아닌데 자재군이 있으면 만들어져 나온 것에 「무슨 자재인가」가
+        # 적힌 것이다. 한쪽만 걸면 다른 쪽으로 새는 줄이 선다.
+        CheckConstraint(
+            f"(item_type = '{codes.RAW_MATERIAL}') = (material_group IS NOT NULL)",
+            name="ck_item_material_group_matches_type",
+        ),
     )
 
     id: Mapped[int] = mapped_column(primary_key=True)
@@ -130,6 +143,18 @@ class Item(Base):
     # 서는 단계에서 정한다 — 그때의 답은 아마 **「단위 변경은 수정이 아니라
     # 새 품목」** 이다. 여기 적어 두는 것은 그 결정을 미룬다는 사실 자체를
     # 코드가 알고 있게 하기 위해서다.
+    # 자재군 — **수입 검사 기준이 걸리는 축**이다. 없으면 「수입」 기준 여덟이
+    # 원자재 열다섯 전부에 똑같이 걸려, 분말에 점도를 재라고 내밀게 된다.
+    #
+    # **원자재만 갖는다.** 반제품과 완제품은 만들어져 나온 것이라 「무슨
+    # 자재인가」를 물을 수 없다. 위의 양방향 CHECK 가 그것을 못박는다.
+    material_group: Mapped[str | None] = mapped_column(String(30), nullable=True)
+    # 복합 외래키의 왼쪽 절반. 이름이 겹쳐 보이지만 `process`/`process_group` 과
+    # 같은 꼴이다 — 칸 이름 뒤에 `_group` 을 붙인 것이 구조를 말하는 자리다.
+    material_group_group: Mapped[str] = mapped_column(
+        String(20), default=codes.MATERIAL_GROUP, server_default=codes.MATERIAL_GROUP
+    )
+
     stock_uom: Mapped[str] = mapped_column(String(30))
     stock_uom_group: Mapped[str] = mapped_column(
         String(20), default=codes.UOM, server_default=codes.UOM

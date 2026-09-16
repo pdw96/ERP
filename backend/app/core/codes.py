@@ -44,7 +44,7 @@ SHIFT = "SHIFT"
 SETTLE_TYPE = "SETTLE_TYPE"
 RISK_STATUS = "RISK_STATUS"
 
-# ── 값이 늘 수 있는 그룹 여덟 — 세기만 한다 ────────────────────────────────
+# ── 값이 늘 수 있는 그룹 아홉 — 세기만 한다 ────────────────────────────────
 NC_REASON = "NC_REASON"
 PO_CLOSE = "PO_CLOSE"
 SP_REASON = "SP_REASON"
@@ -53,6 +53,7 @@ PROCESS = "PROCESS"
 INSP_ITEM = "INSP_ITEM"
 DEPT = "DEPT"
 UOM = "UOM"
+MATERIAL_GROUP = "MATERIAL_GROUP"
 
 
 CODE_GROUPS: tuple[CodeGroupDef, ...] = (
@@ -118,6 +119,13 @@ CODE_GROUPS: tuple[CodeGroupDef, ...] = (
     ),  # 설계도는 18이라 적었으나 공정별 표에서 실제로 나오는 것은 17이다 — 시드 주석 참조.
     CodeGroupDef(DEPT, "부서", False, "조직의 사실. 교차 실사 기록이 이것을 요구한다."),
     CodeGroupDef(UOM, "단위", False, "kg · L · EA · m² — 늘어도 아무것도 고장 나지 않는다."),
+    CodeGroupDef(
+        MATERIAL_GROUP,
+        "자재군",
+        False,
+        "수입 검사 기준이 걸리는 축이다 — 분말에 점도를, 라이너에 입도를 재라고 "
+        "내밀지 않기 위해 있다. 무리가 늘어도 프로그램은 분기하지 않고 주소로만 쓴다.",
+    ),
 )
 
 GROUP_CODES: tuple[str, ...] = tuple(group.group_code for group in CODE_GROUPS)
@@ -258,3 +266,11 @@ STAGE_PROCESSES: dict[str, tuple[str, ...]] = {
     "OQC": ("출하",),
 }
 RETEST_STAGE = "재검사"
+
+# ── 자재군이 붙는 공정 ──────────────────────────────────────────────────────
+# **자재군은 원자재를 보는 검사에만 붙는다.** 반제품과 완제품에는 자재군이 없다 —
+# 만들어져 나온 것이라 「무슨 자재인가」를 물을 수 없기 때문이다.
+#
+# 원자재를 보는 것은 IQC 하나뿐이므로 위의 대응표에서 그대로 끌어 쓴다. 여기에
+# 따로 적으면 목록이 두 벌이 되고, 두 벌이면 반드시 갈린다.
+MATERIAL_GROUPED_PROCESSES: tuple[str, ...] = STAGE_PROCESSES["IQC"]

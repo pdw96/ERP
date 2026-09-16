@@ -6,7 +6,7 @@
 측정값 하나뿐이다.**
 """
 
-from sqlalchemy import Boolean, CheckConstraint, Float, String
+from sqlalchemy import Boolean, CheckConstraint, Float, String, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.core import codes
@@ -40,6 +40,34 @@ class ProcessInspectionStandard(Base):
             code_column="item_code",
             group_code=codes.INSP_ITEM,
             name="inspection_standard_item",
+        ),
+        *code_reference(
+            group_column="material_group_group",
+            code_column="material_group",
+            group_code=codes.MATERIAL_GROUP,
+            name="inspection_standard_material_group",
+        ),
+        # **이 줄의 정체성이다.** 자재군이 `NULL` 인 줄(공정검사)은 (공정 ×
+        # 검사항목)으로, 자재군이 있는 줄(수입)은 셋으로 갈린다.
+        #
+        # `NULLS NOT DISTINCT` 가 없으면 PostgreSQL 은 `NULL` 을 서로 다른 값으로
+        # 보아 **같은 (공정 × 검사항목)이 몇 줄이든 선다** — 「배합 · 공정온도」가
+        # 둘이 되면 어느 기준으로 판정했는지 말할 수 없다. PostgreSQL 15 부터
+        # 쓸 수 있고 우리는 16 이다.
+        UniqueConstraint(
+            "process_code",
+            "item_code",
+            "material_group",
+            name="uq_inspection_standard",
+            postgresql_nulls_not_distinct=True,
+        ),
+        # **양방향이다.** 수입인데 자재군이 없으면 기준 여덟이 원자재 열다섯
+        # 전부에 걸리던 옛 자리로 돌아가고, 수입이 아닌데 자재군이 있으면
+        # 반제품·완제품 기준에 「무슨 자재인가」가 적힌 것이다.
+        CheckConstraint(
+            f"(process_code IN ({_quoted(codes.MATERIAL_GROUPED_PROCESSES)}))"
+            " = (material_group IS NOT NULL)",
+            name="ck_inspection_standard_material_group_matches_process",
         ),
         CheckConstraint(
             f"sigma_source IN ({_quoted(codes.SIGMA_SOURCES)})",
@@ -96,25 +124,34 @@ class ProcessInspectionStandard(Base):
         ),
     )
 
-    # **이 PK 는 품목을 가리지 못한다 — 아직.** 「수입」 기준 여덟이 원자재
-    # 열다섯 전부에 똑같이 걸린다. 자재는 한 덩어리가 아니고 재고단위가 그것을
-    # 말한다(KG 아홉 · L 둘 · M2 넷) — 분말에 점도를, 라이너에 입도를 재라고
-    # 내미는 셈이다.
-    #
-    # **2단계 착공에서 정해졌다 — 자재군을 둔다.** 품목 축을 더하면 원자재 15 ×
-    # 검사항목만큼의 실측값을 누군가 정해야 하고, 그 값이 없으면 빈 기준정보가
-    # 된다. 자재군은 재고단위가 이미 경계를 말하고 있어 지어낼 값이 없다.
-    #
-    # **아직 이 표는 바뀌지 않았다.** 자재군 축이 PK 에 붙는 것은 마이그레이션이
-    # 있는 조각의 일이다 — 이미 심긴 표라 재시드가 닿지 않는다. 초안은
-    # `docs/schema-2단계.md` 15번에 있다.
-    process_code: Mapped[str] = mapped_column(String(30), primary_key=True)
+    # **대리키를 쓰는 이유는 자재군이 비어 있을 수 있기 때문이다.** 이 줄의
+    # 정체성은 (공정 × 검사항목 × 자재군)이지만 PostgreSQL 의 기본키는 `NULL`
+    # 을 받지 않는다. 공정검사 줄에 「해당없음」 같은 값을 채우면 그것은 빈
+    # 기준정보이고, 화면에 뜨는 순간 진짜로 보인다. 그래서 자리만 맡는 `id` 를
+    # 두고 **정체성은 위의 유일키가 말한다.**
+    id: Mapped[int] = mapped_column(primary_key=True)
+
+    process_code: Mapped[str] = mapped_column(String(30))
     process_group: Mapped[str] = mapped_column(
         String(20), default=codes.PROCESS, server_default=codes.PROCESS
     )
-    item_code: Mapped[str] = mapped_column(String(30), primary_key=True)
+    item_code: Mapped[str] = mapped_column(String(30))
     item_group: Mapped[str] = mapped_column(
         String(20), default=codes.INSP_ITEM, server_default=codes.INSP_ITEM
+    )
+
+    # **자재군 — 수입 기준이 품목을 가리게 하는 축.** 없던 시절에는 「수입」 기준
+    # 여덟이 원자재 열다섯 전부에 똑같이 걸렸다: 분말에 점도를, 라이너에 입도를
+    # 재라고 내미는 셈이었다.
+    #
+    # 품목 축이 아니라 자재군인 이유는, 품목 축을 더하면 원자재 15 × 검사항목
+    # 만큼의 실측값을 누군가 정해야 하고 그 값이 지금 없기 때문이다. 자재군은
+    # 재고단위가 이미 경계를 말한다 — KG 아홉 · L 둘 · M2 넷.
+    #
+    # **공정검사 줄에서는 비어 있다.** 반제품과 완제품에는 자재군이 없다.
+    material_group: Mapped[str | None] = mapped_column(String(30), nullable=True)
+    material_group_group: Mapped[str] = mapped_column(
+        String(20), default=codes.MATERIAL_GROUP, server_default=codes.MATERIAL_GROUP
     )
 
     # 규격은 고객이 정한다 — 지금은 임의 설정이다.

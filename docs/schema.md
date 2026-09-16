@@ -18,7 +18,7 @@
 | 1 | `items` | 전사 기준정보 | 품목 한 표 — 완제품 · 반제품 · 원자재 |
 | 2 | `bom_components` | 생산 기준정보 | 2단 고정 BOM |
 | 3 | `partners` | 전사 기준정보 | 거래처 — 공급사 · 고객사 |
-| 4 | `code_groups` | 시스템 관리 | 공통코드 그룹 23 |
+| 4 | `code_groups` | 시스템 관리 | 공통코드 그룹 24 |
 | 5 | `common_codes` | 시스템 관리 | 공통코드 본체 |
 | 6 | `txn_type_attributes` | 시스템 관리 | 확장 ① 수불유형 |
 | 7 | `nonconformity_attributes` | 시스템 관리 | 확장 ② 불합격사유 |
