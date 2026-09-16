@@ -84,6 +84,55 @@ BEGIN
 END $$;
 """
 
+# **되돌리기가 조용히 지우지 못하게 막는다.**
+#
+# 옛 기본키 `(공정, 검사항목)` 이 돌아오므로 항목마다 한 줄로 줄이는 것 **자체는
+# 피할 수 없다.** 피할 수 있는 것은 **조용한 것**이다 — upgrade 가 멈출 때 이유를
+# 말하는데 downgrade 는 아무 말도 하지 않았다.
+#
+# 둘을 본다: 이 리비전이 세우지 않은 줄(남이 더한 것)과, 남길 한 줄이 아닌 자리에
+# 들어 있는 실측 σ(잰 사실). 둘 다 「일어난 일은 지우지 않는다」에 걸린다.
+_STOP_IF_DOWNGRADE_WOULD_LOSE_SOMETHING = f"""
+DO $$
+DECLARE doomed text;
+BEGIN
+  SELECT string_agg(DISTINCT item_code || '/' || material_group, ', ') INTO doomed
+    FROM process_inspection_standards
+   WHERE process_code = '수입'
+     AND (item_code, material_group) NOT IN (
+           SELECT f.item, f.grp FROM (VALUES {_FIRST_GROUP}) AS f(item, grp)
+           UNION ALL
+           SELECT e.item, e.grp FROM (VALUES {_EXTRA_GROUPS}) AS e(item, grp)
+         );
+  IF doomed IS NOT NULL THEN
+    RAISE EXCEPTION '되돌리면 이 리비전이 세우지 않은 수입 기준이 사라진다: % — 남이 더한 줄이다. 지울지 옮길지는 사람이 정한다', doomed;
+  END IF;
+
+  SELECT string_agg(DISTINCT item_code || '/' || material_group, ', ') INTO doomed
+    FROM process_inspection_standards s
+   WHERE s.process_code = '수입' AND s.sigma IS NOT NULL
+     AND s.id <> (SELECT min(t.id) FROM process_inspection_standards t
+                   WHERE t.process_code = '수입' AND t.item_code = s.item_code);
+  IF doomed IS NOT NULL THEN
+    RAISE EXCEPTION '되돌리면 실측 σ 가 사라진다: % — 옛 기본키가 항목마다 한 줄만 받으므로 줄이는 것은 피할 수 없다. 남길 줄로 옮긴 뒤 다시 되돌린다', doomed;
+  END IF;
+END $$;
+"""
+
+
+# 그룹이 이미 있어도 **뜻이 같으면** 넘어간다. 다른 것은 `value_fixed` 하나뿐인데,
+# 그것이 참이면 「프로그램이 값을 보고 분기한다」는 뜻이라 자재군과 정반대다 —
+# 넘어가면 화면에서 무리를 못 늘리게 된다. 그때는 이름을 말하고 멈춘다.
+_STOP_IF_THE_GROUP_MEANS_SOMETHING_ELSE = """
+DO $$
+BEGIN
+  IF EXISTS (SELECT 1 FROM code_groups WHERE group_code = 'MATERIAL_GROUP' AND value_fixed) THEN
+    RAISE EXCEPTION 'MATERIAL_GROUP 그룹이 이미 있는데 value_fixed 가 참이다 — 자재군은 값이 늘 수 있는 그룹이어야 한다. 먼저 사람이 정한다';
+  END IF;
+END $$;
+"""
+
+
 _STANDARD_VALUE_COLUMNS = (
     "upper_spec_limit, lower_spec_limit, center_line, warning_ratio,"
     " sigma, sigma_source, time_variant, unit"
@@ -150,10 +199,16 @@ def upgrade() -> None:
     op.execute("ALTER TABLE process_inspection_standards ADD COLUMN id SERIAL PRIMARY KEY")
 
     # ── 데이터 — 이미 심긴 데이터베이스에서만 돈다 ─────────────────────────
+    # **이미 있으면 넘어간다.** 자재군은 「값이 늘 수 있는 그룹」이라 운영자가 먼저
+    # 만들어 두었을 수 있다. 그대로 `INSERT` 하면 「제약 위반」만 보이고 원인이
+    # 이 리비전에 있다는 것을 말해 주지 않는다 — upgrade 가 멈출 때 이유를 말하기로
+    # 한 것과 같은 자리다.
+    op.execute(_STOP_IF_THE_GROUP_MEANS_SOMETHING_ELSE)
     op.execute(
         "INSERT INTO code_groups (group_code, name, value_fixed, description)"
         " SELECT 'MATERIAL_GROUP', '자재군', FALSE, '수입 검사 기준이 걸리는 축이다.'"
         f" {_ALREADY_SEEDED}"
+        "   AND NOT EXISTS (SELECT 1 FROM code_groups WHERE group_code = 'MATERIAL_GROUP')"
     )
     op.execute(
         "INSERT INTO common_codes (group_code, code, name, sort_order, description)"
@@ -163,6 +218,8 @@ def upgrade() -> None:
         " ('MATERIAL_GROUP','시트필름','시트 · 필름',3,'두께와 색차를 본다')"
         " ) AS v(group_code, code, name, sort_order, description)"
         f" {_ALREADY_SEEDED}"
+        "   AND NOT EXISTS (SELECT 1 FROM common_codes c"
+        "                    WHERE c.group_code = v.group_code AND c.code = v.code)"
     )
     op.execute(
         "UPDATE items SET material_group = m.grp"
@@ -224,9 +281,17 @@ def downgrade() -> None:
     op.drop_constraint("uq_inspection_standard", "process_inspection_standards", type_="unique")
     op.drop_constraint("ck_item_material_group_matches_type", "items", type_="check")
 
-    # **베낀 줄만 지운다.** 항목마다 가장 먼저 선 줄 하나를 남기는데, 그것이 옮겨
-    # 쓴 옛 줄이다 — 사람이 고친 값이 거기 있다. 남기지 않고 전부 지운 뒤 기본값을
-    # 다시 심으면 되돌리기가 그 값을 잃는다.
+    op.execute(_STOP_IF_DOWNGRADE_WOULD_LOSE_SOMETHING)
+
+    # **항목마다 가장 먼저 선 줄 하나만 남기고 나머지를 지운다.**
+    #
+    # 앞의 주석은 「베낀 줄만 지운다」고 말했는데 그것은 사실이 아니었다 — 조건은
+    # `id` 가 최솟값이 아닌 **전부**라서, 이 리비전이 베끼지 않은 줄도 함께
+    # 지웠다. 남는 한 줄이 옮겨 쓴 옛 줄이라 사람이 고친 값이 거기 있다는 것은
+    # 맞지만, 그 밖의 줄에 있던 값은 사라진다.
+    #
+    # 줄이는 것 자체는 피할 수 없다(옛 기본키가 항목마다 한 줄만 받는다). 그래서
+    # 위에서 **무엇이 사라지는지 먼저 말하고 멈춘다.**
     op.execute(
         "DELETE FROM process_inspection_standards s"
         " WHERE s.process_code = '수입'"

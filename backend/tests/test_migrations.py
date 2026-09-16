@@ -5,8 +5,12 @@
 고치면, 둘이 조용히 갈린다. 갈린 쪽은 규칙을 잃는데 아무도 모른다.
 
 그래서 **두 스키마를 실제로 만들어 견준다** — 하나는 마이그레이션으로, 하나는
-모델로. 컬럼과 제약 정의가 한 글자라도 다르면 여기서 걸린다. 읽기 좋으라고
-CHECK 식을 줄바꿈하는 것조차 이 테스트가 잡는다.
+모델로. 컬럼과 제약의 **뜻**이 다르면 여기서 걸린다.
+
+**공백과 줄바꿈은 잡지 못한다.** `pg_get_constraintdef` 는 데이터베이스가 저장한
+식을 정규화해 돌려주므로, CHECK 식 한가운데에 줄바꿈을 넣어도 비교 전에 사라진다
+(`IN ('수입')` 이 `= '수입'::text` 로 다시 쓰이는 것까지 정규화된다). 이 테스트를
+「두 스키마가 완전히 같다」로 읽지 않는다 — 잡는 것은 뜻이다.
 """
 
 import os
@@ -113,6 +117,10 @@ def _constraints(engine: Engine, schema: str) -> dict[tuple[str, str], str]:
 
     `pg_get_constraintdef` 는 데이터베이스가 실제로 강제하는 식을 돌려준다.
     모델이 무엇을 적었는지가 아니라 **무엇이 걸렸는지**를 견주는 것이 요점이다.
+
+    **정규화된 식이라 공백은 견주지 않는다.** PostgreSQL 이 줄바꿈과 여분의
+    공백을 지우고 표현도 다시 쓰므로(`IN ('수입')` → `= '수입'::text`), 식을
+    읽기 좋게 줄바꿈해도 이 비교는 통과한다. 잡는 것은 **뜻이 달라진 자리**다.
     """
     sql = text(
         "SELECT c.relname, con.conname, pg_get_constraintdef(con.oid)"
@@ -354,18 +362,23 @@ VALUES
   ('RM-14','기능성 염료','원자재','수입','PROCESS','KG','UOM','양산',100),
   ('RM-15','포장 라미네이트','원자재','수입','PROCESS','M2','UOM','양산',700);
 
+-- **옛 시드와 같은 값이어야 한다.** 이 픽스처는 「옛 DB」를 재현한다고 이름 붙어
+-- 있으므로 한 칸이라도 다르면 한 번도 존재한 적 없는 상태 위에서 초록이 뜬다.
+-- `time_variant` 는 만료 재검사가 보는 유일한 잣대라 특히 그렇다 — 처음에는 적지
+-- 않아 여덟 줄이 전부 FALSE 로 섰고, 옛 시드는 수분 · 점도 · 색차 · 포장에 TRUE 다.
+-- `warning_ratio` 와 `sigma_source` 는 server_default 와 같지만 함께 적어 둔다.
 INSERT INTO process_inspection_standards
   (process_group, process_code, item_group, item_code, upper_spec_limit, lower_spec_limit,
-   center_line, unit)
+   center_line, warning_ratio, sigma, sigma_source, time_variant, unit)
 VALUES
-  ('PROCESS','수입','INSP_ITEM','입도',   50.0,   10.0,   30.0, 'µm'),
-  ('PROCESS','수입','INSP_ITEM','수분',    0.50,  NULL,    0.20, '%'),
-  ('PROCESS','수입','INSP_ITEM','점도', 4000.0, 2000.0, 3000.0, 'cP'),
-  ('PROCESS','수입','INSP_ITEM','두께',  105.0,   95.0,  100.0, 'µm'),
-  ('PROCESS','수입','INSP_ITEM','색차',    1.00,  NULL,    0.30, 'ΔE'),
-  ('PROCESS','수입','INSP_ITEM','이물',   NULL,   NULL,   NULL, NULL),
-  ('PROCESS','수입','INSP_ITEM','포장',   NULL,   NULL,   NULL, NULL),
-  ('PROCESS','수입','INSP_ITEM','성적서', NULL,   NULL,   NULL, NULL);
+  ('PROCESS','수입','INSP_ITEM','입도',50.0,10.0,30.0,0.70,NULL,'미정',FALSE,'µm'),
+  ('PROCESS','수입','INSP_ITEM','수분',0.50,NULL,0.20,0.70,NULL,'미정',TRUE,'%'),
+  ('PROCESS','수입','INSP_ITEM','점도',4000.0,2000.0,3000.0,0.70,NULL,'미정',TRUE,'cP'),
+  ('PROCESS','수입','INSP_ITEM','두께',105.0,95.0,100.0,0.70,NULL,'미정',FALSE,'µm'),
+  ('PROCESS','수입','INSP_ITEM','색차',1.00,NULL,0.30,0.70,NULL,'미정',TRUE,'ΔE'),
+  ('PROCESS','수입','INSP_ITEM','이물',NULL,NULL,NULL,0.70,NULL,'미정',FALSE,NULL),
+  ('PROCESS','수입','INSP_ITEM','포장',NULL,NULL,NULL,0.70,NULL,'미정',TRUE,NULL),
+  ('PROCESS','수입','INSP_ITEM','성적서',NULL,NULL,NULL,0.70,NULL,'미정',FALSE,NULL);
 """
 
 
@@ -378,16 +391,26 @@ def _material_groups(engine: Engine) -> dict[str, str]:
     return {str(row[0]): str(row[1]) for row in rows}
 
 
-def _incoming_standards(engine: Engine) -> set[tuple[str, str]]:
-    """수입 기준이 (검사항목, 자재군) 으로 어떻게 서 있는가."""
+def _incoming_standards(engine: Engine) -> set[tuple[object, ...]]:
+    """수입 기준 한 줄 전부 — 배정과 **값까지**.
+
+    배정만 견주면 픽스처가 옛 시드와 달라도 초록이 뜬다. 실제로 그랬다 —
+    `_BEFORE_MATERIAL_GROUP` 이 `time_variant` 를 적지 않아 여덟 줄이 전부
+    `FALSE` 로 섰는데 아무도 잡지 않았다. 만료 재검사가 보는 유일한 잣대라
+    2단계에 그것이 들어오면 **한 번도 존재한 적 없는 상태 위에서 초록이 뜬다.**
+
+    두 길의 값이 같아야 하는 이유는 마이그레이션이 옛 줄을 **옮기기** 때문이다 —
+    지우고 다시 심지 않으므로 옛 시드의 값이 그대로 따라온다.
+    """
     with engine.connect() as conn:
         rows = conn.execute(
             text(
-                "SELECT item_code, material_group FROM process_inspection_standards"
-                " WHERE process_code = '수입'"
+                "SELECT item_code, material_group, upper_spec_limit, lower_spec_limit,"
+                "       center_line, warning_ratio, sigma, sigma_source, time_variant, unit"
+                "  FROM process_inspection_standards WHERE process_code = '수입'"
             )
         ).all()
-    return {(str(row[0]), str(row[1])) for row in rows}
+    return {tuple(row) for row in rows}
 
 
 def _upgrade_over_the_old_seed(engine: Engine, schema: str) -> Engine:
@@ -415,8 +438,9 @@ def test_both_roads_reach_the_same_material_groups(
     반드시 갈리므로, 갈리는 순간을 여기서 잡는다 — 한쪽만 고치면 빈 데이터베이스와
     이미 심긴 데이터베이스가 서로 다른 기준을 갖게 되고, 갈린 줄 아무도 모른다.
 
-    견주는 것은 **값이 아니라 배정**이다. 규격 숫자는 옛 줄에서 따라오므로
-    두 길이 같을 이유가 없고, 갈려서 문제가 되는 것은 어느 자재가 어느 무리인가다.
+    **배정과 값을 함께 견준다.** 마이그레이션이 옛 줄을 지우지 않고 옮기므로 두
+    길의 값도 같아야 한다 — 그리고 그 덕에 「옛 DB」 픽스처가 진짜 옛 DB 와 같은지도
+    여기서 지켜진다.
     """
     monkeypatch.setenv("ERP_SEED_ENABLED", "true")
     with _schema(engine, "road_seed"), _schema(engine, "road_migration"):
@@ -546,3 +570,135 @@ def test_a_raw_material_the_revision_does_not_know_stops_it(engine: Engine) -> N
 
         with pytest.raises(Exception, match="RM-99"):
             command.upgrade(config, "head")
+
+
+def _plant_old_shape(engine: Engine, schema: str, *, extra: str = "") -> tuple[Config, Engine]:
+    """옛 리비전까지 올리고 옛 모양으로 심는다. `extra` 로 한 줄 더 얹는다."""
+    config = _config_for_schema(engine, schema)
+    command.upgrade(config, "3c602ffaebc3")
+    scoped = _engine_for_schema(engine, schema)
+    with scoped.begin() as conn:
+        for statement in (_BEFORE_MATERIAL_GROUP + extra).strip().split(";"):
+            if statement.strip():
+                conn.execute(text(statement))
+    return config, scoped
+
+
+def test_an_inspection_item_the_revision_does_not_know_stops_it(engine: Engine) -> None:
+    """**모르는 수입 검사항목도 이름을 말하고 멈춘다.**
+
+    원자재 경로에는 테스트가 있었지만 이 경로는 도달 가능한데 검사되지 않았다 —
+    도달 못 하는 방어 코드가 아니라 **검사되지 않는** 방어 코드였다.
+    """
+    with _schema(engine, "unknown_item"):
+        config, _ = _plant_old_shape(
+            engine,
+            "unknown_item",
+            extra=(
+                ";INSERT INTO common_codes (group_code, code, name)"
+                " VALUES ('INSP_ITEM','밀도','밀도');"
+                "INSERT INTO process_inspection_standards"
+                " (process_group, process_code, item_group, item_code)"
+                " VALUES ('PROCESS','수입','INSP_ITEM','밀도')"
+            ),
+        )
+
+        with pytest.raises(Exception, match="밀도"):
+            command.upgrade(config, "head")
+
+
+def test_a_group_someone_already_made_does_not_stop_it(engine: Engine) -> None:
+    """**자재군 그룹이 이미 있어도 올라간다.**
+
+    자재군은 「값이 늘 수 있는 그룹」이라 운영자가 먼저 만들어 두었을 수 있다.
+    그대로 `INSERT` 하면 「제약 위반」만 보이고 원인이 이 리비전에 있다는 것을
+    말해 주지 않았다.
+    """
+    with _schema(engine, "group_exists"):
+        config, scoped = _plant_old_shape(
+            engine,
+            "group_exists",
+            extra=(
+                ";INSERT INTO code_groups (group_code, name, value_fixed, description)"
+                " VALUES ('MATERIAL_GROUP','자재군',FALSE,'운영자가 먼저 만들었다');"
+                "INSERT INTO common_codes (group_code, code, name)"
+                " VALUES ('MATERIAL_GROUP','분체','분체')"
+            ),
+        )
+
+        command.upgrade(config, "head")
+
+        with scoped.connect() as conn:
+            planted = conn.execute(
+                text("SELECT count(*) FROM common_codes WHERE group_code = 'MATERIAL_GROUP'")
+            ).scalar_one()
+        assert planted == 3, "먼저 있던 코드를 두고 나머지만 채워야 한다"
+
+
+def test_a_group_that_means_something_else_stops_it(engine: Engine) -> None:
+    """뜻이 다른 그룹이면 넘어가지 않고 멈춘다 — `value_fixed` 가 참이면 화면에서
+    무리를 못 늘리게 된다. 자재군과 정반대다."""
+    with _schema(engine, "group_differs"):
+        config, _ = _plant_old_shape(
+            engine,
+            "group_differs",
+            extra=(
+                ";INSERT INTO code_groups (group_code, name, value_fixed, description)"
+                " VALUES ('MATERIAL_GROUP','자재군',TRUE,'분기한다고 적힌 그룹')"
+            ),
+        )
+
+        with pytest.raises(Exception, match="value_fixed"):
+            command.upgrade(config, "head")
+
+
+def test_downgrade_says_what_it_would_erase(engine: Engine) -> None:
+    """**되돌리기가 남의 줄을 조용히 지우지 않는다.**
+
+    옛 기본키가 항목마다 한 줄만 받으므로 줄이는 것 자체는 피할 수 없다. 피할 수
+    있는 것은 **조용한 것**이다 — upgrade 는 멈출 때 이유를 말하는데 downgrade 는
+    아무 말도 하지 않았다.
+    """
+    with _schema(engine, "down_speaks"):
+        config, scoped = _plant_old_shape(engine, "down_speaks")
+        command.upgrade(config, "head")
+
+        # 운영자가 넷째 무리와 그 무리의 기준 한 줄을 더한다.
+        with scoped.begin() as conn:
+            conn.execute(
+                text(
+                    "INSERT INTO common_codes (group_code, code, name)"
+                    " VALUES ('MATERIAL_GROUP','금속','금속')"
+                )
+            )
+            conn.execute(
+                text(
+                    "INSERT INTO process_inspection_standards"
+                    " (process_group, process_code, item_group, item_code, material_group)"
+                    " VALUES ('PROCESS','수입','INSP_ITEM','두께','금속')"
+                )
+            )
+
+        with pytest.raises(Exception, match="금속"):
+            command.downgrade(config, "3c602ffaebc3")
+
+
+def test_downgrade_says_when_a_measured_sigma_would_vanish(engine: Engine) -> None:
+    """잰 값이 사라지는 것도 말하고 멈춘다 — 실측 σ 는 잰 사실이다."""
+    with _schema(engine, "down_sigma"):
+        config, scoped = _plant_old_shape(engine, "down_sigma")
+        command.upgrade(config, "head")
+
+        # 베낀 줄(수분/액상수지)에 실측 σ 를 채운다. 남는 줄은 수분/분체 쪽이다.
+        with scoped.begin() as conn:
+            conn.execute(
+                text(
+                    "UPDATE process_inspection_standards"
+                    "   SET sigma = 0.11, sigma_source = '실측'"
+                    " WHERE process_code = '수입' AND item_code = '수분'"
+                    "   AND material_group = '액상수지'"
+                )
+            )
+
+        with pytest.raises(Exception, match="수분/액상수지"):
+            command.downgrade(config, "3c602ffaebc3")
