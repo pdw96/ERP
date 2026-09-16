@@ -251,3 +251,30 @@ def test_a_process_is_optional(prepared: Session) -> None:
     prepared.add(make_item(codes.RAW_MATERIAL, process=None))
 
     prepared.flush()
+
+
+# ── 자재군은 원자재만 갖는다 ────────────────────────────────────────────────
+
+
+def test_a_raw_material_must_say_which_group_it_belongs_to(prepared: Session) -> None:
+    """자재군이 없으면 수입 기준을 끌어올 축이 없다 — 기준 여덟이 전부 걸린다."""
+    prepared.add(make_item(codes.RAW_MATERIAL, material_group=None))
+
+    with pytest.raises(IntegrityError, match="material_group_matches_type"):
+        prepared.flush()
+
+
+def test_a_semi_finished_item_cannot_belong_to_a_material_group(prepared: Session) -> None:
+    """반제품은 만들어져 나온 것이라 「무슨 자재인가」를 물을 수 없다."""
+    prepared.add(make_item(codes.SEMI_FINISHED, material_group="분체"))
+
+    with pytest.raises(IntegrityError, match="material_group_matches_type"):
+        prepared.flush()
+
+
+def test_a_material_group_must_exist_in_its_group(prepared: Session) -> None:
+    """복합 외래키가 자재군 그룹만 받는다 — 아무 코드나 들어오지 못한다."""
+    prepared.add(make_item(codes.RAW_MATERIAL, material_group="없는무리"))
+
+    with pytest.raises(IntegrityError, match="fk_item_material_group"):
+        prepared.flush()

@@ -14,19 +14,39 @@
 -- 포장 · 접착력 · 광택. 만료 로트의 재검사가 다시 보는 것은 이것뿐이다:
 -- 「시간이 이 값을 바꿀 수 있는가」가 유일한 잣대다.
 
--- ── 수입 (IQC) ─────────────────────────────────────────────────────────────
+-- ── 수입 (IQC) — 자재군마다 다른 항목을 본다 ───────────────────────────────
+-- **여기가 자재군이 값을 하는 자리다.** 예전에는 이 여덟 줄이 원자재 열다섯
+-- 전부에 똑같이 걸렸다 — 분말에 점도를, 라이너에 입도를 재라고 내미는 셈이었다.
+-- 이제 무리마다 볼 것만 선다: 분체는 입도, 액상·수지는 점도, 시트·필름은 두께.
+--
+-- **규격 값은 옮겨 적기만 했다.** 상·하한과 중심선은 항목이 갖는 것이지 무리가
+-- 갖는 것이 아니므로 예전 여덟 줄의 숫자를 그대로 쓴다 — 자재군을 세우면서
+-- 새 숫자를 지어내면 그것이 진짜로 보인다.
+--
+-- 계수 셋(이물 · 포장 · 성적서)은 **세 무리 모두**가 본다. 재는 것이 아니라
+-- 세는 것이라 규격도 중심선도 없다.
 INSERT INTO process_inspection_standards
-  (process_group, process_code, item_group, item_code,
+  (process_group, process_code, item_group, item_code, material_group, material_group_group,
    upper_spec_limit, lower_spec_limit, center_line, warning_ratio, sigma, sigma_source, time_variant, unit) VALUES
-  ('PROCESS', '수입', 'INSP_ITEM', '입도',   50.0,   10.0,   30.0, 0.70, NULL, '미정', FALSE, 'µm'),
-  ('PROCESS', '수입', 'INSP_ITEM', '수분',    0.50,  NULL,    0.20, 0.70, NULL, '미정', TRUE,  '%'),
-  ('PROCESS', '수입', 'INSP_ITEM', '점도', 4000.0, 2000.0, 3000.0, 0.70, NULL, '미정', TRUE,  'cP'),
-  ('PROCESS', '수입', 'INSP_ITEM', '두께',  105.0,   95.0,  100.0, 0.70, NULL, '미정', FALSE, 'µm'),
-  ('PROCESS', '수입', 'INSP_ITEM', '색차',    1.00,  NULL,    0.30, 0.70, NULL, '미정', TRUE,  'ΔE'),
-  -- 계수 항목은 재는 것이 아니라 세는 것이라 규격도 중심선도 없다.
-  ('PROCESS', '수입', 'INSP_ITEM', '이물',   NULL,   NULL,   NULL, 0.70, NULL, '미정', FALSE, NULL),
-  ('PROCESS', '수입', 'INSP_ITEM', '포장',   NULL,   NULL,   NULL, 0.70, NULL, '미정', TRUE,  NULL),
-  ('PROCESS', '수입', 'INSP_ITEM', '성적서', NULL,   NULL,   NULL, 0.70, NULL, '미정', FALSE, NULL);
+  -- 분체 — 알갱이의 굵기와 머금은 물을 본다.
+  ('PROCESS', '수입', 'INSP_ITEM', '입도',   '분체',     'MATERIAL_GROUP',   50.0,   10.0,   30.0, 0.70, NULL, '미정', FALSE, 'µm'),
+  ('PROCESS', '수입', 'INSP_ITEM', '수분',   '분체',     'MATERIAL_GROUP',    0.50,  NULL,    0.20, 0.70, NULL, '미정', TRUE,  '%'),
+  ('PROCESS', '수입', 'INSP_ITEM', '이물',   '분체',     'MATERIAL_GROUP',   NULL,   NULL,   NULL, 0.70, NULL, '미정', FALSE, NULL),
+  ('PROCESS', '수입', 'INSP_ITEM', '포장',   '분체',     'MATERIAL_GROUP',   NULL,   NULL,   NULL, 0.70, NULL, '미정', TRUE,  NULL),
+  ('PROCESS', '수입', 'INSP_ITEM', '성적서', '분체',     'MATERIAL_GROUP',   NULL,   NULL,   NULL, 0.70, NULL, '미정', FALSE, NULL),
+  -- 액상 · 수지 — 흐름과 빛깔을 본다. 물기는 분체와 같은 이유로 함께 본다.
+  ('PROCESS', '수입', 'INSP_ITEM', '점도',   '액상수지', 'MATERIAL_GROUP', 4000.0, 2000.0, 3000.0, 0.70, NULL, '미정', TRUE,  'cP'),
+  ('PROCESS', '수입', 'INSP_ITEM', '수분',   '액상수지', 'MATERIAL_GROUP',    0.50,  NULL,    0.20, 0.70, NULL, '미정', TRUE,  '%'),
+  ('PROCESS', '수입', 'INSP_ITEM', '색차',   '액상수지', 'MATERIAL_GROUP',    1.00,  NULL,    0.30, 0.70, NULL, '미정', TRUE,  'ΔE'),
+  ('PROCESS', '수입', 'INSP_ITEM', '이물',   '액상수지', 'MATERIAL_GROUP',   NULL,   NULL,   NULL, 0.70, NULL, '미정', FALSE, NULL),
+  ('PROCESS', '수입', 'INSP_ITEM', '포장',   '액상수지', 'MATERIAL_GROUP',   NULL,   NULL,   NULL, 0.70, NULL, '미정', TRUE,  NULL),
+  ('PROCESS', '수입', 'INSP_ITEM', '성적서', '액상수지', 'MATERIAL_GROUP',   NULL,   NULL,   NULL, 0.70, NULL, '미정', FALSE, NULL),
+  -- 시트 · 필름 — 두께와 빛깔을 본다. 입도도 점도도 잴 것이 없다.
+  ('PROCESS', '수입', 'INSP_ITEM', '두께',   '시트필름', 'MATERIAL_GROUP',  105.0,   95.0,  100.0, 0.70, NULL, '미정', FALSE, 'µm'),
+  ('PROCESS', '수입', 'INSP_ITEM', '색차',   '시트필름', 'MATERIAL_GROUP',    1.00,  NULL,    0.30, 0.70, NULL, '미정', TRUE,  'ΔE'),
+  ('PROCESS', '수입', 'INSP_ITEM', '이물',   '시트필름', 'MATERIAL_GROUP',   NULL,   NULL,   NULL, 0.70, NULL, '미정', FALSE, NULL),
+  ('PROCESS', '수입', 'INSP_ITEM', '포장',   '시트필름', 'MATERIAL_GROUP',   NULL,   NULL,   NULL, 0.70, NULL, '미정', TRUE,  NULL),
+  ('PROCESS', '수입', 'INSP_ITEM', '성적서', '시트필름', 'MATERIAL_GROUP',   NULL,   NULL,   NULL, 0.70, NULL, '미정', FALSE, NULL);
 
 -- ── 배합 (IPQC) ────────────────────────────────────────────────────────────
 INSERT INTO process_inspection_standards

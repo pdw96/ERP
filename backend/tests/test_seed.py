@@ -384,3 +384,80 @@ def test_there_are_sixteen_inspection_items(blank: Engine) -> None:
     seed_module.seed(blank)
 
     assert _count(blank, "common_codes", "group_code = 'INSP_ITEM'") == 16
+
+
+# ── 자재군 ──────────────────────────────────────────────────────────────────
+
+
+def test_every_raw_material_belongs_to_a_group(blank: Engine) -> None:
+    """원자재 열다섯이 전부 무리를 갖는다 — 분체 다섯 · 액상수지 여섯 · 시트필름 넷."""
+    seed_module.seed(blank)
+
+    assert _count(blank, "items", "item_type = '원자재' AND material_group IS NULL") == 0
+    assert _count(blank, "items", "material_group = '분체'") == 5
+    assert _count(blank, "items", "material_group = '액상수지'") == 6
+    assert _count(blank, "items", "material_group = '시트필름'") == 4
+
+
+def test_nothing_but_raw_materials_belongs_to_a_group(blank: Engine) -> None:
+    """반제품과 완제품에는 자재군이 없다."""
+    seed_module.seed(blank)
+
+    assert _count(blank, "items", "item_type <> '원자재' AND material_group IS NOT NULL") == 0
+
+
+def test_a_powder_is_not_asked_for_viscosity(blank: Engine) -> None:
+    """**이 조각이 있는 이유다.**
+
+    자재군이 서기 전에는 「수입」 기준 여덟이 원자재 열다섯 전부에 똑같이 걸렸다 —
+    분말에 점도를, 라이너에 입도를 재라고 내미는 셈이었다. 이제 무리마다 볼 것만
+    선다.
+    """
+    seed_module.seed(blank)
+
+    powder = "process_code = '수입' AND material_group = '분체'"
+    liquid = "process_code = '수입' AND material_group = '액상수지'"
+    sheet = "process_code = '수입' AND material_group = '시트필름'"
+
+    # 분말에 점도를 재라고 하지 않는다. 라이너에 입도를 재라고 하지 않는다.
+    assert (
+        _count(blank, "process_inspection_standards", f"{powder} AND item_code = '점도'") == 0
+    )
+    assert _count(blank, "process_inspection_standards", f"{sheet} AND item_code = '입도'") == 0
+    # 대신 무리가 실제로 갖는 것은 선다.
+    assert (
+        _count(blank, "process_inspection_standards", f"{powder} AND item_code = '입도'") == 1
+    )
+    assert (
+        _count(blank, "process_inspection_standards", f"{liquid} AND item_code = '점도'") == 1
+    )
+    assert _count(blank, "process_inspection_standards", f"{sheet} AND item_code = '두께'") == 1
+
+
+def test_every_group_is_checked_for_the_three_counted_items(blank: Engine) -> None:
+    """이물 · 포장 · 성적서는 세는 것이라 무리를 가리지 않는다 — 셋 모두 본다."""
+    seed_module.seed(blank)
+
+    for counted in ("이물", "포장", "성적서"):
+        assert (
+            _count(
+                blank,
+                "process_inspection_standards",
+                f"process_code = '수입' AND item_code = '{counted}'",
+            )
+            == 3
+        ), f"{counted} 가 세 무리 전부에 서지 않았다"
+
+
+def test_no_process_standard_carries_a_material_group(blank: Engine) -> None:
+    """공정검사 기준은 자재군을 갖지 않는다 — 반제품과 완제품을 보기 때문이다."""
+    seed_module.seed(blank)
+
+    assert (
+        _count(
+            blank,
+            "process_inspection_standards",
+            "process_code <> '수입' AND material_group IS NOT NULL",
+        )
+        == 0
+    )

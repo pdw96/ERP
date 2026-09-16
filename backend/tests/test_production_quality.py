@@ -32,10 +32,13 @@ def _standard(**overrides: object) -> ProcessInspectionStandard:
 @pytest.fixture
 def prepared(session: Session) -> Session:
     add_code(session, codes.PROCESS, "코팅")
+    add_code(session, codes.PROCESS, "수입")
     add_code(session, codes.INSP_ITEM, "두께")
     add_code(session, codes.SHIFT, "현장 주간")
     add_code(session, codes.SHIFT, "현장 야간")
     add_code(session, codes.SHIFT, "사무")
+    add_code(session, codes.MATERIAL_GROUP, "분체")
+    add_code(session, codes.MATERIAL_GROUP, "액상수지")
     session.flush()
     return session
 
@@ -253,4 +256,62 @@ def test_a_warning_ratio_of_one_is_not_a_warning(prepared: Session) -> None:
     prepared.add(_standard(warning_ratio=1.0))
 
     with pytest.raises(IntegrityError):
+        prepared.flush()
+
+
+# ── 자재군 축 ───────────────────────────────────────────────────────────────
+
+
+def test_an_incoming_standard_must_say_which_material_group(prepared: Session) -> None:
+    """자재군 없는 수입 기준은 **원자재 열다섯 전부에 걸린다.**
+
+    그것이 이 축을 세우기 전의 자리였다 — 분말에 점도를, 라이너에 입도를 재라고
+    내미는 셈이었다. 다시 그리로 돌아가지 못하게 막는다.
+    """
+    prepared.add(_standard(process_code="수입", material_group=None))
+
+    with pytest.raises(IntegrityError, match="material_group_matches_process"):
+        prepared.flush()
+
+
+def test_a_process_standard_cannot_carry_a_material_group(prepared: Session) -> None:
+    """반제품과 완제품에는 자재군이 없다 — 만들어져 나온 것이기 때문이다."""
+    prepared.add(_standard(process_code="코팅", material_group="분체"))
+
+    with pytest.raises(IntegrityError, match="material_group_matches_process"):
+        prepared.flush()
+
+
+def test_the_same_item_stands_once_per_material_group(prepared: Session) -> None:
+    """같은 항목이 무리마다 다른 기준을 갖는다 — 그러라고 세운 축이다."""
+    prepared.add(_standard(process_code="수입", material_group="분체"))
+    prepared.add(_standard(process_code="수입", material_group="액상수지"))
+    prepared.flush()
+
+    assert prepared.query(ProcessInspectionStandard).count() == 2
+
+
+def test_the_same_item_cannot_stand_twice_in_one_material_group(prepared: Session) -> None:
+    """무리가 같으면 한 줄뿐이다. 둘이면 어느 기준으로 판정했는지 말할 수 없다."""
+    prepared.add(_standard(process_code="수입", material_group="분체"))
+    prepared.flush()
+    prepared.add(_standard(process_code="수입", material_group="분체"))
+
+    with pytest.raises(IntegrityError, match="uq_inspection_standard"):
+        prepared.flush()
+
+
+def test_a_process_standard_cannot_stand_twice_either(prepared: Session) -> None:
+    """**`NULL` 이 둘을 서로 다른 값으로 만들지 못한다.**
+
+    PostgreSQL 의 기본 유일키는 `NULL` 을 서로 다르게 보므로, 그대로 두면
+    자재군이 비어 있는 공정검사 줄이 몇 줄이든 선다 — 「코팅 · 두께」가 둘이 되면
+    어느 기준으로 판정했는지 표가 말하지 못한다. `NULLS NOT DISTINCT` 가 그것을
+    막는 것을 여기서 지킨다.
+    """
+    prepared.add(_standard(process_code="코팅"))
+    prepared.flush()
+    prepared.add(_standard(process_code="코팅"))
+
+    with pytest.raises(IntegrityError, match="uq_inspection_standard"):
         prepared.flush()

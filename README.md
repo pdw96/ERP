@@ -58,7 +58,7 @@ docker compose run --rm migrate
 ```
 backend/
   app/core/config.py     환경에서 읽는 설정
-  app/core/codes.py      공통코드 그룹 스물셋 — 프로그램이 아는 이름
+  app/core/codes.py      공통코드 그룹 스물넷 — 프로그램이 아는 이름
   app/db/base.py         SQLAlchemy 뿌리 · 엔진 · 트랜잭션 하나
   app/db/constraints.py  모델과 마이그레이션이 함께 부르는 제약 식
   app/db/common_codes.py 공통코드 본체 두 표
