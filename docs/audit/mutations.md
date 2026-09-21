@@ -54,3 +54,14 @@
 여기 적힌 것은 **손으로 돌린 것**이다. 돌연변이 러너를 개발 의존성으로 들이는
 쪽(NC-89 의 제안 ②)은 아직 하지 않았다 — 먼저 **기록의 자리**를 정하는 것이 싸고,
 그 자리가 없으면 러너를 들여도 결과가 다시 저장소 밖에 남는다.
+
+## Codex 리뷰의 고침 (`ebeef8a` 뒤)
+
+| NC | 무엇을 어긋냈나 | 빨개진 검사 |
+|---|---|---|
+| 104 | `app.py` 에서 커밋을 **의존성 뒤로 되돌렸다**(`yield` 다음) | `test_a_commit_that_fails_does_not_answer_201` — 커밋이 터졌는데 **201 이 나갔다.** 그것이 이 부적합의 모양 그대로다 |
+| 103 | `incoming.py` 의 `_must_be_a_counted_reason(...)` 호출을 지웠다 | `test_a_measured_reason_cannot_be_sent_by_a_person` |
+| 107 | `if counted_items:` 를 `if False:` 로 | `test_a_value_for_a_counted_item_is_refused` |
+| 106 | `if not partner.is_active:` 를 `if False:` 로 | `test_an_inactive_supplier_cannot_deliver` |
+| 105 | 로트 번호 길이 가드를 `if False:` 로 | `test_an_item_code_too_long_for_the_lot_number_is_refused` |
+| 102 | 유효기간을 `request.received_date` 대신 **`judged_at.date()`** 에서 세게 되돌렸다 | `test_the_expiry_counts_from_the_day_it_arrived` · `test_material_that_already_expired_on_arrival_is_refused` |

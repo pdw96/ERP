@@ -21,7 +21,7 @@ from collections import Counter
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 
-from sqlalchemy import select, text
+from sqlalchemy import String, select, text
 from sqlalchemy.orm import Session
 
 from app.core import codes, locks
@@ -76,6 +76,11 @@ REASON_IS_NOT_USABLE_AT_THIS_GATE = "reason_is_not_usable_at_this_gate"
 REASON_COMES_WITH_A_COMPUTED_DEVIATION = "reason_comes_with_a_computed_deviation"
 SPECIAL_ACCEPTANCE_ON_A_PASS = "special_acceptance_on_a_pass"
 SPECIAL_ACCEPTANCE_IS_NOT_OPEN = "special_acceptance_is_not_open"
+SUPPLIER_IS_NOT_ACTIVE = "supplier_is_not_active"
+REASON_IS_NOT_A_COUNTED_ONE = "reason_is_not_a_counted_one"
+ITEM_IS_NOT_MEASURED = "item_is_not_measured"
+LOT_NUMBER_WOULD_NOT_FIT = "lot_number_would_not_fit"
+MATERIAL_IS_ALREADY_EXPIRED = "material_is_already_expired"
 
 
 @dataclass(frozen=True)
@@ -135,6 +140,11 @@ def _supplier(session: Session, code: str) -> Partner:
         raise RefusedInspection(
             PARTNER_IS_NOT_SUPPLIER, f"공급사가 아니다: {code} 는 {partner.partner_type} 이다"
         )
+    if not partner.is_active:
+        # **그 칸은 지우지 않고 거래를 끝내기 위해 있다.** 지난 줄이 가리키는
+        # 거래처를 지울 수 없으므로 꺼 두는 것인데, 꺼진 거래처로 **새 사실**을
+        # 만들면 그 칸이 아무것도 뜻하지 않게 된다.
+        raise RefusedInspection(SUPPLIER_IS_NOT_ACTIVE, f"거래가 끝난 공급사다: {code}")
     return partner
 
 
@@ -189,6 +199,23 @@ def _reason_for(session: Session, item_code: str) -> str:
     return reason
 
 
+def _must_be_a_counted_reason(session: Session, reason_code: str) -> None:
+    """사람이 적을 수 있는 사유는 **세는 항목의 것뿐이다** (원칙 ③).
+
+    재는 항목의 사유(`입도 이탈` 같은)는 **측정값에서만 나온다.** 그것을 요청에서
+    받으면 규격 안에 든 값을 적어 놓고 같은 항목으로 불합격을 만들 수 있고,
+    특채가 열린 사유라면 **규격 안인데 특채**라는 줄까지 선다 — 계산이 낸 판정을
+    사람이 요청 본문으로 덮는 자리이고, 그것이 원칙 ③ 이 없애려는 것이다.
+    """
+    attribute = session.get(NonconformityAttribute, (codes.NC_REASON, reason_code))
+    if attribute is None or attribute.measure_kind != codes.COUNTED_KIND:
+        raise RefusedInspection(
+            REASON_IS_NOT_A_COUNTED_ONE,
+            f"{reason_code} 는 재는 항목의 사유라 사람이 적을 수 없다 —"
+            " 재는 항목의 판정은 측정값에서만 나온다",
+        )
+
+
 def _allows_special_acceptance(session: Session, reason_code: str) -> bool:
     rule = session.get(
         NonconformityStageRule,
@@ -200,6 +227,13 @@ def _allows_special_acceptance(session: Session, reason_code: str) -> bool:
             f"관문 1 에서 쓸 수 있는 사유가 아니다: {reason_code}",
         )
     return rule.special_acceptance_allowed
+
+
+# **칸의 길이를 여기서 다시 적지 않는다.** 모델이 든 것을 그대로 읽는다 — 두
+# 벌이면 칸을 넓히는 날 이 검사가 조용히 낡는다.
+_lot_number_column = Lot.__table__.c.lot_number.type
+assert isinstance(_lot_number_column, String), "로트 번호는 길이가 있는 문자열 칸이다"
+_LOT_NUMBER_LENGTH: int = _lot_number_column.length or 0
 
 
 def _next_lot_number(session: Session, item: Item, received_date: date) -> str:
@@ -222,6 +256,14 @@ def _next_lot_number(session: Session, item: Item, received_date: date) -> str:
         {"key": locks.LOT_NUMBER, "item": item.id},
     )
     prefix = f"{item.code}-{received_date:%y%m%d}-"
+    if len(prefix) + 2 > _LOT_NUMBER_LENGTH:
+        # 품목 코드가 길면 우리가 지은 번호가 칸을 넘어 **데이터베이스가 자르려다
+        # 터진다.** 품목은 정상으로 서고 그 품목의 모든 합격이 500 이 되므로,
+        # 번호를 짓기 전에 이름으로 말한다.
+        raise RefusedInspection(
+            LOT_NUMBER_WOULD_NOT_FIT,
+            f"품목 코드가 길어 로트 번호가 칸({_LOT_NUMBER_LENGTH}자)을 넘는다: {item.code}",
+        )
     used = session.scalars(
         select(Lot.lot_number).where(Lot.item_id == item.id, Lot.lot_number.like(f"{prefix}%"))
     ).all()
@@ -294,6 +336,17 @@ def receive(session: Session, request: IncomingInspection) -> Judged:
             ITEM_IS_NOT_IN_THE_STANDARD,
             f"{item.material_group} 의 수입 기준에 없는 항목을 쟀다: {', '.join(unknown)}",
         )
+    counted_items = sorted(code for code in measured if not _measures(standards[code]))
+    if counted_items:
+        # **세는 항목에는 잰 값이 없다.** 그 무리의 기준에 있으므로 위의 검사는
+        # 지나가고, 규격 두 칸이 다 빈 측정 줄이 만들어져
+        # `ck_inspection_measurement_has_a_spec` 가 문다 — **잘 만들어진 요청
+        # 하나가 제약 이름이 담긴 500 으로 나가던** 자리다.
+        raise RefusedInspection(
+            ITEM_IS_NOT_MEASURED,
+            f"세는 항목에는 잰 값을 적을 수 없다: {', '.join(counted_items)} —"
+            " 그 항목의 결함은 사유로 적는다",
+        )
     missing = sorted(
         code
         for code, standard in standards.items()
@@ -328,6 +381,7 @@ def receive(session: Session, request: IncomingInspection) -> Judged:
     elif request.nonconformity_code is not None:
         # **계산이 보지 못하는 것은 사람이 적는다** — 세는 항목의 결함이다.
         _allows_special_acceptance(session, request.nonconformity_code)
+        _must_be_a_counted_reason(session, request.nonconformity_code)
         reason = request.nonconformity_code
 
     if reason is None:
@@ -383,6 +437,24 @@ def receive(session: Session, request: IncomingInspection) -> Judged:
         session.flush()
         return Judged(inspection.id, result, reason, None, None, None)
 
+    expiry_date = (
+        request.received_date + timedelta(days=item.shelf_life_days)
+        if item.shelf_life_days is not None
+        else None
+    )
+    if expiry_date is not None and expiry_date < judged_at.date():
+        # **이미 지난 자재가 합격으로 서지 않는다.** 로트의 CHECK 가 같은 것을
+        # 막지만 거기서 나오는 말은 제약 이름이라 500 이 된다.
+        #
+        # **여기서 보는 것은 「이미 지났는가」뿐이다.** 시드의 `IQ-EXP`(잔여
+        # 유효기간 부족)는 「며칠은 남아 있어야 하는가」를 묻는데 **그 값이 어디에도
+        # 없다** — 지어내지 않고 열어 둔다(`docs/schema.md` 미결).
+        raise RefusedInspection(
+            MATERIAL_IS_ALREADY_EXPIRED,
+            f"입고일({request.received_date})에 설정기간을 더하면 이미 지난 날이다:"
+            f" {expiry_date}",
+        )
+
     lot = Lot(
         item_id=item.id,
         item_type=item.item_type,
@@ -396,11 +468,12 @@ def receive(session: Session, request: IncomingInspection) -> Judged:
         # **파생해 저장하는 예외 하나.** 라벨에 찍혀 나가므로 설정기간을 나중에
         # 고쳐도 그 로트의 유효기간은 바뀌지 않는다. 설정기간이 없는 자재
         # (시트 · 필름)는 비어서 선다 — 없는 값을 지어내지 않는다.
-        expiry_date=(
-            judged_at.date() + timedelta(days=item.shelf_life_days)
-            if item.shelf_life_days is not None
-            else None
-        ),
+        #
+        # **세는 것은 입고일부터다.** 시드가 `IQ-EXP` 를 「입고일 + 설정기간에서
+        # 시스템이 계산해 단다」로 정해 두었다. 판정일부터 세면 **검사가 늦어진
+        # 만큼 유효기간이 늘어난다** — 뒤늦게 적은 입고 한 건이 이미 지난 자재를
+        # 멀쩡한 재고로 만든다.
+        expiry_date=expiry_date,
         inspection_id=inspection.id,
         inspection_result=result,
     )

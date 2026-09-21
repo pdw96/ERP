@@ -20,12 +20,13 @@ import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import text
 from sqlalchemy.engine import Engine
+from sqlalchemy.orm import Session
 
-from app.api.app import _sessions, app
+from app.api.app import _sessions, app, session_scope
 from app.db.base import Base, create_session_factory
 from tests.conftest import TEST_DATABASE_URL
 from tests.test_api import _PAYLOAD
-from tests.test_write_path import plant_master_data
+from tests.test_write_path import plant_master_data, prepared  # noqa: F401
 
 
 @pytest.fixture
@@ -104,6 +105,42 @@ def test_nothing_is_left_when_the_request_breaks(
     assert response.status_code == 500, response.text
     assert _rows(committed, "lots") == 0
     assert _rows(committed, "inspections") == 0
+
+
+class _SessionThatCannotCommit:
+    """커밋만 실패하는 세션 — 나머지는 그대로 넘긴다."""
+
+    def __init__(self, session: object) -> None:
+        self._session = session
+
+    def __getattr__(self, name: str) -> object:
+        return getattr(self._session, name)
+
+    def commit(self) -> None:
+        raise RuntimeError("커밋이 실패했다 — 연결이 끊겼다고 하자")
+
+
+def test_a_commit_that_fails_does_not_answer_201(prepared: Session) -> None:  # noqa: F811
+    """**커밋은 응답을 만들기 전에 해야 한다.**
+
+    `yield` 를 쓰는 의존성의 뒷부분은 **응답이 만들어져 나간 뒤에** 돈다. 커밋을
+    거기 두면 커밋이 실패해도 201 은 이미 떠난 뒤라 되돌릴 수 없고, 부르는 쪽은
+    **저장되지 않은 것을 저장됐다고 읽는다** — 되돌릴 대상조차 남기지 않는
+    실패다.
+
+    그래서 여기서 커밋을 터뜨리고 **상태 코드를 본다.** 커밋이 의존성 뒤로
+    돌아가면 이 검사가 201 을 받는다.
+    """
+    app.dependency_overrides[session_scope] = lambda: _SessionThatCannotCommit(prepared)
+    try:
+        broken = TestClient(app, raise_server_exceptions=False)
+        response = broken.post("/inspections", json=_PAYLOAD)
+    finally:
+        app.dependency_overrides.clear()
+        prepared.rollback()
+
+    assert response.status_code == 500, response.text
+    assert response.json()["detail"][0]["type"] == "internal_error"
 
 
 def test_the_app_does_not_reach_for_the_default_database() -> None:

@@ -125,11 +125,15 @@ def session_scope() -> Iterator[Session]:
     **터지면 아무것도 남지 않는다.** 검사 · 측정값 · 로트 · 원장 줄이 한 번에
     들어가거나 하나도 들어가지 않으며, 「로트는 생겼는데 원장에 줄이 없는」
     상태가 여기서 구조적으로 사라진다.
+
+    **여기서 커밋하지 않는다.** `yield` 뒤의 코드는 **응답이 만들어져 나간 뒤에**
+    돈다. 커밋을 여기 두면 커밋이 실패해도 201 은 이미 떠난 뒤라 되돌릴 수 없고,
+    부르는 쪽은 **저장되지 않은 것을 저장됐다고 읽는다.** 커밋은 응답을 만들기
+    전에, 엔드포인트가 한다 — 여기 남는 것은 **되돌리기와 닫기**다.
     """
     session = _sessions()()
     try:
         yield session
-        session.commit()
     except Exception:
         session.rollback()
         raise
@@ -174,6 +178,10 @@ def post_inspection(
             status.HTTP_422_UNPROCESSABLE_CONTENT,
             [{"loc": ["body"], "msg": str(refused), "type": refused.code}],
         )
+
+    # **응답을 만들기 전에 커밋한다.** 여기서 터지면 500 이 나가고, 그것이
+    # 「저장되지 않았다」의 올바른 모양이다.
+    session.commit()
 
     return InspectionOut(
         inspection_id=judged.inspection_id,

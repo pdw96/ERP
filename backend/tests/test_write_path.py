@@ -9,7 +9,7 @@
 - **같은 품목·같은 날에 둘이 동시에 들어와도 번호가 겹치지 않는가** (감사 W-2)
 """
 
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 
 import pytest
 from sqlalchemy import text
@@ -21,7 +21,7 @@ from app.core import codes, locks
 from app.db.code_attributes import NonconformityAttribute, NonconformityStageRule
 from app.db.inspection import Inspection, InspectionMeasurement
 from app.db.inventory import Lot, StockLedgerEntry
-from app.db.master import Item
+from app.db.master import Item, Partner
 from app.db.quality import ProcessInspectionStandard
 from app.services.incoming import (
     IncomingInspection,
@@ -520,6 +520,108 @@ def test_a_reason_sent_with_an_out_of_spec_value_is_refused(prepared: Session) -
         )
 
     assert prepared.query(Inspection).count() == 0
+
+
+def test_a_measured_reason_cannot_be_sent_by_a_person(prepared: Session) -> None:
+    """**재는 항목의 판정은 측정값에서만 나온다** (원칙 ③).
+
+    규격 안에 드는 값을 적어 놓고 `입도 이탈` 을 사유로 보내면, 계산은 합격을
+    냈는데 **요청 본문이 그것을 불합격으로 덮는다.** 특채가 열린 사유라면
+    **규격 안인데 특채**라는 줄까지 선다 — 사람이 적을 수 있는 것은 계산이 보지
+    못하는 것, 곧 세는 항목의 결함뿐이다.
+    """
+    with pytest.raises(RefusedInspection, match="사람이 적을 수 없다"):
+        receive(prepared, _request(nonconformity_code=_GRAIN_REASON))
+
+    assert prepared.query(Inspection).count() == 0
+
+
+def test_a_value_for_a_counted_item_is_refused(prepared: Session) -> None:
+    """**세는 항목에는 잰 값이 없다.**
+
+    그 무리의 기준에 있으므로 「기준에 없는 항목」 검사는 지나가고, 규격 두 칸이
+    다 빈 측정 줄이 서서 `ck_inspection_measurement_has_a_spec` 가 문다 — **잘
+    만들어진 요청 하나가 제약 이름이 담긴 500 으로** 나가던 자리다.
+    """
+    with pytest.raises(RefusedInspection, match="잰 값을 적을 수 없다"):
+        receive(
+            prepared,
+            _request(
+                measurements=(
+                    Measurement(_GRAIN, 30.0),
+                    Measurement(_MOISTURE, 0.3),
+                    Measurement(_FOREIGN, 0.0),
+                )
+            ),
+        )
+
+
+def test_an_inactive_supplier_cannot_deliver(prepared: Session) -> None:
+    """**꺼진 거래처로 새 사실을 만들지 않는다.**
+
+    그 칸은 지난 줄이 가리키는 거래처를 지우지 않으려고 있다. 꺼져 있는데 새
+    검사가 서면 그 칸이 아무것도 뜻하지 않게 된다.
+    """
+    supplier = prepared.query(Partner).filter_by(code="SUP-01").one()
+    supplier.is_active = False
+    prepared.flush()
+
+    with pytest.raises(RefusedInspection, match="거래가 끝난 공급사"):
+        receive(prepared, _request())
+
+
+def test_an_item_code_too_long_for_the_lot_number_is_refused(prepared: Session) -> None:
+    """**우리가 지은 번호가 칸을 넘으면 데이터베이스가 자르려다 터진다.**
+
+    품목 코드는 50자까지 서는데 로트 번호도 50자다 — `-YYMMDD-NN` 이 열 자를
+    더하므로 긴 코드의 품목은 **정상으로 서고 그 품목의 모든 합격이 500** 이
+    된다. 번호를 짓기 전에 이름으로 말한다.
+    """
+    long_code = "RM-" + "X" * 45
+    prepared.add(make_item(codes.RAW_MATERIAL, code=long_code, material_group=GROUP))
+    prepared.flush()
+
+    with pytest.raises(RefusedInspection, match="로트 번호가 칸"):
+        receive(prepared, _request(item_code=long_code))
+
+    assert prepared.query(Lot).count() == 0
+
+
+def test_the_expiry_counts_from_the_day_it_arrived(prepared: Session) -> None:
+    """**세는 것은 입고일부터다** — 시드의 `IQ-EXP` 가 그렇게 적는다.
+
+    판정일부터 세면 **검사가 늦어진 만큼 유효기간이 늘어난다.** 뒤늦게 적은 입고
+    한 건이 이미 지난 자재를 멀쩡한 재고로 만드는 자리다.
+    """
+    item = prepared.query(Item).filter_by(code="RM-01").one()
+    item.shelf_life_days = 365
+    prepared.flush()
+    arrived = date.today() - timedelta(days=3)
+
+    receive(prepared, _request(received_date=arrived))
+
+    lot = prepared.query(Lot).one()
+    assert lot.expiry_date == arrived + timedelta(days=365)
+    # 판정일에서 세었다면 사흘이 더 붙는다.
+    assert lot.expiry_date != date.today() + timedelta(days=365)
+
+
+def test_material_that_already_expired_on_arrival_is_refused(prepared: Session) -> None:
+    """**이미 지난 자재가 합격으로 서지 않는다.**
+
+    로트의 CHECK 가 같은 것을 막지만 거기서 나오는 말은 제약 이름이라 500 이
+    된다. 「며칠은 남아 있어야 하는가」(`IQ-EXP`)는 **그 값이 어디에도 없어**
+    여기서 보지 않는다 — 보는 것은 「이미 지났는가」뿐이다.
+    """
+    item = prepared.query(Item).filter_by(code="RM-01").one()
+    item.shelf_life_days = 30
+    prepared.flush()
+    long_ago = date.today() - timedelta(days=31)
+
+    with pytest.raises(RefusedInspection, match="이미 지난 날"):
+        receive(prepared, _request(received_date=long_ago))
+
+    assert prepared.query(Lot).count() == 0
 
 
 def test_a_missing_measurement_is_refused(prepared: Session) -> None:
