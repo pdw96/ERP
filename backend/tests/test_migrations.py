@@ -886,6 +886,50 @@ def test_downgrade_says_when_an_arbitrary_sigma_would_vanish(engine: Engine) -> 
             command.downgrade(config, "3c602ffaebc3")
 
 
+def test_downgrade_does_not_stop_for_a_sigma_on_the_row_it_keeps(engine: Engine) -> None:
+    """**남길 줄의 σ 는 멈출 이유가 아니다** — 거짓 멈춤 갈래.
+
+    위의 갈래들은 전부 「멈추는가」를 묻는다. 그래서 가드를 **넓히는** 쪽으로 틀려도
+    아무것도 물지 않는다 — 넓힌 가드는 더 자주 멈출 뿐이고, 멈추는 것을 기다리는
+    검사는 그것을 통과로 읽는다.
+
+    넓힐 자리가 이미 열려 있다. 줄 대 줄 비교는 σ 와 σ출처를 빼는데, 리비전에 적힌
+    근거가 **거짓이다**(NC-31) — 「두 줄이 그 칸에서 갈릴 수 없다」가 아니라 남길 줄에
+    실측 σ 가 있으면 **늘 갈린다**(베낀 줄은 「미정」으로 선다). 그 문장을 믿고
+    `_COMPARED_VALUE_COLUMNS` 에서 `startswith("sigma")` 를 떼면, 사람이 σ 를 잰
+    데이터베이스는 그날부터 **영구히 되돌릴 수 없다.** 그러고도 175 개가 전부 초록이다.
+
+    여기서 막는다. 남길 줄(수분/분체)에만 실측 σ 를 넣고 되돌리기가 **통과하는지**
+    본다 — σ 가드는 남길 줄의 σ 를 허용하고, 줄 비교는 σ 를 보지 않기 때문이다.
+    """
+    with _schema(engine, "down_sigma_kept"):
+        config, scoped = _plant_old_shape(engine, "down_sigma_kept")
+        command.upgrade(config, "head")
+
+        # 남길 줄은 첫 무리다(`_FIRST_GROUP`: 수분 → 분체). 베낀 줄은 수분/액상수지.
+        with scoped.begin() as conn:
+            conn.execute(
+                text(
+                    "UPDATE process_inspection_standards"
+                    "   SET sigma = 0.04, sigma_source = '실측'"
+                    " WHERE process_code = '수입' AND item_code = '수분'"
+                    "   AND material_group = '분체'"
+                )
+            )
+
+        command.downgrade(config, "3c602ffaebc3")
+
+        # 통과했고, 사람이 잰 값은 그대로 남아 있다.
+        with scoped.connect() as conn:
+            kept = conn.execute(
+                text(
+                    "SELECT sigma, sigma_source FROM process_inspection_standards"
+                    " WHERE process_code = '수입' AND item_code = '수분'"
+                )
+            ).all()
+        assert [tuple(row) for row in kept] == [(0.04, "실측")]
+
+
 def test_downgrade_says_when_a_group_specific_spec_would_vanish(engine: Engine) -> None:
     """**σ 만이 아니라 그 줄의 값 전부를 본다.**
 
@@ -895,9 +939,15 @@ def test_downgrade_says_when_a_group_specific_spec_would_vanish(engine: Engine) 
 
     같은 모양의 다섯 번째였다 — 앞의 넷은 「지우는 자리」를 좁게 셌고 이것은 그
     자리에서 **사라지는 사실**을 좁게 셌다.
+
+    **갈래는 비교 목록과 같은 폭이다** — `_COMPARED_VALUE_COLUMNS` 여섯 칸을 전부
+    밟는다. 고칠 때 넷만 밟아 `lower_spec_limit` 과 `center_line` 이 검사 밖에
+    있었고, 그래서 비교에서 그 둘을 빼도 초록이 떴다 (NC-32).
     """
     for label, column, value in (
         ("usl", "upper_spec_limit", "0.31"),
+        ("lsl", "lower_spec_limit", "0.05"),
+        ("cl", "center_line", "0.30"),
         ("warn", "warning_ratio", "0.5"),
         ("tv", "time_variant", "NOT time_variant"),
         ("unit", "unit", "'ppm'"),
@@ -926,9 +976,13 @@ def test_downgrade_says_when_the_group_someone_changed_would_vanish(engine: Engi
     되돌리기 가드 다섯 중 이것 하나만 검사가 없었다 — 통째로 무력화해도 전부
     초록이었다. 죽은 코드가 아니라 **검사되지 않는** 코드였고, 「닫힌 부적합이
     검사 없이 닫혀 있으면 조용히 다시 열린다」가 NC-18 이 이미 낸 진단이다.
+
+    **갈래는 가드와 같은 폭이다** — 가드가 견주는 `(name, value_fixed, description)`
+    셋을 전부 밟는다. 처음에는 `value_fixed` 가 빠져 있었다 (NC-32).
     """
     for label, column, value in (
         ("name", "name", "'자재 무리'"),
+        ("fixed", "value_fixed", "TRUE"),
         ("desc", "description", "'운영자가 고쳐 적었다'"),
     ):
         with _schema(engine, f"down_group_{label}"):
