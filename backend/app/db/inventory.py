@@ -141,14 +141,26 @@ class Lot(Base):
         # 갈릴 수 없다 — 값을 다시 적는 것이 아니라 **같은 줄을 가리키는** 것이다.
         #
         # **이 외래키가 못 보는 부류**: `inspection_id` 나 `received_date` 가 비면
-        # 복합 외래키는 통째로 건너뛰어진다. 앞쪽은 이월 로트(검사를 모른다),
-        # 뒤쪽은 자사 로트다 — 자사 로트에는 `ck_lot_produced_has_produced_date`
-        # 가 도착일을 비우게 하므로, 자사 로트가 검사를 가리키게 되는 날
-        # (관문 2) 이 자리를 다시 봐야 한다.
+        # 복합 외래키는 통째로 건너뛰어진다. 앞쪽은 이월 로트(검사를 모른다)이고
+        # 뒤쪽은 **아래 CHECK 가 막는다.**
         ForeignKeyConstraint(
             ["inspection_id", "received_date"],
             ["inspections.id", "inspections.received_date"],
             name="fk_lot_inspection_received_date",
+        ),
+        # **주석은 규칙이 아니다.** 처음에는 「자사 로트가 검사를 가리키게 되는 날
+        # 이 자리를 다시 봐야 한다」고 적어 두었는데, 적어 두기만 하고 강제하지
+        # 않는 규칙을 만들지 않는 것이 이 저장소의 규칙이다 — 자사 로트는
+        # `ck_lot_produced_has_produced_date` 가 도착일을 비우게 하므로 위 외래키를
+        # 통째로 빠져나가고, **오늘 그 줄을 만드는 쓰기 경로가 없다는 것은 제약의
+        # 보증이 아니라 우연이다.**
+        #
+        # **손봐야 하는 제약이다.** 관문 2 가 오면 자사 로트도 판정을 가리키는데
+        # 그쪽에는 도착일이 없다 — `inspections.inspection_stage = 'IQC'` 와 같은
+        # 자리이고, 그날 **넓히는 마이그레이션이 함께 온다.**
+        CheckConstraint(
+            "inspection_id IS NULL OR received_date IS NOT NULL",
+            name="ck_lot_from_an_inspection_has_an_arrival_date",
         ),
         CheckConstraint(
             "(inspection_id IS NULL) = (inspection_result IS NULL)",

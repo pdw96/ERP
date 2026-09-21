@@ -90,3 +90,4 @@
 | 109 | `ck_inspection_judged_after_arrival` 의 비교를 60 일 늦췄다 | `test_an_inspection_cannot_be_judged_before_the_material_arrived` · 대조 테스트 |
 | 109 | 데이터 단계를 `l.received_date` 대신 `i.judged_at::date` 로 | **처음에는 통과했다.** 픽스처의 두 날짜를 떼어 둔 뒤 `test_the_data_step_moves_the_arrival_date_from_the_lot` 이 물었다 |
 | 109 | 되돌림 가드의 `NOT EXISTS` 를 `FALSE AND NOT EXISTS` 로(아무것도 세지 않게) | `test_downgrade_says_whose_arrival_date_has_no_lot_to_fall_back_on` |
+| 114 | `ck_lot_from_an_inspection_has_an_arrival_date` 를 항상 참으로(`OR TRUE`) | `test_an_own_lot_cannot_borrow_an_incoming_inspection` · 대조 테스트. **CHECK 를 걸기 전에 그 검사가 실제로 통과하는 것**(DID NOT RAISE)을 먼저 확인했다 — 구멍이 있다는 주장과 구멍이 있다는 사실은 다르다 |

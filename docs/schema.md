@@ -327,7 +327,8 @@ PostgreSQL 의 기본키는 `NULL` 을 받지 않으므로 자재군을 PK 에 �
 - **창고가 담는 품목 유형** — 원재료창고는 자재만, 제품창고는 완제품만,
   생산창고는 셋 다 (투입 대기 자재 · 반제품 · 완제품)
 - `FK (inspection_id, inspection_result) → inspections (id, result)` — **쌍으로** 가리킨다
-- `FK (inspection_id, received_date) → inspections (id, received_date)` — 도착일도 쌍으로. **같은 사실이 두 표에 살면 갈린다**(원칙 ⑥). 복합 외래키는 한 칸이라도 `NULL` 이면 건너뛰므로 이월 로트(검사를 모른다)와 자사 로트(도착일이 없다)는 그대로 선다
+- `FK (inspection_id, received_date) → inspections (id, received_date)` — 도착일도 쌍으로. **같은 사실이 두 표에 살면 갈린다**(원칙 ⑥)
+- `CHECK inspection_id IS NULL OR received_date IS NOT NULL` — **위 외래키가 못 보는 자리를 막는다.** 복합 외래키는 한 칸이라도 `NULL` 이면 통째로 건너뛰므로, 도착일이 비는 자사 로트가 수입검사를 가리키면서 대조만 빠져나갈 수 있었다. **손봐야 하는 제약이다** — 관문 2 가 오면 자사 로트도 판정을 가리키고 그쪽에는 도착일이 없다
 - `CHECK inspection_result IS DISTINCT FROM '불합격'` — **원칙 ① 이 제약이 되는 자리다**
 - **양방향** — `(inspection_id IS NULL) = (inspection_result IS NULL)`
 - `UNIQUE (inspection_id)` — 한 판정은 로트를 한 번만 만든다

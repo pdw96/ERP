@@ -799,3 +799,56 @@ def test_a_receipt_line_cannot_name_someone_elses_judgement(prepared: Session) -
     )
     with pytest.raises(IntegrityError):
         prepared.flush()
+
+
+def test_an_own_lot_cannot_borrow_an_incoming_inspection(prepared: Session) -> None:
+    """**주석은 규칙이 아니다** — 쌍 외래키가 못 보는 자리를 CHECK 가 막는다.
+
+    복합 외래키는 한 칸이라도 `NULL` 이면 통째로 건너뛰어진다. 자사 로트는
+    `ck_lot_produced_has_produced_date` 때문에 도착일이 비므로, 수입검사를
+    가리키면서 **도착일 대조만 빠져나간다** — 오늘 그 줄을 만드는 쓰기 경로가
+    없다는 것은 제약의 보증이 아니라 **우연**이다 (CodeRabbit 리뷰).
+
+    `inspections.inspection_stage = 'IQC'` 와 같은 **손봐야 하는 제약**이다 —
+    관문 2 가 오는 날 넓히는 마이그레이션이 함께 온다.
+    """
+    add_code(prepared, codes.WAREHOUSE, codes.WAREHOUSE_PRODUCTION, "생산창고")
+    material = prepared.query(Item).filter_by(code="RM-01").one()
+    supplier = prepared.query(Partner).filter_by(code="SUP-01").one()
+    semi = make_item(codes.SEMI_FINISHED, code="SF-01")
+    prepared.add(semi)
+    prepared.flush()
+
+    inspection = Inspection(
+        item_id=material.id,
+        item_type=material.item_type,
+        material_group=material.material_group,
+        supplier_id=supplier.id,
+        supplier_type=supplier.partner_type,
+        supplier_lot_number="SL-2026-0001",
+        quantity=500.0,
+        received_date=RECEIVED,
+        judged_at=datetime(2026, 9, 21, 9, 0),
+        judged_by="검사원 1",
+        result=codes.JUDGMENT_PASSED,
+    )
+    prepared.add(inspection)
+    prepared.flush()
+
+    prepared.add(
+        Lot(
+            item_id=semi.id,
+            item_type=semi.item_type,
+            lot_number="SF-01-260921-01",
+            lot_origin=codes.LOT_FROM_OWN,
+            warehouse=codes.WAREHOUSE_PRODUCTION,
+            stock_type=codes.STOCK_GOOD,
+            quantity=100.0,
+            produced_date=date(2026, 9, 1),
+            passed_date=date(2026, 9, 2),
+            inspection_id=inspection.id,
+            inspection_result=codes.JUDGMENT_PASSED,
+        )
+    )
+    with pytest.raises(IntegrityError, match="ck_lot_from_an_inspection_has_an_arrival_date"):
+        prepared.flush()

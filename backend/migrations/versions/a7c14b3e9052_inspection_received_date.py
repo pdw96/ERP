@@ -92,6 +92,15 @@ def upgrade() -> None:
         ["inspection_id", "received_date"],
         ["id", "received_date"],
     )
+    # **위 외래키가 못 보는 자리를 여기서 막는다.** 복합 외래키는 한 칸이라도
+    # `NULL` 이면 통째로 건너뛰므로, 도착일이 비는 자사 로트가 수입검사를
+    # 가리키면서 대조만 빠져나갈 수 있다. 오늘 그 줄을 만드는 쓰기 경로가 없다는
+    # 것은 제약의 보증이 아니라 우연이다.
+    op.create_check_constraint(
+        "ck_lot_from_an_inspection_has_an_arrival_date",
+        "lots",
+        "inspection_id IS NULL OR received_date IS NOT NULL",
+    )
 
 
 def downgrade() -> None:
@@ -121,6 +130,7 @@ def downgrade() -> None:
         """
     )
 
+    op.drop_constraint("ck_lot_from_an_inspection_has_an_arrival_date", "lots", type_="check")
     op.drop_constraint("fk_lot_inspection_received_date", "lots", type_="foreignkey")
     op.drop_constraint("uq_inspection_id_received_date", "inspections", type_="unique")
     op.drop_constraint("ck_inspection_judged_after_arrival", "inspections", type_="check")
