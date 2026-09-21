@@ -248,8 +248,9 @@ WAREHOUSE_ITEM_TYPES: dict[str, tuple[str, ...]] = {
     WAREHOUSE_FINISHED: (FINISHED_GOODS,),
 }
 
-# ── 로트 번호의 출처 ────────────────────────────────────────────────────────
-# 원칙 ① — 재고 로트는 언제나 합격 후에 생긴다. **번호의 출처만 다르다.**
+# ── 로트가 온 곳 ───────────────────────────────────────────────────────────
+# 원칙 ① — 재고 로트는 언제나 합격 후에 생긴다. **물건이 온 곳만 다르다** —
+# 번호는 둘 다 우리가 짓는다(`docs/schema-2단계.md`).
 LOT_FROM_SUPPLIER = "공급사"
 LOT_FROM_OWN = "자사"
 LOT_ORIGINS = (LOT_FROM_SUPPLIER, LOT_FROM_OWN)

@@ -74,7 +74,7 @@ def test_a_lot_has_no_status_column(prepared: Session) -> None:
     assert "is_passed" not in columns
 
 
-# ── 번호의 출처 ─────────────────────────────────────────────────────────────
+# ── 로트가 온 곳 ────────────────────────────────────────────────────────────
 
 
 def test_a_raw_material_lot_comes_from_a_supplier(prepared: Session) -> None:
@@ -229,7 +229,7 @@ def test_rework_is_read_from_a_column_not_from_the_number(prepared: Session) -> 
 
     창고의 라벨과 장부가 같아야 사람이 찾을 수 있으므로 번호는 그대로 두고,
     관리도가 「선은 정상분이 긋는다」를 가를 때 읽는 것은 이 칸이다. 번호를
-    잘라 읽으면 우연히 R 로 끝나는 공급사 번호를 오판한다.
+    잘라 읽으면 우연히 R 로 끝나는 번호를 오판한다.
     """
     semi = make_item(codes.SEMI_FINISHED)
     prepared.add(semi)
@@ -300,7 +300,11 @@ def test_two_lots_of_one_item_cannot_share_a_number(prepared: Session) -> None:
 
 
 def test_two_items_may_share_a_lot_number(prepared: Session) -> None:
-    """**공급사 번호는 우리가 짓지 않는다** — 다른 공급사가 같은 번호를 쓸 수 있다."""
+    """유일키는 **품목마다** 본다 — 번호를 우리가 짓게 된 뒤에도 그대로 둔다.
+
+    왜 그대로인지는 `docs/schema-2단계.md` 의 「로트 번호는 우리가 짓는다」가
+    적는다. 좁히면 오늘 통과하지만 **그 결정을 뒤집는다.**
+    """
     first = make_item(codes.RAW_MATERIAL, code="RM-01")
     second = make_item(codes.RAW_MATERIAL, code="RM-02")
     prepared.add_all([first, second])

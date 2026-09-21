@@ -102,3 +102,58 @@ def test_there_is_still_no_screen() -> None:
 
     assert screens == [], screens
     assert not (REPO_ROOT / "package.json").exists()
+
+
+def _table_rows(text: str) -> list[tuple[int, str]]:
+    """표의 줄만 돌려준다 — 구분선(`|---|`)과 코드 블록 안은 뺀다."""
+    rows: list[tuple[int, str]] = []
+    fenced = False
+    for number, line in enumerate(text.splitlines(), start=1):
+        if line.lstrip().startswith("```"):
+            fenced = not fenced
+            continue
+        stripped = line.strip()
+        if fenced or not stripped.startswith("|") or set(stripped) <= set("|-: "):
+            continue
+        rows.append((number, stripped))
+    return rows
+
+
+def _cells(row: str) -> int:
+    """칸 수. 앞뒤의 구분자는 GFM 에서 선택이라 벗기고 센다."""
+    return len(row.strip("|").split("|"))
+
+
+def test_a_table_row_does_not_carry_a_cell_the_header_did_not_declare() -> None:
+    """**선언한 열보다 셀이 많은 줄은 그 셀을 잃는다.**
+
+    대장의 재감사 판정을 앞 셀에 잇지 않고 **칸 구분자 뒤에** 붙인 자리가 열둘
+    있었고, 원문에서는 이어 보이는데 **렌더된 표에서는 사라진다**(NC-112).
+    사람이 원문만 읽으면 끝까지 보이지 않는 부류라 기계가 센다.
+
+    **이 게이트가 못 보는 부류**(W-6 ③): 셀이 **모자란** 줄(GFM 이 빈 칸으로
+    채워 주므로 뜻이 사라지지는 않는다), 셀 안에 `|` 가 이스케이프된 자리,
+    그리고 **헤더 자체가 틀린** 표 — 셀 수만 맞으면 통과한다.
+    """
+    overflowing = []
+    for path in REPO_ROOT.rglob("*.md"):
+        if ".venv" in path.parts or ".git" in path.parts:
+            continue
+        relative = path.relative_to(REPO_ROOT).as_posix()
+        width: int | None = None
+        previous = 0
+        for number, row in _table_rows(path.read_text()):
+            if number != previous + 1:
+                width = None  # 표가 끊겼다 — 다음 줄이 새 표의 머리다
+            previous = number
+            if width is None:
+                width = _cells(row)
+                continue
+            if _cells(row) > width:
+                overflowing.append(
+                    f"{relative}:{number} — 머리는 {width} 칸인데 {_cells(row)} 칸이다"
+                )
+
+    assert overflowing == [], (
+        "선언한 열보다 셀이 많다 — 넘치는 셀은 렌더에서 사라진다:\n" + "\n".join(overflowing)
+    )

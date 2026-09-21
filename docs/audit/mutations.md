@@ -65,3 +65,13 @@
 | 106 | `if not partner.is_active:` 를 `if False:` 로 | `test_an_inactive_supplier_cannot_deliver` |
 | 105 | 로트 번호 길이 가드를 `if False:` 로 | `test_an_item_code_too_long_for_the_lot_number_is_refused` |
 | 102 | 유효기간을 `request.received_date` 대신 **`judged_at.date()`** 에서 세게 되돌렸다 | `test_the_expiry_counts_from_the_day_it_arrived` · `test_material_that_already_expired_on_arrival_is_refused` |
+
+## CodeRabbit 리뷰의 고침 (`e3b3eeb` 뒤)
+
+넷 중 **하나만** 기계가 셀 수 있는 모양이었다. 나머지 셋(110 · 111 · 113)은 산문의
+뜻이 갈린 자리라 게이트가 서지 않는다 — 그 셋이 못 세는 부류라는 것이
+`test_prose.py` 머리말의 「이 게이트가 못 보는 부류」다.
+
+| NC | 무엇을 어긋냈나 | 빨개진 검사 |
+|---|---|---|
+| 112 | 대장의 NC-35 줄 끝에 **칸 하나를 도로 붙였다**(머리가 6 칸인데 7 칸) | `test_a_table_row_does_not_carry_a_cell_the_header_did_not_declare` — 줄 번호까지 가리켰다(`docs/audit/README.md:111`) |

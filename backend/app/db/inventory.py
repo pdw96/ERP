@@ -7,7 +7,7 @@
 
 원칙 ① — **재고 로트는 언제나 합격 후에 생긴다.** 그래서 「검사 대기」나
 「불합격」 같은 상태 칸이 없다: 로트가 있다는 것 자체가 합격했다는 뜻이고,
-불합격품은 로트가 되지 않으므로 담을 창고도 필요 없다. 번호의 출처만 다르다.
+불합격품은 로트가 되지 않으므로 담을 창고도 필요 없다. 물건이 온 곳만 다르다.
 """
 
 from datetime import date, datetime
@@ -43,7 +43,7 @@ _WAREHOUSE_HOLDS_ITEM_TYPE = " OR ".join(
     for warehouse, item_types in codes.WAREHOUSE_ITEM_TYPES.items()
 )
 
-# 번호의 출처가 품목 유형을 따른다 — 자재는 사 오고 자사 품목은 만들어 낸다.
+# 로트가 온 곳이 품목 유형을 따른다 — 자재는 사 오고 자사 품목은 만들어 낸다.
 _ORIGIN_MATCHES_ITEM_TYPE = " OR ".join(
     f"(lot_origin = '{origin}' AND item_type IN ({_quoted(item_types)}))"
     for origin, item_types in codes.LOT_ORIGIN_ITEM_TYPES.items()
@@ -56,8 +56,9 @@ class Lot(Base):
     __tablename__ = "lots"
     __table_args__ = (
         # 같은 품목에 같은 로트 번호가 둘일 수 없다. 번호만으로 전역 유일을
-        # 요구하지는 않는다 — **공급사 번호는 우리가 짓지 않으므로** 다른
-        # 공급사가 같은 번호를 쓸 수 있다.
+        # 요구하지는 않는다 — 번호를 우리가 짓게 된 뒤에도 이 제약은 그대로
+        # 둔다. 왜 그대로인지는 `docs/schema-2단계.md` 의 「로트 번호는 우리가
+        # 짓는다」가 적는다.
         UniqueConstraint("item_id", "lot_number", name="uq_lot_item_number"),
         ForeignKeyConstraint(
             ["item_id", "item_type"],
@@ -168,8 +169,10 @@ class Lot(Base):
     # 복합 외래키의 절반. 품목의 유형과 다를 수 없다.
     item_type: Mapped[str] = mapped_column(String(20))
 
-    # 자재는 공급사 번호, 자사 품목은 배치 번호. 재작업분은 번호가 `...R` 로
-    # 끝나지만 **판정을 문자열에서 하지 않는다** — 그것은 아래 칸이 말한다.
+    # **사내 번호다.** 공급사가 붙여 온 번호는 `inspections.supplier_lot_number`
+    # 에 남는다(`docs/schema-2단계.md` 의 「로트 번호는 우리가 짓는다」).
+    # 재작업분은 번호가 `...R` 로 끝나지만 **판정을 문자열에서 하지 않는다** —
+    # 그것은 아래 칸이 말한다.
     lot_number: Mapped[str] = mapped_column(String(50), index=True)
     lot_origin: Mapped[str] = mapped_column(String(10))
 
