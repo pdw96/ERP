@@ -122,6 +122,32 @@ def test_the_groups_in_the_database_match_the_ones_the_program_calls(
     assert planted == set(codes.GROUP_CODES)
 
 
+def test_the_transaction_type_the_program_names_is_in_the_seed(blank: Engine) -> None:
+    """**프로그램이 이름으로 부르는 수불유형이 시드에 있어야 한다.**
+
+    수불유형 열둘의 값은 시드에만 있고 `codes.py` 에는 **부르는 쪽이 있는 하나만**
+    적혀 있다(`TXN_PURCHASE_RECEIPT`). 한 벌 반이라 갈릴 수 있는 자리이므로 —
+    시드에서 그 줄의 이름을 바꾸면 원장의 CHECK 가 아무 줄도 받지 않게 되고,
+    그것은 **아무도 터지지 않는 고장**이다 — 여기서 둘을 견준다.
+
+    **속성 줄까지 본다.** 코드만 있고 속성이 없으면 원장이 가리킬 수 없다.
+    """
+    seed_module.seed(blank)
+
+    with blank.connect() as conn:
+        planted = conn.execute(
+            text(
+                "SELECT a.total_effect FROM txn_type_attributes AS a"
+                " JOIN common_codes AS c"
+                " ON c.group_code = a.group_code AND c.code = a.code"
+                " WHERE a.code = :code"
+            ),
+            {"code": codes.TXN_PURCHASE_RECEIPT},
+        ).all()
+
+    assert planted == [(codes.EFFECT_INCREASE,)], planted
+
+
 def test_every_measured_reason_points_at_an_item_that_exists(blank: Engine) -> None:
     """계량 코드는 검사 항목의 판정 결과일 뿐이다 — 가리킬 항목이 있어야 한다."""
     seed_module.seed(blank)

@@ -10,16 +10,20 @@
 불합격품은 로트가 되지 않으므로 담을 창고도 필요 없다. 번호의 출처만 다르다.
 """
 
-from datetime import date
+from datetime import date, datetime
 
 from sqlalchemy import (
     Boolean,
     CheckConstraint,
     Date,
+    DateTime,
     Float,
     ForeignKeyConstraint,
+    Index,
+    Integer,
     String,
     UniqueConstraint,
+    text,
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -159,14 +163,112 @@ class Lot(Base):
 
     # **특채로 들어온 로트에는 아직 표식이 없다.** 원칙 ①의 예외 하나가 특채이고
     # 거기에는 표식이 남아야 하는데, 그것을 담을 자리가 이 표에 없다.
-    # `nonconformity_stage_rules.special_acceptance_allowed` 는 **그 사유가 특채를
-    # 허용하는가**를 말할 뿐, 이 로트가 실제로 그 길로 들어왔는지는 말하지 않는다.
     #
-    # 칸 하나로 둘지, 로트가 **자기를 만든 검사를 가리키게** 해서 구조로 답할지는
-    # 검사 표가 서는 2단계에서 정한다. 지금 칸을 두면 2단계가 검사를 가리키게 하는
-    # 순간 같은 사실이 두 곳에 살고, 두 벌은 반드시 갈린다.
+    # **어떻게 답할지는 정해졌다 — 칸이 아니라 구조다.** 로트가 `inspection_id`
+    # 로 자기를 만든 검사를 가리키면 특채 여부도 판정자도 측정값도 검사 쪽에 한
+    # 번만 산다. 칸을 따로 두면 같은 사실이 두 곳에 살고, 두 벌은 반드시 갈린다
+    # (`docs/schema-2단계.md` 의 「`lots` 가 바뀌는 자리」).
     #
-    # 아직 쓰기 경로가 없으므로 틀린 데이터가 들어올 자리는 아니다 —
-    # **로트를 만드는 길이 서는 바로 그 단계에서 함께 선다.**
+    # **아직 붙지 않았다.** 붙는 자리는 **로트를 실제로 만드는 쪽**, 곧 쓰기
+    # 경로가 서는 조각이다 — 지금 붙이면 아무도 채우지 않는 칸이 선다. 그때까지
+    # 이 표는 검사를 모르고, 수불 원장의 입고 줄이 가리키는 검사가 그 로트를
+    # 만든 검사인지도 데이터베이스가 보증하지 못한다.
 
     item: Mapped[Item] = relationship(foreign_keys=[item_id, item_type])
+
+
+class StockLedgerEntry(Base):
+    """수불 원장 한 줄 — **로트가 생기고 움직인 사실.**
+
+    **원칙 ⑦이 이 표의 모양을 정한다 — 일어난 일은 지우지 않는다.** 줄을 지우거나
+    고치지 않고, 취소는 **반대 방향의 새 줄**이다. 그래서 삭제 칸도 수정 시각도
+    없다: 있으면 지우는 길이 생기고, 길이 있으면 언젠가 지나간다.
+
+    ### 수량은 늘 양수다 — 방향은 유형이 말한다
+
+    `txn_type_attributes.total_effect` 가 증가 · 감소 · 불변 · 기준점 · 양방향을
+    **이미 들고 있다.** 원장 줄에 부호를 또 두면 같은 사실이 두 곳에 살고, 유형은
+    「감소」인데 수량이 양수인 줄을 제약이 막지 못한다.
+
+    부호를 쓰면 `>= 0` 을 걸 수 없다는 것도 값이다. 하한이 없는 칸은
+    `is_finite()` 단독이 되고, 그것은 `NaN` 은 막아도 **음수 입고**는 막지 않는다.
+
+    ### 유형은 공통코드가 아니라 **속성 줄**을 가리킨다
+
+    공통코드를 가리키면 「그 코드가 있다」까지만 증명된다 — 총량 영향도 근거
+    문서도 없는 유형이 원장에 서고, 그러면 잔량을 세는 쪽이 **그 줄을 더해야
+    하는지 빼야 하는지 모른다.** 속성 줄을 가리키면 그 한 겹이 더 막힌다.
+
+    ### 이 조각의 원장에 나는 줄은 구매입고 하나다
+
+    합격이 로트를 만들고 그 자리에 입고 한 줄이 남는다. 나머지 열한 유형은 내는
+    쪽이 3~8단계에 있으므로, 받아 두면 **근거 문서가 없는 줄**이 서고 화면에서는
+    실제로 일어난 일처럼 보인다. 그 유형을 내는 조각이 설 때 CHECK 가 함께
+    넓어진다.
+
+    > **데이터베이스가 아직 보증하지 못하는 것이 하나 있다** — 이 줄이 가리키는
+    > 검사가 **그 로트를 만든 검사인가**. 묶으려면 로트가 자기를 만든 검사를
+    > 가리켜야 하는데(`lots.inspection_id`), 그 칸은 로트를 실제로 만드는 쪽이
+    > 서는 조각에서 붙는다. 지금은 붙일 수 있어도 **채우는 쪽이 없다.**
+    """
+
+    __tablename__ = "stock_ledger_entries"
+    __table_args__ = (
+        ForeignKeyConstraint(["lot_id"], ["lots.id"], name="fk_stock_ledger_entry_lot"),
+        ForeignKeyConstraint(
+            ["inspection_id"],
+            ["inspections.id"],
+            name="fk_stock_ledger_entry_inspection",
+        ),
+        # **속성 줄을 가리킨다.** 공통코드를 가리키면 총량 영향이 없는 유형이
+        # 원장에 설 수 있고, 그러면 잔량을 세는 쪽이 방향을 알 수 없다.
+        ForeignKeyConstraint(
+            ["txn_type_group", "txn_type"],
+            ["txn_type_attributes.group_code", "txn_type_attributes.code"],
+            name="fk_stock_ledger_entry_txn_type",
+        ),
+        CheckConstraint(
+            f"txn_type_group = '{codes.TXN_TYPE}'", name="ck_stock_ledger_entry_txn_type_group"
+        ),
+        # 이 조각이 내는 유형은 하나다. 넓히는 것은 마이그레이션이다.
+        CheckConstraint(
+            f"txn_type = '{codes.TXN_PURCHASE_RECEIPT}'",
+            name="ck_stock_ledger_entry_is_a_purchase_receipt",
+        ),
+        # `NaN >= 0` 이 참이라 하한만으로는 막지 못한다. 한 줄이 들어오면 이후의
+        # **모든 잔량 합계가 `NaN`** 이 되고 비교가 전부 거짓이라 재고가 조용히
+        # 사라진다 — 원장은 합으로 읽는 표이므로 그 피해가 표 하나에 그치지 않는다.
+        CheckConstraint(
+            f"quantity >= 0 AND {is_finite('quantity')}", name="ck_stock_ledger_entry_quantity"
+        ),
+        # **로트 하나에 입고 줄은 하나다.** 둘이 서면 같은 물건이 두 번 들어온
+        # 것이 되고, 잔량이 실물의 두 배가 된다.
+        #
+        # 유형을 조건에 적어 **부분 유일 인덱스**로 둔다. 그냥 `UNIQUE (lot_id)`
+        # 로 두면 오늘은 같은 뜻이지만, 불출이 서는 날 한 로트에 여러 줄이 나야
+        # 하므로 그때 이 제약을 손봐야 한다 — 손봐야 하는 제약은 손보지 않은
+        # 채로 남는다.
+        Index(
+            "uq_stock_ledger_entry_one_receipt_per_lot",
+            "lot_id",
+            unique=True,
+            postgresql_where=text(f"txn_type = '{codes.TXN_PURCHASE_RECEIPT}'"),
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+
+    lot_id: Mapped[int] = mapped_column(Integer)
+
+    txn_type: Mapped[str] = mapped_column(String(30))
+    txn_type_group: Mapped[str] = mapped_column(
+        String(20), default=codes.TXN_TYPE, server_default=codes.TXN_TYPE
+    )
+
+    quantity: Mapped[float] = mapped_column(Float)
+    occurred_at: Mapped[datetime] = mapped_column(DateTime)
+
+    # **입고 줄은 자기를 만든 검사를 가리킨다.** 이 조각의 줄은 전부 판정에서
+    # 나오므로 비어 있을 수 없다 — 비워 두면 근거 없는 입고가 선다. 판정에서
+    # 나지 않는 줄(전기이월 · 생산입고)이 서는 날 함께 넓어진다.
+    inspection_id: Mapped[int] = mapped_column(Integer)
