@@ -44,8 +44,8 @@
   그동안 `AccessExclusiveLock`
 - 외래키 둘과 CHECK 넷 — **기존 행 전체를 검증한다.** 외래키는 가리키는 표와
   가리켜지는 표 **양쪽**을 잡으므로 `common_codes` 의 쓰기도 함께 멈춘다
-- **`code_groups` 는 세지 않는다.** 이 리비전이 그 표에 하는 일은 `INSERT` 와
-  (되돌릴 때) `DELETE` 뿐이라 둘 다 `RowExclusiveLock` 이고, 그것은 다른 쓰기를 막지 않는다 — DDL 을 받는 표
+- **`code_groups` 는 세지 않는다.** 이 리비전은 그 표에 **DDL 을 내지 않는다** —
+  읽고 쓸 뿐이라 가장 무거운 것이 `RowExclusiveLock` 이고, 그것은 다른 쓰기를 막지 않는다 — DDL 을 받는 표
   둘과 외래키가 가리키는 표 하나, 그래서 셋이다
 - `create_unique_constraint` — 잠금을 잡고 인덱스를 만든다. `CONCURRENTLY` 를 쓸 수
   없는 형태다

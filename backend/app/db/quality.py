@@ -148,7 +148,8 @@ class ProcessInspectionStandard(Base):
     # 품목 축이 아니라 자재군인 이유는, 품목 축을 더하면 원자재 15 × 검사항목
     # 만큼의 실측값을 누군가 정해야 하고 그 값이 지금 없기 때문이다. 자재군은
     # **품목 시드가 이미 적어 둔 구분**이다 — 지어낸 축이 아니다
-    # (`seed_data/03_items.sql` 의 「무리별 수는 재고단위와 맞는다」).
+    # (`seed_data/03_items.sql` 의 `material_group` 열. 재고단위는 그 경계를
+    # 반만 말하므로 근거는 단위가 아니라 그 열이다).
     #
     # **공정검사 줄에서는 비어 있다.** 반제품과 완제품에는 자재군이 없다.
     material_group: Mapped[str | None] = mapped_column(String(30), nullable=True)
