@@ -9,6 +9,13 @@
   보는 조건**이라 CHECK 로 적을 수 없다. 판정을 이 줄에 들고 쌍으로 가리키면
   그 줄만 보고 막을 수 있다. 값을 나르는 칸이 아니라 외래키의 자리다
 
+**데이터 단계가 하나 있다 — 원장이 이미 아는 짝을 로트로 옮긴다.** 앞 리비전
+(`e84fbec436c0`)에 선 원장 줄은 검사를 알고 로트도 아는데, 로트는 검사를 모른다.
+옮기지 않으면 아래의 쌍 외래키가 상대를 찾지 못해 **올리는 것 자체가 멈춘다.**
+「이 리비전이 칸을 세우니 옛 줄에 값이 있을 수 없다」는 NC-65 와 같은 함정이고,
+여기서는 **값이 다른 표에 있었다.** 옮길 수 있는 것은 한 로트에 입고 줄이
+하나이기 때문이다 — 앞 리비전의 부분 유일 인덱스가 그것을 보장한다.
+
 **자동 생성을 그대로 쓰지 않았다. CHECK 가 통째로 빠져 있었다** — Alembic 은
 기존 표에 붙는 CHECK 를 감지하지 않는다(`65d31f8b7918` 에서 넷이 같은 이유로
 빠졌다). 손으로 적었고 `tests/test_migrations.py` 가 두 스키마를 견준다.
@@ -68,6 +75,42 @@ def upgrade() -> None:
     op.add_column("lots", sa.Column("inspection_result", sa.String(length=10), nullable=True))
     op.create_unique_constraint("uq_lot_inspection", "lots", ["inspection_id"])
     op.create_unique_constraint("uq_lot_id_inspection", "lots", ["id", "inspection_id"])
+    # ── 데이터 단계 — 원장이 이미 아는 짝을 로트로 옮긴다 ──────────────────
+    # **앞 리비전에 선 원장 줄은 검사를 알고 로트도 안다.** 그 짝을 옮기지 않으면
+    # 아래의 쌍 외래키가 `(lot_id, inspection_id)` 에서 상대를 찾지 못해 **올리는
+    # 것 자체가 멈춘다** — 「이 리비전이 칸을 세우니 옛 줄에 값이 있을 수 없다」는
+    # NC-65 와 같은 함정이고, 여기서는 값이 **다른 표에** 있었다(Codex 리뷰 NC-117).
+    #
+    # 옮길 수 있는 것은 **한 로트에 입고 줄이 하나**이기 때문이다 — 앞 리비전의
+    # 부분 유일 인덱스가 그것을 이미 보장한다. 짝이 없는 로트(이월)는 그대로
+    # 비어서 선다.
+    op.execute(
+        """
+        UPDATE lots AS l
+        SET inspection_id = e.inspection_id, inspection_result = i.result
+        FROM stock_ledger_entries AS e
+        JOIN inspections AS i ON i.id = e.inspection_id
+        WHERE e.lot_id = l.id AND e.txn_type = '구매입고'
+        """
+    )
+    # **옮기고 나서 옮길 수 없던 것을 이름으로 말한다.** 불합격 판정이 만든 원장
+    # 줄은 이 리비전이 세우는 CHECK 가 거부하는데, 거기서 나오는 말은 제약 이름이라
+    # 배포하는 사람이 **어느 줄 때문인지** 모른다.
+    op.execute(
+        """
+        DO $$
+        DECLARE impossible text;
+        BEGIN
+          SELECT string_agg(lot_number, ', ' ORDER BY lot_number) INTO impossible
+          FROM lots WHERE inspection_result = '불합격';
+          IF impossible IS NOT NULL THEN
+            RAISE EXCEPTION
+              '불합격 판정이 만든 로트가 있어 올릴 수 없다: %. 원칙 ① 이 금지하는 줄이므로 사람이 먼저 가른다',
+              impossible;
+          END IF;
+        END $$;
+        """
+    )
     op.create_foreign_key(
         "fk_lot_inspection",
         "lots",

@@ -1135,6 +1135,25 @@ FROM items AS i WHERE i.code = 'RM-01';
 )
 
 
+_WITH_A_LEDGER_LINE = (
+    _BEFORE_WRITE_PATH
+    + """
+INSERT INTO code_groups (group_code, name, value_fixed, description) VALUES
+  ('TXN_TYPE', '수불유형', TRUE, '시험');
+
+INSERT INTO common_codes (group_code, code, name) VALUES ('TXN_TYPE', '구매입고', '구매입고');
+
+INSERT INTO txn_type_attributes (group_code, code, total_effect, source_document_type)
+VALUES ('TXN_TYPE', '구매입고', '증가', '가입고');
+
+INSERT INTO stock_ledger_entries (lot_id, txn_type, txn_type_group, quantity, occurred_at,
+                                  inspection_id)
+SELECT l.id, '구매입고', 'TXN_TYPE', 500.0, TIMESTAMP '2026-09-21 09:30', i.id
+FROM lots AS l, inspections AS i;
+"""
+)
+
+
 def _upgrade_with(engine: Engine, schema: str, revision: str, planted: str) -> Config:
     """그 리비전까지 올리고 **줄을 심는다.**"""
     config = _config_for_schema(engine, schema)
@@ -1292,28 +1311,39 @@ def test_downgrade_says_which_lots_would_lose_their_ledger(engine: Engine) -> No
     사라지는 것을 본다.**
     """
     schema = "ledger_downgrade_guard"
-    planted = (
-        _BEFORE_WRITE_PATH
-        + """
-INSERT INTO code_groups (group_code, name, value_fixed, description) VALUES
-  ('TXN_TYPE', '수불유형', TRUE, '시험');
-
-INSERT INTO common_codes (group_code, code, name) VALUES ('TXN_TYPE', '구매입고', '구매입고');
-
-INSERT INTO txn_type_attributes (group_code, code, total_effect, source_document_type)
-VALUES ('TXN_TYPE', '구매입고', '증가', '가입고');
-
-INSERT INTO stock_ledger_entries (lot_id, txn_type, txn_type_group, quantity, occurred_at,
-                                  inspection_id)
-SELECT l.id, '구매입고', 'TXN_TYPE', 500.0, TIMESTAMP '2026-09-21 09:30', i.id
-FROM lots AS l, inspections AS i;
-"""
-    )
     with _schema(engine, schema):
-        config = _upgrade_with(engine, schema, "e84fbec436c0", planted)
+        config = _upgrade_with(engine, schema, "e84fbec436c0", _WITH_A_LEDGER_LINE)
 
         with pytest.raises(Exception, match="SL-2026-0001"):
             command.downgrade(config, "361ec789023c")
+
+
+def test_upgrading_a_database_that_already_has_a_ledger_line_does_not_stop(
+    engine: Engine,
+) -> None:
+    """**값이 다른 표에 있는 함정** (Codex 리뷰 NC-117).
+
+    `e84fbec436c0` 에 멈춰 있던 데이터베이스의 원장 줄은 **검사를 알고 로트도
+    안다.** 그런데 `08d406fa7f3b` 가 세우는 `lots.inspection_id` 는 비어서 서므로,
+    원장의 쌍 외래키가 `(lot_id, inspection_id)` 에서 상대를 찾지 못해 **올리는
+    것 자체가 멈춘다.**
+
+    NC-65 와 같은 함정의 다른 얼굴이다 — 그때는 「이 리비전이 세운 표라 사람의
+    줄이 있을 수 없다」였고, 여기서는 **「이 리비전이 세운 칸이라 값이 있을 수
+    없다」**인데 값이 **다른 표에** 있었다.
+    """
+    schema = "write_path_upgrade_with_a_ledger"
+    with _schema(engine, schema):
+        config = _upgrade_with(engine, schema, "e84fbec436c0", _WITH_A_LEDGER_LINE)
+
+        command.upgrade(config, "head")
+
+        scoped = _engine_for_schema(engine, schema)
+        with scoped.connect() as conn:
+            linked = conn.execute(text("SELECT lot_number, inspection_result FROM lots")).all()
+
+    # 원장이 알던 짝이 로트로 옮겨 왔다 — 비어 있으면 위에서 멈췄을 것이다.
+    assert linked == [("SL-2026-0001", "합격")], linked
 
 
 # ── 조각 6 — 불합격에도 도착일이 남는다 (`a7c14b3e9052`) ─────────────────────

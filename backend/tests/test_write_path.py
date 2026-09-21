@@ -634,6 +634,77 @@ def test_an_item_code_too_long_for_the_lot_number_is_refused(prepared: Session) 
     assert prepared.query(Lot).count() == 0
 
 
+def test_a_serial_that_grew_a_digit_is_refused_by_name(prepared: Session) -> None:
+    """**재는 것은 접두가 아니라 지은 번호다** (Codex 리뷰 NC-116).
+
+    접두만 재면 `-NN` 두 자리를 예약한 셈인데, **일련이 99 를 넘으면 세 자리로
+    는다.** 접두가 딱 맞던 품목의 백째 입고에서 번호가 한 자 길어지고, 그때는
+    이름 있는 거절이 아니라 **실마리 없는 500** 이 된다.
+
+    99 번을 실제로 받는 대신 **그날의 마지막 번호를 심어** 다음 후보가 100 이
+    되게 한다 — 같은 갈래이고 백 배 싸다.
+    """
+    exact_code = "RM-" + "X" * 37  # 접두가 정확히 48자 = 50 - 두 자리
+    item = make_item(codes.RAW_MATERIAL, code=exact_code, material_group=GROUP)
+    prepared.add(item)
+    prepared.flush()
+    prefix = f"{exact_code}-{RECEIVED:%y%m%d}-"
+    assert len(prefix) + 2 == 50, len(prefix)
+
+    # 99 번이 이미 나간 셈으로 둔다 — 다음 후보가 세 자리다.
+    prepared.add(
+        Lot(
+            item_id=item.id,
+            item_type=item.item_type,
+            lot_number=f"{prefix}99",
+            lot_origin=codes.LOT_FROM_SUPPLIER,
+            warehouse=codes.WAREHOUSE_RAW,
+            stock_type=codes.STOCK_GOOD,
+            quantity=1.0,
+            received_date=RECEIVED,
+        )
+    )
+    prepared.flush()
+
+    with pytest.raises(RefusedInspection, match="로트 번호가 칸"):
+        receive(prepared, _request(item_code=exact_code))
+
+
+def test_a_reason_the_system_derives_cannot_be_sent_by_a_person(prepared: Session) -> None:
+    """**세는 사유 가운데도 사람이 적을 수 없는 것이 있다** (Codex 리뷰 NC-115).
+
+    `IQ-EXP`(잔여 유효기간 부족)는 계수지만 **사람이 들여다볼 검사 항목이 없다** —
+    입고일과 설정기간의 비교 결과라 시스템이 단다. 「계수인가」만 보면 이것이
+    통과해서, **멀쩡한 자재에 사람이 「유효기간 부족」을 찍는 줄**이 선다.
+
+    가르는 것은 코드값이 아니라 **그 사유가 가리키는 검사 항목이 있는가**이고,
+    기준정보가 이미 그것을 들고 있다.
+    """
+    add_code(prepared, codes.NC_REASON, "IQ-EXP", "잔여 유효기간 부족")
+    prepared.flush()
+    prepared.add(
+        NonconformityAttribute(
+            code="IQ-EXP",
+            measure_kind=codes.COUNTED_KIND,
+            inspection_item_code=None,
+        )
+    )
+    prepared.add(
+        NonconformityStageRule(
+            reason_code="IQ-EXP",
+            stage_code=codes.STAGE_INCOMING,
+            disposition="반품",
+            special_acceptance_allowed=False,
+        )
+    )
+    prepared.flush()
+
+    with pytest.raises(RefusedInspection, match="시스템이 계산해 다는 사유"):
+        receive(prepared, _request(nonconformity_code="IQ-EXP"))
+
+    assert prepared.query(Inspection).count() == 0
+
+
 def test_the_expiry_counts_from_the_day_it_arrived(prepared: Session) -> None:
     """**세는 것은 입고일부터다** — 시드의 `IQ-EXP` 가 그렇게 적는다.
 

@@ -78,6 +78,7 @@ SPECIAL_ACCEPTANCE_ON_A_PASS = "special_acceptance_on_a_pass"
 SPECIAL_ACCEPTANCE_IS_NOT_OPEN = "special_acceptance_is_not_open"
 SUPPLIER_IS_NOT_ACTIVE = "supplier_is_not_active"
 REASON_IS_NOT_A_COUNTED_ONE = "reason_is_not_a_counted_one"
+REASON_IS_DERIVED_BY_THE_SYSTEM = "reason_is_derived_by_the_system"
 ITEM_IS_NOT_MEASURED = "item_is_not_measured"
 LOT_NUMBER_WOULD_NOT_FIT = "lot_number_would_not_fit"
 MATERIAL_IS_ALREADY_EXPIRED = "material_is_already_expired"
@@ -199,13 +200,24 @@ def _reason_for(session: Session, item_code: str) -> str:
     return reason
 
 
-def _must_be_a_counted_reason(session: Session, reason_code: str) -> None:
-    """사람이 적을 수 있는 사유는 **세는 항목의 것뿐이다** (원칙 ③).
+def _must_be_a_reason_a_person_inspects(session: Session, reason_code: str) -> None:
+    """사람이 적을 수 있는 사유는 **사람이 보는 항목의 것뿐이다** (원칙 ③).
 
-    재는 항목의 사유(`입도 이탈` 같은)는 **측정값에서만 나온다.** 그것을 요청에서
-    받으면 규격 안에 든 값을 적어 놓고 같은 항목으로 불합격을 만들 수 있고,
-    특채가 열린 사유라면 **규격 안인데 특채**라는 줄까지 선다 — 계산이 낸 판정을
-    사람이 요청 본문으로 덮는 자리이고, 그것이 원칙 ③ 이 없애려는 것이다.
+    두 겹이다 —
+
+    **① 재는 항목의 사유는 측정값에서만 나온다.** 그것을 요청에서 받으면 규격 안에
+    든 값을 적어 놓고 같은 항목으로 불합격을 만들 수 있고, 특채가 열린 사유라면
+    **규격 안인데 특채**라는 줄까지 선다.
+
+    **② 세는 사유 가운데도 시스템이 다는 것이 있다.** `IQ-EXP`(잔여 유효기간
+    부족)가 그것이며, 기준정보가 그 사실을 **검사 항목을 가리키지 않는 것**으로
+    적어 둔다 — 사람이 들여다볼 항목이 없고 입고일과 설정기간의 비교 결과일
+    뿐이기 때문이다. 첫 겹만 보면 이것이 통과해서, **멀쩡한 자재에 사람이
+    「유효기간 부족」을 찍는 줄**이 선다(Codex 리뷰 NC-115).
+
+    **코드를 이름으로 세지 않는다.** 「`IQ-EXP` 는 안 된다」로 적으면 같은 성질의
+    사유가 느는 날 이 자리가 낡는다 — 가르는 것은 코드값이 아니라 **그 사유가
+    가리키는 검사 항목이 있는가**이고, 그것은 기준정보가 이미 들고 있다.
     """
     attribute = session.get(NonconformityAttribute, (codes.NC_REASON, reason_code))
     if attribute is None or attribute.measure_kind != codes.COUNTED_KIND:
@@ -213,6 +225,12 @@ def _must_be_a_counted_reason(session: Session, reason_code: str) -> None:
             REASON_IS_NOT_A_COUNTED_ONE,
             f"{reason_code} 는 재는 항목의 사유라 사람이 적을 수 없다 —"
             " 재는 항목의 판정은 측정값에서만 나온다",
+        )
+    if attribute.inspection_item_code is None:
+        raise RefusedInspection(
+            REASON_IS_DERIVED_BY_THE_SYSTEM,
+            f"{reason_code} 는 사람이 보는 검사 항목이 없다 —"
+            " 시스템이 계산해 다는 사유라 요청에서 받지 않는다",
         )
 
 
@@ -256,19 +274,25 @@ def _next_lot_number(session: Session, item: Item, received_date: date) -> str:
         {"key": locks.LOT_NUMBER, "item": item.id},
     )
     prefix = f"{item.code}-{received_date:%y%m%d}-"
-    if len(prefix) + 2 > _LOT_NUMBER_LENGTH:
-        # 품목 코드가 길면 우리가 지은 번호가 칸을 넘어 **데이터베이스가 자르려다
-        # 터진다.** 품목은 정상으로 서고 그 품목의 모든 합격이 500 이 되므로,
-        # 번호를 짓기 전에 이름으로 말한다.
-        raise RefusedInspection(
-            LOT_NUMBER_WOULD_NOT_FIT,
-            f"품목 코드가 길어 로트 번호가 칸({_LOT_NUMBER_LENGTH}자)을 넘는다: {item.code}",
-        )
     used = session.scalars(
         select(Lot.lot_number).where(Lot.item_id == item.id, Lot.lot_number.like(f"{prefix}%"))
     ).all()
     serials = [int(number[len(prefix) :]) for number in used if number[len(prefix) :].isdigit()]
-    return f"{prefix}{max(serials, default=0) + 1:02d}"
+    number = f"{prefix}{max(serials, default=0) + 1:02d}"
+    if len(number) > _LOT_NUMBER_LENGTH:
+        # **지은 번호를 재지 접두만 재지 않는다.** 처음에는 `len(prefix) + 2` 를
+        # 봤는데, 일련이 99 를 넘으면 자릿수가 **세 자리로 는다** — 접두가 딱
+        # 맞던 품목의 백째 입고에서 번호가 한 자 길어지고, 데이터베이스가 자르려다
+        # 터져 실마리 없는 500 이 된다(Codex 리뷰 NC-116).
+        #
+        # 두 원인(긴 품목 코드 · 늘어난 일련)이 같은 결과를 내므로 **결과를**
+        # 잰다. 자릿수를 두 자리로 묶어 막는 쪽은 쓰지 않는다 — 같은 품목이 하루에
+        # 백 번 들어오는 것은 일어날 수 있는 일이고, 제약이 사실을 막으면 안 된다.
+        raise RefusedInspection(
+            LOT_NUMBER_WOULD_NOT_FIT,
+            f"지은 로트 번호가 칸({_LOT_NUMBER_LENGTH}자)을 넘는다: {number}",
+        )
+    return number
 
 
 def receive(session: Session, request: IncomingInspection) -> Judged:
@@ -381,7 +405,7 @@ def receive(session: Session, request: IncomingInspection) -> Judged:
     elif request.nonconformity_code is not None:
         # **계산이 보지 못하는 것은 사람이 적는다** — 세는 항목의 결함이다.
         _allows_special_acceptance(session, request.nonconformity_code)
-        _must_be_a_counted_reason(session, request.nonconformity_code)
+        _must_be_a_reason_a_person_inspects(session, request.nonconformity_code)
         reason = request.nonconformity_code
 
     if reason is None:

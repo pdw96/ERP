@@ -91,3 +91,11 @@
 | 109 | 데이터 단계를 `l.received_date` 대신 `i.judged_at::date` 로 | **처음에는 통과했다.** 픽스처의 두 날짜를 떼어 둔 뒤 `test_the_data_step_moves_the_arrival_date_from_the_lot` 이 물었다 |
 | 109 | 되돌림 가드의 `NOT EXISTS` 를 `FALSE AND NOT EXISTS` 로(아무것도 세지 않게) | `test_downgrade_says_whose_arrival_date_has_no_lot_to_fall_back_on` |
 | 114 | `ck_lot_from_an_inspection_has_an_arrival_date` 를 항상 참으로(`OR TRUE`) | `test_an_own_lot_cannot_borrow_an_incoming_inspection` · 대조 테스트. **CHECK 를 걸기 전에 그 검사가 실제로 통과하는 것**(DID NOT RAISE)을 먼저 확인했다 — 구멍이 있다는 주장과 구멍이 있다는 사실은 다르다 |
+
+## Codex 리뷰의 고침 — `931a400` 뒤
+
+| NC | 무엇을 어긋냈나 | 빨개진 검사 |
+|---|---|---|
+| 115 | `if attribute.inspection_item_code is None:` 을 `if False:` 로 | `test_a_reason_the_system_derives_cannot_be_sent_by_a_person` |
+| 116 | 길이 가드를 접두를 재던 옛 식(`len(prefix) + 2`)으로 되돌렸다 | `test_a_serial_that_grew_a_digit_is_refused_by_name` — 긴 코드 갈래는 **그대로 통과한다**(같은 결과의 두 원인이라 한 갈래로는 갈리지 않는다) |
+| 117 | `08d406fa7f3b` 의 데이터 단계를 `SELECT 1` 로 | `test_upgrading_a_database_that_already_has_a_ledger_line_does_not_stop` |
