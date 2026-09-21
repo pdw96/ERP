@@ -1,7 +1,7 @@
 [project]
 name = "erp"
 version = "0.1.0"
-description = "조기경보 ERP — 1단계 기준정보"
+description = "조기경보 ERP — 기준정보와 품질 기준"
 # 하한이 3.11 인 것은 **이 저장소를 손으로 검증할 수 있게 하기 위해서**다.
 # 컨테이너는 3.12 를 쓰지만, 개발자의 로컬이 3.11 이어도 같은 테스트가 돈다.
 requires-python = ">=3.11"

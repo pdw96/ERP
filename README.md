@@ -4,20 +4,26 @@
 입고 → 원재료창고 → 생산창고 → 제품창고 → 출하 — 을 장부에 적는다.
 
 - **설계도**: [조기경보 ERP 설계도 42판](https://claude.ai/artifact/GMJpbFywKh8wj6N4vEukT6)
-- **이번 범위**: [`PRD.md`](PRD.md) — 1단계 · 표를 세우는 단 한 번
+- **이번 범위**: [`PRD.md`](PRD.md) — 2단계 · 합격이 로트를 만든다
+  (1단계는 [`docs/PRD-1단계.md`](docs/PRD-1단계.md) 로 닫혔다)
 - **표의 모양**: [`docs/schema.md`](docs/schema.md)
 - **작업 규칙**: [`CLAUDE.md`](CLAUDE.md) · [`CHECKLIST.md`](CHECKLIST.md)
 
 ## 지금 어디인가
 
-**1단계가 끝났다** — 기준정보 표 열셋과 로트 표 하나, 마이그레이션, 시드.
-테스트 145개가 PostgreSQL 16 위에서 돈다.
+**1단계가 끝났고 2단계가 시작됐다.** 1단계가 세운 것은 기준정보 표 열셋과 로트 표
+하나, 마이그레이션, 시드다. 2단계의 첫 조각(자재군 축)이 그 위에 섰다 — 「수입」
+검사 기준이 원자재 열다섯 전부에 똑같이 걸리던 자리를 자재군 셋으로 가른다.
+
+테스트는 PostgreSQL 16 위에서 돈다. **수는 여기 적지 않는다** — CI 출력이 그것을
+말하고, 산문에 적어 둔 수는 다음 커밋에서 낡는다.
 
 `app/seed_data/` 의 숫자는 **전부 시연용 임의값**이다. 실제 규격은 고객 도면이
 있어야 나온다 — 각 파일 머리에 그 사실을 적어 두었다.
 
-1단계에는 **공개 API 도 화면도 없다.** 뜨는 것은 데이터베이스뿐이고 backend 는
-마이그레이션과 시드를 돌리고 끝나는 일회성 잡이다. 웹 서버는 2단계에 들어온다.
+**아직 공개 API 도 화면도 없다.** 뜨는 것은 데이터베이스뿐이고 backend 는
+마이그레이션과 시드를 돌리고 끝나는 일회성 잡이다. 웹 서버는 2단계의 첫 쓰기
+엔드포인트와 함께 들어오고, 화면은 그 뒤다.
 
 ## 돌리는 법
 
@@ -67,9 +73,11 @@ backend/
   app/db/production.py   근무형태 · 비가동 구간
   app/db/quality.py      공정별 검사 기준
   app/db/inventory.py    로트 한 표
+  app/core/locks.py      자문 잠금 키 — 한 곳에 모은다
+  app/core/alembic_url.py  Alembic 에 넘기는 URL
   app/seed.py            세 조건 · 트랜잭션 하나
   app/seed_data/*.sql    기준정보 — 사람이 읽고 고치는 표
-  migrations/            Alembic — 리비전 하나
-  tests/                 실제 PostgreSQL 에 붙는다 (145개)
+  migrations/            Alembic — 리비전 둘 (초기 스키마 · 자재군 축)
+  tests/                 실제 PostgreSQL 에 붙는다
 compose.yaml             postgres + 일회성 migrate 잡
 ```
