@@ -239,13 +239,14 @@ def test_downgrade_takes_every_table_back_out(engine: Engine) -> None:
         assert remaining <= {"alembic_version"}, f"내렸는데 남은 표가 있다: {remaining}"
 
 
-def test_two_containers_can_migrate_at_the_same_time(engine: Engine) -> None:
+def test_containers_starting_together_do_not_kill_each_other(engine: Engine) -> None:
     """**동시에 뜬 컨테이너가 서로를 죽이지 않는가.**
 
     compose 가 백엔드를 둘 이상 띄우면 각자 `alembic upgrade head` 로 시작한다.
     둘 다 아직 적용되지 않은 리비전을 보고 각자 `CREATE TABLE` 을 내면, 진 쪽은
     `pg_type_typname_nsp_index` 유일 위반으로 **기동에 실패한다.** 잠금을 걸기
-    전에 넷을 동시에 띄워 둘이 실제로 그렇게 죽었다.
+    전에 넷을 동시에 띄웠을 때 둘이 실제로 그렇게 죽었다. 여기서는 셋을 띄운다 —
+    이름에 수를 넣지 않는 것은 수가 코드보다 먼저 낡기 때문이다.
 
     시드 구간에만 잠금을 두는 것은 반쪽이다 — 시드에 닿기 전에 여기서 죽는다.
 
@@ -329,7 +330,7 @@ def test_the_url_the_caller_gives_is_not_escaped_again(
 # 위의 대조 테스트는 **빈 스키마**에 올린다. 그래서 자재군 리비전의 데이터
 # 단계(`WHERE EXISTS (SELECT 1 FROM items)`)는 통째로 건너뛰어진다 — 저장소에서
 # 처음으로 **데이터를 옮기는** 마이그레이션인데 그 부분만 아무 검사도 받지 않는
-# 자리였다. 아래 둘이 그 자리를 덮는다.
+# 자리였다. 아래 절 전체가 그 자리를 덮는다.
 
 _BEFORE_MATERIAL_GROUP = """
 INSERT INTO code_groups (group_code, name, value_fixed, description) VALUES
@@ -542,7 +543,11 @@ def test_the_data_step_moves_the_old_rows_instead_of_replacing_them(engine: Engi
 
 
 def test_downgrade_keeps_the_values_it_moved(engine: Engine) -> None:
-    """되돌려도 사람이 고친 값이 남는다 — 베낀 줄만 지운다."""
+    """되돌려도 사람이 고친 값이 남는다.
+
+    항목마다 남길 한 줄만 남고 나머지는 지워진다 — 「베낀 줄만」이 아니다. 남는
+    줄이 옮겨 쓴 옛 줄이라 사람이 고친 값이 거기 있다.
+    """
     with _schema(engine, "down_values"):
         config = _config_for_schema(engine, "down_values")
         command.upgrade(config, "3c602ffaebc3")
@@ -897,7 +902,8 @@ def test_downgrade_does_not_stop_for_a_sigma_on_the_row_it_keeps(engine: Engine)
     근거가 **거짓이다**(NC-31) — 「두 줄이 그 칸에서 갈릴 수 없다」가 아니라 남길 줄에
     실측 σ 가 있으면 **늘 갈린다**(베낀 줄은 「미정」으로 선다). 그 문장을 믿고
     `_COMPARED_VALUE_COLUMNS` 에서 `startswith("sigma")` 를 떼면, 사람이 σ 를 잰
-    데이터베이스는 그날부터 **영구히 되돌릴 수 없다.** 그러고도 175 개가 전부 초록이다.
+    데이터베이스는 그날부터 **영구히 되돌릴 수 없다.** 그런데도 이 갈래를 세우기
+    전에는 검사가 하나도 물지 않았다.
 
     여기서 막는다. 남길 줄(수분/분체)에만 실측 σ 를 넣고 되돌리기가 **통과하는지**
     본다 — σ 가드는 남길 줄의 σ 를 허용하고, 줄 비교는 σ 를 보지 않기 때문이다.
