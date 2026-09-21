@@ -13,11 +13,13 @@ from collections.abc import Iterator
 
 import pytest
 from fastapi.testclient import TestClient
+from sqlalchemy import text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.api.app import app, session_scope
 from app.core import codes
+from app.db.constraints import blank_characters, is_present
 from app.db.inventory import Lot, StockLedgerEntry
 from tests.test_write_path import _GRAIN, _MOISTURE, RECEIVED, prepared  # noqa: F401
 
@@ -108,6 +110,36 @@ def test_the_boundary_refuses_what_it_cannot_believe(
     response = client.post("/inspections", json=_PAYLOAD | {field: value})
 
     assert response.status_code == 422
+
+
+@pytest.mark.parametrize("field", ["judged_by", "supplier_lot_number"])
+@pytest.mark.parametrize("blank", list(blank_characters()))
+def test_the_boundary_refuses_what_only_looks_empty(
+    client: TestClient,
+    prepared: Session,  # noqa: F811
+    field: str,
+    blank: str,
+) -> None:
+    """**눈에는 비어 보이는데 비어 있지 않은 값** — 경계가 놓치면 500 이 나간다.
+
+    `min_length=1` 은 길이만 본다. 공백 한 칸 · 탭 · 전각 공백(U+3000)은 그것을
+    통과하고 `is_present()` CHECK 가 문다 — 그러면 검사원이 보는 것은 **제약
+    이름이 담긴 500** 이고, 그것이 바로 이 엔드포인트가 없애려고 적어 둔 「왜
+    막혔는지 모르는 실패」다.
+
+    **두 층이 같은 목록을 말하는지 여기서 견준다.** 목록은 한 벌이지만
+    (`app/db/constraints.py`) SQL 쪽 형태를 파이썬 글자로 푸는 자리가 있고, 그
+    푸는 것이 틀리면 두 층이 조용히 갈린다 — 그래서 **데이터베이스에게 직접
+    물어보고** 나서 경계를 두드린다.
+    """
+    seen_as_present = prepared.execute(
+        text(f"SELECT {is_present(':value')}"), {"value": blank}
+    ).scalar_one()
+    assert seen_as_present is False, f"DB 는 {blank!r} 를 값이 있는 것으로 본다"
+
+    response = client.post("/inspections", json=_PAYLOAD | {field: blank})
+
+    assert response.status_code == 422, response.text
 
 
 @pytest.mark.parametrize("literal", ["NaN", "Infinity"])

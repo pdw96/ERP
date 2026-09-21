@@ -24,6 +24,19 @@ def is_present(column: str) -> str:
     return f"btrim({column}, E'{BLANK_CHARACTERS}') <> ''"
 
 
+def blank_characters() -> str:
+    """SQL 이 깎는 그 글자들을 **파이썬 글자로.**
+
+    경계(pydantic)도 같은 것을 막아야 한다 — 막지 않으면 공백 한 칸이 경계를
+    지나 CHECK 에 걸리고, 검사원은 422 대신 **제약 이름이 담긴 500** 을 본다.
+
+    그런데 목록을 경계 쪽에 다시 적으면 **두 벌이 되고 두 벌은 갈린다.** 위의
+    상수는 `E'…'` 안에 박히는 이스케이프 형태라 파이썬에서 쓰려면 한 번 풀어야
+    하고, **푸는 자리를 여기 하나만 둔다.**
+    """
+    return BLANK_CHARACTERS.encode("ascii").decode("unicode_escape")
+
+
 def code_reference(
     *,
     group_column: str,

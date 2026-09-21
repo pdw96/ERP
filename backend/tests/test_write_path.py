@@ -404,6 +404,75 @@ def test_a_material_group_with_no_standard_is_refused(prepared: Session) -> None
     assert prepared.query(Lot).count() == 0
 
 
+def test_a_material_group_with_nothing_to_measure_is_refused(prepared: Session) -> None:
+    """**같은 결정의 한 겹 아래다** — 기준은 있는데 **재는** 기준이 없는 무리.
+
+    위의 가드는 「기준이 0줄」만 본다. 세는 항목(이물 · 포장 · 성적서)만 걸린
+    무리는 그것을 통과하고, **측정값 줄이 하나도 없는 합격**이 서서 로트와 입고
+    줄을 만든다 — 결정은 넓은데 가드가 한 칸만 보던 자리다.
+    """
+    add_code(prepared, codes.MATERIAL_GROUP, "금속")
+    prepared.flush()
+    prepared.add(make_item(codes.RAW_MATERIAL, code="RM-99", material_group="금속"))
+    _standard(
+        prepared,
+        _FOREIGN,
+        material_group="금속",
+        upper_spec_limit=None,
+        lower_spec_limit=None,
+        center_line=None,
+        unit=None,
+    )
+    prepared.flush()
+
+    with pytest.raises(RefusedInspection, match="재는 항목이 한 줄도 없다"):
+        receive(prepared, _request(item_code="RM-99", measurements=()))
+
+    assert prepared.query(Lot).count() == 0
+
+
+def test_measuring_the_same_item_twice_is_refused(prepared: Session) -> None:
+    """**판정이 요청 순서에 달리면 안 된다.**
+
+    같은 항목이 두 번 오면 `dict` 가 뒤엣것으로 덮는다 — 순서만 뒤집으면 합격과
+    불합격이 뒤집히고, 표에는 어느 쪽으로 갈렸는지 흔적이 없다. 측정값 표의
+    기본키가 이것을 막도록 되어 있지만 **거기까지 가지 않는다.**
+    """
+    for first, second in ((30.0, 99.0), (99.0, 30.0)):
+        with pytest.raises(RefusedInspection, match=f"두 번 쟀다: {_GRAIN}"):
+            receive(
+                prepared,
+                _request(
+                    measurements=(
+                        Measurement(_GRAIN, first),
+                        Measurement(_GRAIN, second),
+                        Measurement(_MOISTURE, 0.3),
+                    )
+                ),
+            )
+
+    assert prepared.query(Inspection).count() == 0
+
+
+def test_a_reason_sent_with_an_out_of_spec_value_is_refused(prepared: Session) -> None:
+    """**사람이 적은 사유를 조용히 삼키지 않는다.**
+
+    계산이 이탈을 하나라도 잡으면 사유는 계산이 고른다. 그때 사람이 보낸 사유를
+    읽지도 않고 버리면 「입도가 벗어났는데 이물도 섞여 있었다」가 표 어디에도
+    남지 않고, **없는 코드를 보내도 아무 말이 없다.** 사유 칸이 하나인 것은
+    설계이므로 둘을 함께 적을 수는 없다 — 그러면 남는 답은 되돌려보내는 것이다.
+    """
+    out_of_spec = (Measurement(_GRAIN, 99.0), Measurement(_MOISTURE, 0.3))
+
+    with pytest.raises(RefusedInspection, match="사유 칸은 하나"):
+        receive(
+            prepared,
+            _request(measurements=out_of_spec, nonconformity_code=_FOREIGN_REASON),
+        )
+
+    assert prepared.query(Inspection).count() == 0
+
+
 def test_a_missing_measurement_is_refused(prepared: Session) -> None:
     """재야 하는 항목을 빠뜨리면 판정의 근거가 반쪽이다."""
     with pytest.raises(RefusedInspection, match=_MOISTURE):

@@ -1215,3 +1215,94 @@ def test_downgrade_goes_quietly_when_no_lot_points_at_a_judgement(engine: Engine
             ).scalars()
 
     assert "inspection_id" not in set(columns)
+
+
+# ── 표를 세우는 리비전 셋 — **표는 내 것이고 줄은 사람의 것이다** ──────────
+
+# 검사 한 건에 측정값 한 줄까지 선 모양. `_BEFORE_WRITE_PATH` 의 로트는 검사를
+# 가리키지 않으므로 **`08d406fa7f3b` 의 가드가 조용히 지나간다** — 그 뒤에 서는
+# 리비전들이 무엇을 말하는지가 여기서 갈린다.
+_JUDGED_AND_MEASURED = (
+    _BEFORE_WRITE_PATH
+    + """
+INSERT INTO code_groups (group_code, name, value_fixed, description) VALUES
+  ('INSP_ITEM', '검사항목', FALSE, '시험');
+
+INSERT INTO common_codes (group_code, code, name) VALUES ('INSP_ITEM', '입도', '입도');
+
+INSERT INTO process_inspection_standards (process_code, process_group, item_code, item_group,
+                                          material_group, material_group_group,
+                                          upper_spec_limit, lower_spec_limit)
+VALUES ('수입', 'PROCESS', '입도', 'INSP_ITEM', '분체', 'MATERIAL_GROUP', 50.0, 10.0);
+
+INSERT INTO inspection_measurements (inspection_id, item_code, process_code, material_group,
+                                     measured_value, applied_upper_spec, applied_lower_spec)
+SELECT i.id, '입도', '수입', '분체', 30.0, 50.0, 10.0 FROM inspections AS i;
+"""
+)
+
+
+def test_downgrade_says_whose_judgements_would_vanish(engine: Engine) -> None:
+    """**표가 내 것이라고 그 안의 줄까지 내 것은 아니다.**
+
+    세 리비전이 「이 리비전이 세운 표라 사람이 먼저 넣어 둔 값이 있을 수 없다」고
+    적고 조용히 내려갔다. **명제는 참이고 함의가 거짓이다** — 물어야 하는 것은
+    「먼저 넣었는가」가 아니라 **「그 줄을 이 리비전이 만들었는가」**이고,
+    `create_table` 은 줄을 하나도 만들지 않는다.
+
+    그리고 `08d406fa7f3b` 의 가드가 이 자리를 대신하지 못한다 — 그쪽은 검사를
+    가리키는 **로트**를 세므로 **로트를 만들지 않는 판정을 구조적으로 보지
+    못한다.** 여기 심은 로트는 이월이라 검사를 가리키지 않는다.
+    """
+    schema = "judgement_downgrade_guard"
+    with _schema(engine, schema):
+        config = _upgrade_with(engine, schema, "head", _BEFORE_WRITE_PATH)
+
+        with pytest.raises(Exception, match="검사원 1"):
+            command.downgrade(config, "65d31f8b7918")
+
+
+def test_downgrade_says_whose_measurements_would_vanish(engine: Engine) -> None:
+    """**판정의 근거는 기준 표에서 다시 만들 수 없다.**
+
+    측정값 줄에는 **그때 쓴 규격**이 박혀 있다. 기준이 나중에 바뀌어도 그 판정은
+    그 규격으로 내려졌기 때문이며, 그래서 이 줄은 어디에서도 복원되지 않는다.
+    """
+    schema = "measurement_downgrade_guard"
+    with _schema(engine, schema):
+        config = _upgrade_with(engine, schema, "head", _JUDGED_AND_MEASURED)
+
+        with pytest.raises(Exception, match="측정값과 그때 쓴 규격"):
+            command.downgrade(config, "992bb442d985")
+
+
+def test_downgrade_says_which_lots_would_lose_their_ledger(engine: Engine) -> None:
+    """**원장 줄은 로트가 움직인 사실이다** (원칙 ⑦).
+
+    이 리비전이 머리인 데이터베이스에는 `08d406fa7f3b` 의 가드가 없다 — 뒤에 선
+    리비전의 가드에 기대면 그 자리에서 조용히 지워진다. **가드는 자기 리비전에서
+    사라지는 것을 본다.**
+    """
+    schema = "ledger_downgrade_guard"
+    planted = (
+        _BEFORE_WRITE_PATH
+        + """
+INSERT INTO code_groups (group_code, name, value_fixed, description) VALUES
+  ('TXN_TYPE', '수불유형', TRUE, '시험');
+
+INSERT INTO common_codes (group_code, code, name) VALUES ('TXN_TYPE', '구매입고', '구매입고');
+
+INSERT INTO txn_type_attributes (group_code, code, total_effect, source_document_type)
+VALUES ('TXN_TYPE', '구매입고', '증가', '가입고');
+
+INSERT INTO stock_ledger_entries (lot_id, txn_type, txn_type_group, quantity, occurred_at,
+                                  inspection_id)
+SELECT l.id, '구매입고', 'TXN_TYPE', 500.0, TIMESTAMP '2026-09-21 09:30', i.id
+FROM lots AS l, inspections AS i;
+"""
+    )
+    with _schema(engine, schema):
+        config = _upgrade_with(engine, schema, "e84fbec436c0", planted)
+
+        with pytest.raises(Exception, match="SL-2026-0001"):
+            command.downgrade(config, "361ec789023c")

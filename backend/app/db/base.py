@@ -19,8 +19,21 @@ class Base(DeclarativeBase):
 
 
 def create_db_engine(url: str | None = None) -> Engine:
-    """엔진 하나를 만든다. `url` 을 주면 그것을 쓰고, 없으면 설정에서 읽는다."""
-    return create_engine(url or get_settings().database_url, future=True)
+    """엔진 하나를 만든다. `url` 을 주면 그것을 쓰고, 없으면 설정에서 읽는다.
+
+    **격리 수준을 박는다.** 로트 번호를 짓는 구간은 자문 잠금을 잡은 **뒤에**
+    그날의 마지막 번호를 읽는데, 그 순서가 뜻을 갖는 것은 READ COMMITTED 가
+    문장마다 새 스냅샷을 잡기 때문이다. REPEATABLE READ 에서는 기다렸다 깨어난
+    쪽이 **잠그기 전의 스냅샷**을 그대로 읽어 같은 번호를 짓고, 잠금이 없애려던
+    바로 그 실패(둘째가 유일키에 터진다)로 되돌아간다 — 실제로 재현된 자리다.
+
+    기본값이 READ COMMITTED 라 오늘은 같은 동작이지만, 기본값은 서버 설정 한
+    줄로 뒤집힌다(`ALTER DATABASE … SET default_transaction_isolation`). **적어
+    두기만 하고 강제하지 않는 규칙을 만들지 않는다** — 전제를 코드에 박는다.
+    """
+    return create_engine(
+        url or get_settings().database_url, future=True, isolation_level="READ COMMITTED"
+    )
 
 
 def create_session_factory(engine: Engine) -> sessionmaker[Session]:

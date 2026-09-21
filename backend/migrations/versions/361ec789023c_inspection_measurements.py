@@ -25,19 +25,26 @@
 품목이 이미 아는 자재군을 그대로 끌어온다. 끌어올 수 없는 줄이 있으면 그 줄은
 원자재가 아니라는 뜻이고, 검사 기록의 CHECK 가 그런 줄을 애초에 막는다.
 
-**`downgrade()` 가 측정값을 통째로 지운다.** 되돌릴 수 없다 — 실측값과 그때 쓴
-규격이 함께 사라지고 복구할 방법은 백업뿐이다. **멈추고 이름을 말하지는 않는다**:
-이 리비전이 세운 표라 그 안의 모든 줄이 이 리비전 뒤에 생긴 것이고, 「사람이 먼저
-넣어 둔 값」이 있을 수 없기 때문이다. `inspections.material_group` 도 같다 — 이
-리비전이 붙였고 값은 품목에서 끌어온 것이라 그 칸에만 있던 사실이 없다.
+**`downgrade()` 가 측정값을 통째로 지운다. 그래서 멈추고 이름을 말한다.** 되돌릴
+수 없다 — 실측값과 **그때 쓴 규격**이 함께 사라지고 복구할 방법은 백업뿐이다.
+처음에는 「이 리비전이 세운 표라 사람이 먼저 넣어 둔 값이 있을 수 없다」고 적고
+멈추지 않았는데, **표가 내 것인 것과 줄이 내 것인 것은 다르다** — `create_table`
+은 줄을 하나도 만들지 않는다.
 
-**올릴 때 잠근다.** 표가 셋 걸린다.
+**`inspections.material_group` 은 다르다 — 조용히 내려간다.** 그 칸의 값은 사람의
+것이 아니라 품목에서 끌어온 파생이고, **다시 만들 수 있다는 주장의 근거를 이름으로
+적는다**: `fk_inspection_item`(품목이 실재한다) · `ck_inspection_item_is_raw_material`
+(원자재다) · `ck_item_material_group_matches_type`(원자재면 자재군이 있다). 셋 중
+하나가 느슨해지는 날 이 주장은 **조용히 거짓이 된다** — 그래서 근거를 적는다.
+
+**올릴 때 잠근다.**
 
 - `items` · `inspections` 의 유일키 — 잠금을 잡고 인덱스를 만든다.
   `CONCURRENTLY` 를 쓸 수 없는 형태다
 - `inspections` 의 `SET NOT NULL` — **기존 행 전체를 검사한다**
-- `inspections` 의 외래키 — 가리키는 표와 가리켜지는 표 **양쪽**을 잡으므로
-  `items` 의 쓰기도 함께 멈춘다
+- 외래키는 **가리키는 표와 가리켜지는 표 양쪽을 잡는다.** 이 리비전의 외래키가
+  가리키는 표는 전부 함께 잠겨 그동안 쓰기가 멈춘다 — 목록을 세지 않는다. 세면
+  갈리고, 실제로 갈려서 `process_inspection_standards` 가 빠져 있었다
 - `ADD COLUMN` 은 기본값이 없어 표를 다시 쓰지 않는다(PostgreSQL 11 이후)
 
 `migrations/env.py` 가 전체를 트랜잭션 하나로 감싸므로 첫 `ALTER` 가 잡은 잠금이
@@ -139,6 +146,27 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
+    # **사라지는 것을 먼저 이름으로 말하고 멈춘다.** 측정값은 판정의 근거이고,
+    # 그때 쓴 규격이 함께 박혀 있어 기준 표에서 다시 만들 수 없다.
+    #
+    # **앞선 리비전의 가드가 이 자리를 대신하지 못한다.** `08d406fa7f3b` 는
+    # 로트를 세므로 로트를 만들지 않는 판정(불합격)의 측정값을 보지 못한다.
+    op.execute(
+        """
+        DO $$
+        DECLARE judged text;
+        BEGIN
+          SELECT string_agg(DISTINCT judged_by, ', ' ORDER BY judged_by) INTO judged
+          FROM inspections AS i JOIN inspection_measurements AS m ON m.inspection_id = i.id;
+          IF judged IS NOT NULL THEN
+            RAISE EXCEPTION
+              '되돌리면 측정값과 그때 쓴 규격이 사라진다 — 판정자: %. 판정의 근거라 기준 표에서 다시 만들 수 없다',
+              judged;
+          END IF;
+        END $$;
+        """
+    )
+
     # **올린 것의 역순이다.** 가리키는 쪽을 먼저 떼지 않으면 가리켜지는 쪽을
     # 지울 수 없다 — 자동 생성은 `items` 의 유일키부터 떼려 했고, 그것을
     # 가리키는 외래키가 아직 `inspections` 에 붙어 있다.

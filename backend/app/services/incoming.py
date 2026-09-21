@@ -17,6 +17,7 @@
 시드에서 「반쯤 채워짐」을 없앤 것과 같은 이유다.
 """
 
+from collections import Counter
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 
@@ -203,9 +204,30 @@ def receive(session: Session, request: IncomingInspection) -> Judged:
             " 기준을 먼저 세우지 않으면 무엇을 보고 판정하는지 표가 말하지 못한다"
         )
 
+    if not any(_measures(standard) for standard in standards.values()):
+        # **같은 자리의 한 겹 아래다.** 위의 가드는 「기준이 0줄」만 보므로, 세는
+        # 항목(`이물` · `포장`)만 걸린 무리는 통과하고 **측정값이 한 줄도 없는
+        # 합격**이 서서 로트와 입고 줄을 만든다. 결정은 위와 같다 — 재지 않은
+        # 합격은 검사가 아니라 통과다.
+        raise RefusedInspection(
+            f"{item.material_group} 에 걸린 수입 기준에 재는 항목이 한 줄도 없다 —"
+            " 세는 항목만으로는 무엇을 보고 판정했는지 측정값 줄이 말하지 못한다"
+        )
+
     measured = {
         measurement.item_code: measurement.value for measurement in request.measurements
     }
+    counted = Counter(measurement.item_code for measurement in request.measurements)
+    twice = sorted(code for code, times in counted.items() if times > 1)
+    if twice:
+        # **뭉개는 쪽이 아니라 되돌려보내는 쪽이다.** `dict` 는 뒤엣것으로 덮고
+        # 그 순간 **판정이 요청 순서에 달린다** — 같은 값 집합을 순서만 바꿔
+        # 보내면 합격과 불합격이 뒤집힌다. 측정값 표의 기본키가 이것을 막도록
+        # 되어 있지만 **거기까지 가지 않는다**: `dict` 가 먼저 하나로 만든다.
+        raise RefusedInspection(
+            f"같은 항목을 두 번 쟀다: {', '.join(twice)} —"
+            " 어느 값이 그 항목의 값인지 우리가 고르면 사람이 잰 값 하나가 버려진다"
+        )
     unknown = sorted(set(measured) - set(standards))
     if unknown:
         raise RefusedInspection(
@@ -228,6 +250,16 @@ def receive(session: Session, request: IncomingInspection) -> Judged:
 
     reason: str | None = None
     if out_of_spec:
+        # **조용히 삼키지 않는다.** 사유 칸은 하나인 것이 설계이므로 둘을 함께
+        # 적을 수는 없다. 그렇다고 사람이 적어 보낸 것을 **읽지도 않고 버리면**
+        # 「입도가 벗어났는데 이물도 섞여 있었다」가 표 어디에도 남지 않고,
+        # 없는 코드를 보내도 아무 말이 없다 — 원칙 ⑥ 이 막으려는 자리다.
+        if request.nonconformity_code is not None:
+            raise RefusedInspection(
+                f"계산이 이미 이탈을 잡았다({', '.join(out_of_spec)}) —"
+                f" 사유 칸은 하나라 {request.nonconformity_code} 를 함께 적을 수 없다."
+                " 측정값만 보내면 계산이 사유를 고른다"
+            )
         reason = _reason_for(session, out_of_spec[0])
     elif request.nonconformity_code is not None:
         # **계산이 보지 못하는 것은 사람이 적는다** — 세는 항목의 결함이다.
