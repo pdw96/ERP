@@ -9,8 +9,9 @@
 from datetime import date
 from typing import Annotated
 
-from pydantic import AfterValidator, BaseModel, Field
+from pydantic import AfterValidator, BaseModel, ConfigDict, Field
 
+from app.core import codes
 from app.db.constraints import blank_characters
 
 # **데이터베이스가 깎는 글자와 같은 목록이다.** 두 벌로 적지 않는다 —
@@ -34,8 +35,17 @@ def _present(value: str) -> str:
 Present = Annotated[str, AfterValidator(_present)]
 
 
+# **모르는 칸은 받지 않는다.** 기본값(무시)으로 두면 `"specialAcceptance"` 같은
+# 오타가 **201 로 성공하면서** 특채를 잃는다 — 받으려던 자재가 로트 없이 끝나고,
+# 부르는 쪽은 자기가 보낸 것이 반영됐다고 읽는다. 뒤에 좁히는 것은 그 자체가
+# 파괴적 변경이라, 정할 수 있는 때는 소비자가 붙기 전인 지금뿐이다.
+_ONLY_THE_FIELDS_WE_NAME = ConfigDict(extra="forbid")
+
+
 class MeasurementIn(BaseModel):
     """검사원이 적은 실측값 하나."""
+
+    model_config = _ONLY_THE_FIELDS_WE_NAME
 
     item_code: Present = Field(min_length=1, max_length=30)
     # **`allow_inf_nan=False` 가 여기서도 선다.** JSON 은 `NaN` 을 실어 보낼 수
@@ -46,6 +56,8 @@ class MeasurementIn(BaseModel):
 
 class InspectionIn(BaseModel):
     """수입검사 한 건."""
+
+    model_config = _ONLY_THE_FIELDS_WE_NAME
 
     item_code: Present = Field(min_length=1, max_length=50)
     supplier_code: Present = Field(min_length=1, max_length=20)
@@ -68,7 +80,11 @@ class InspectionOut(BaseModel):
     """
 
     inspection_id: int
-    result: str
+    # **값 집합을 스펙에 적는다.** 자유 문자열로 두면 소비자가 「합격」을
+    # **문서화되지 않은 채** 하드코딩해야 하고, 관문 2 가 값을 늘려도 그것이
+    # 파괴적 변경으로 취급될 근거가 없다. 목록은 `codes.JUDGMENTS` 한 벌에서
+    # 끌어온다 — 여기 다시 적으면 두 벌이 되고, 두 벌은 갈린다.
+    result: str = Field(json_schema_extra={"enum": list(codes.JUDGMENTS)})
     nonconformity_code: str | None
     lot_id: int | None
     lot_number: str | None

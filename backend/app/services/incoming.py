@@ -37,7 +37,38 @@ class RefusedInspection(Exception):
 
     **제약이 터지기 전에 막는다.** 데이터베이스가 같은 것을 한 번 더 막지만,
     거기서 나오는 말은 제약 이름이라 검사원에게 아무것도 알려 주지 않는다.
+
+    **사람에게 하는 말과 기계에게 하는 말을 함께 든다.** 메시지는 한국어 산문이라
+    오타를 고칠 수 있어야 하는데, 부르는 쪽이 그 문자열을 보고 갈라지면 **오타를
+    고치는 커밋이 밖에서는 파괴적 변경**이 된다. 그래서 갈라지는 자리에는 `code`
+    를 둔다 — 「기준을 심으면 같은 요청이 성공하는 건」과 「영영 실패하는 건」이
+    그것으로 갈린다.
     """
+
+    def __init__(self, code: str, message: str) -> None:
+        super().__init__(message)
+        self.code = code
+
+
+# ── 거절의 이름 — **밖으로 나가는 약속이다** ────────────────────────────────
+#
+# 응답의 `detail[].type` 으로 그대로 나간다. 목록이 여기 한 벌이고, 값을 고치는
+# 것은 계약을 고치는 것이다. 메시지는 고쳐도 되지만 **이 이름은 고치면 깨진다.**
+UNKNOWN_ITEM = "unknown_item"
+ITEM_IS_NOT_RAW_MATERIAL = "item_is_not_raw_material"
+UNKNOWN_SUPPLIER = "unknown_supplier"
+PARTNER_IS_NOT_SUPPLIER = "partner_is_not_supplier"
+RECEIVED_DATE_IS_IN_THE_FUTURE = "received_date_is_in_the_future"
+NO_STANDARD_FOR_MATERIAL_GROUP = "no_standard_for_material_group"
+NOTHING_TO_MEASURE_FOR_MATERIAL_GROUP = "nothing_to_measure_for_material_group"
+ITEM_MEASURED_TWICE = "item_measured_twice"
+ITEM_IS_NOT_IN_THE_STANDARD = "item_is_not_in_the_standard"
+MEASUREMENT_IS_MISSING = "measurement_is_missing"
+NO_REASON_FOR_THE_DEVIATION = "no_reason_for_the_deviation"
+REASON_IS_NOT_USABLE_AT_THIS_GATE = "reason_is_not_usable_at_this_gate"
+REASON_COMES_WITH_A_COMPUTED_DEVIATION = "reason_comes_with_a_computed_deviation"
+SPECIAL_ACCEPTANCE_ON_A_PASS = "special_acceptance_on_a_pass"
+SPECIAL_ACCEPTANCE_IS_NOT_OPEN = "special_acceptance_is_not_open"
 
 
 @dataclass(frozen=True)
@@ -80,10 +111,11 @@ class Judged:
 def _item(session: Session, code: str) -> Item:
     item = session.scalars(select(Item).where(Item.code == code)).one_or_none()
     if item is None:
-        raise RefusedInspection(f"그런 품목이 없다: {code}")
+        raise RefusedInspection(UNKNOWN_ITEM, f"그런 품목이 없다: {code}")
     if item.item_type != codes.RAW_MATERIAL:
         raise RefusedInspection(
-            f"관문 1 이 보는 것은 원자재뿐이다 — {code} 는 {item.item_type} 이다"
+            ITEM_IS_NOT_RAW_MATERIAL,
+            f"관문 1 이 보는 것은 원자재뿐이다 — {code} 는 {item.item_type} 이다",
         )
     return item
 
@@ -91,9 +123,11 @@ def _item(session: Session, code: str) -> Item:
 def _supplier(session: Session, code: str) -> Partner:
     partner = session.scalars(select(Partner).where(Partner.code == code)).one_or_none()
     if partner is None:
-        raise RefusedInspection(f"그런 거래처가 없다: {code}")
+        raise RefusedInspection(UNKNOWN_SUPPLIER, f"그런 거래처가 없다: {code}")
     if partner.partner_type != codes.SUPPLIER:
-        raise RefusedInspection(f"공급사가 아니다: {code} 는 {partner.partner_type} 이다")
+        raise RefusedInspection(
+            PARTNER_IS_NOT_SUPPLIER, f"공급사가 아니다: {code} 는 {partner.partner_type} 이다"
+        )
     return partner
 
 
@@ -142,7 +176,8 @@ def _reason_for(session: Session, item_code: str) -> str:
     ).first()
     if reason is None:
         raise RefusedInspection(
-            f"{item_code} 이 규격을 벗어났는데 그것을 적을 불합격 사유가 없다"
+            NO_REASON_FOR_THE_DEVIATION,
+            f"{item_code} 이 규격을 벗어났는데 그것을 적을 불합격 사유가 없다",
         )
     return reason
 
@@ -153,7 +188,10 @@ def _allows_special_acceptance(session: Session, reason_code: str) -> bool:
         (codes.NC_REASON, reason_code, codes.INSP_STAGE, codes.STAGE_INCOMING),
     )
     if rule is None:
-        raise RefusedInspection(f"관문 1 에서 쓸 수 있는 사유가 아니다: {reason_code}")
+        raise RefusedInspection(
+            REASON_IS_NOT_USABLE_AT_THIS_GATE,
+            f"관문 1 에서 쓸 수 있는 사유가 아니다: {reason_code}",
+        )
     return rule.special_acceptance_allowed
 
 
@@ -194,14 +232,27 @@ def receive(session: Session, request: IncomingInspection) -> Judged:
     supplier = _supplier(session, request.supplier_code)
     assert item.material_group is not None  # 원자재는 자재군을 갖는다 (CHECK)
 
+    if request.received_date > date.today():
+        # **아직 오지 않은 물건은 검사하지 못한다.** 막지 않으면 합격일(오늘)이
+        # 입고일보다 앞서 `ck_lot_passed_after_arrival` 이 물고, 검사원은 제약
+        # 이름이 담긴 **500** 을 본다 — 잘 만들어진 요청 하나가 실마리 없는
+        # 실패로 나가는 자리였다. **같은 값이 불합격이면 201 로 지나갔다**:
+        # 불합격은 로트를 만들지 않아 그 CHECK 에 닿지 않기 때문이다.
+        raise RefusedInspection(
+            RECEIVED_DATE_IS_IN_THE_FUTURE,
+            f"아직 오지 않은 날짜다: {request.received_date} —"
+            " 받지 않은 물건은 검사할 수 없다",
+        )
+
     standards = _standards(session, item.material_group)
     if not standards:
         # **감사 W-3 이 연 자리다.** 운영자가 새 자재군을 만들고 기준을 한 줄도
         # 넣지 않으면 「아무것도 재지 않고 합격」이 되고, 그 로트는 아무 근거 없이
         # 재고가 된다. 검사가 아니라 그냥 통과이므로 받지 않는다.
         raise RefusedInspection(
+            NO_STANDARD_FOR_MATERIAL_GROUP,
             f"{item.material_group} 에 걸린 수입 기준이 한 줄도 없다 —"
-            " 기준을 먼저 세우지 않으면 무엇을 보고 판정하는지 표가 말하지 못한다"
+            " 기준을 먼저 세우지 않으면 무엇을 보고 판정하는지 표가 말하지 못한다",
         )
 
     if not any(_measures(standard) for standard in standards.values()):
@@ -210,8 +261,9 @@ def receive(session: Session, request: IncomingInspection) -> Judged:
         # 합격**이 서서 로트와 입고 줄을 만든다. 결정은 위와 같다 — 재지 않은
         # 합격은 검사가 아니라 통과다.
         raise RefusedInspection(
+            NOTHING_TO_MEASURE_FOR_MATERIAL_GROUP,
             f"{item.material_group} 에 걸린 수입 기준에 재는 항목이 한 줄도 없다 —"
-            " 세는 항목만으로는 무엇을 보고 판정했는지 측정값 줄이 말하지 못한다"
+            " 세는 항목만으로는 무엇을 보고 판정했는지 측정값 줄이 말하지 못한다",
         )
 
     measured = {
@@ -225,13 +277,15 @@ def receive(session: Session, request: IncomingInspection) -> Judged:
         # 보내면 합격과 불합격이 뒤집힌다. 측정값 표의 기본키가 이것을 막도록
         # 되어 있지만 **거기까지 가지 않는다**: `dict` 가 먼저 하나로 만든다.
         raise RefusedInspection(
+            ITEM_MEASURED_TWICE,
             f"같은 항목을 두 번 쟀다: {', '.join(twice)} —"
-            " 어느 값이 그 항목의 값인지 우리가 고르면 사람이 잰 값 하나가 버려진다"
+            " 어느 값이 그 항목의 값인지 우리가 고르면 사람이 잰 값 하나가 버려진다",
         )
     unknown = sorted(set(measured) - set(standards))
     if unknown:
         raise RefusedInspection(
-            f"{item.material_group} 의 수입 기준에 없는 항목을 쟀다: {', '.join(unknown)}"
+            ITEM_IS_NOT_IN_THE_STANDARD,
+            f"{item.material_group} 의 수입 기준에 없는 항목을 쟀다: {', '.join(unknown)}",
         )
     missing = sorted(
         code
@@ -239,7 +293,9 @@ def receive(session: Session, request: IncomingInspection) -> Judged:
         if _measures(standard) and code not in measured
     )
     if missing:
-        raise RefusedInspection(f"재야 하는 항목의 측정값이 없다: {', '.join(missing)}")
+        raise RefusedInspection(
+            MEASUREMENT_IS_MISSING, f"재야 하는 항목의 측정값이 없다: {', '.join(missing)}"
+        )
 
     # ── 계산이 판정을 낸다 ──────────────────────────────────────────────────
     # 여럿이 벗어나면 **항목 코드 순서로 첫 하나**를 사유로 적는다. 검사 기록의
@@ -256,9 +312,10 @@ def receive(session: Session, request: IncomingInspection) -> Judged:
         # 없는 코드를 보내도 아무 말이 없다 — 원칙 ⑥ 이 막으려는 자리다.
         if request.nonconformity_code is not None:
             raise RefusedInspection(
+                REASON_COMES_WITH_A_COMPUTED_DEVIATION,
                 f"계산이 이미 이탈을 잡았다({', '.join(out_of_spec)}) —"
                 f" 사유 칸은 하나라 {request.nonconformity_code} 를 함께 적을 수 없다."
-                " 측정값만 보내면 계산이 사유를 고른다"
+                " 측정값만 보내면 계산이 사유를 고른다",
             )
         reason = _reason_for(session, out_of_spec[0])
     elif request.nonconformity_code is not None:
@@ -268,11 +325,15 @@ def receive(session: Session, request: IncomingInspection) -> Judged:
 
     if reason is None:
         if request.special_acceptance:
-            raise RefusedInspection("합격인 검사에 특채를 낼 수 없다")
+            raise RefusedInspection(
+                SPECIAL_ACCEPTANCE_ON_A_PASS, "합격인 검사에 특채를 낼 수 없다"
+            )
         result = codes.JUDGMENT_PASSED
     elif request.special_acceptance:
         if not _allows_special_acceptance(session, reason):
-            raise RefusedInspection(f"특채가 열려 있지 않은 사유다: {reason}")
+            raise RefusedInspection(
+                SPECIAL_ACCEPTANCE_IS_NOT_OPEN, f"특채가 열려 있지 않은 사유다: {reason}"
+            )
         result = codes.JUDGMENT_SPECIAL
     else:
         result = codes.JUDGMENT_FAILED

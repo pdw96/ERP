@@ -11,7 +11,7 @@
 from collections.abc import Iterator
 from typing import Annotated
 
-from fastapi import Depends, FastAPI, HTTPException, Request, status
+from fastapi import Depends, FastAPI, Request, status
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
@@ -25,15 +25,62 @@ from app.services.incoming import (
     receive,
 )
 
+# **이 API 의 판이다 — 패키지의 판과 다른 축이다.** 같은 코드가 계약을 깨지 않고
+# 여러 번 배포될 수 있고, 반대로 코드를 한 줄도 안 고치고 계약만 넓힐 수도 있다.
+# 없으면 `/openapi.json` 이 프레임워크 기본값을 적어 **이 API 가 자기 판을 말하지
+# 못한다** — 소비자가 붙은 뒤에는 「조용히 깬다」와 「경로를 갈아 한 번에 옮긴다」
+# 둘만 남고, **병행 지원이라는 셋째 길이 지금 열리고 나중에는 열리지 않는다.**
+#
+# **자리를 둘만 쓴다.** 배포 번호가 아니라 계약의 판이라, 계약이 깨지면 앞자리가
+# 호환되게 넓어지면 뒷자리가 움직인다. 셋째 자리는 움직일 일이 없다.
+#
+# **그리고 프레임워크의 기본값과 달라야 한다.** 기본값이 하필 `0.1.0` 이라, 그
+# 값을 쓰면 「적었다」와 「안 적었다」가 밖에서 구별되지 않는다 — 검사가 통과하면서
+# 아무것도 지키지 않게 된다(실제로 돌연변이가 그것을 드러냈다).
+API_VERSION = "0.1"
+
 app = FastAPI(
     title="조기경보 ERP — 관문 1",
     summary="수입검사 한 건을 받아 판정하고, 합격이면 로트를 만든다.",
+    version=API_VERSION,
 )
 
 # **엔진은 앱마다 하나다.** 요청마다 만들면 연결 풀이 요청마다 새로 서고,
 # 그것은 풀이 없는 것과 같다.
 _engine = create_db_engine()
 _session_factory = create_session_factory(_engine)
+
+
+def _refusal(status_code: int, errors: list[dict[str, object]]) -> JSONResponse:
+    """**거절의 본문은 한 모양이다.**
+
+    422 가 어떤 때는 배열이고 어떤 때는 문자열이면, `for error in body["detail"]`
+    을 쓰는 클라이언트가 **422 를 처리하다 죽는다.** 그리고 `/openapi.json` 은
+    본문을 받는 라우트의 422 를 `HTTPValidationError` 로만 문서화하므로, 문자열
+    `detail` 은 **스펙에 없는 응답**이 된다.
+
+    세 칸의 뜻은 pydantic 이 정한 것을 그대로 쓴다 — `type` 이 **기계가 읽는
+    자리**이고 `msg` 가 사람이 읽는 자리다.
+    """
+    return JSONResponse(status_code=status_code, content={"detail": errors})
+
+
+@app.exception_handler(Exception)
+def do_not_answer_a_break_with_plain_text(request: Request, exc: Exception) -> JSONResponse:
+    """**터져도 본문의 모양은 그대로다.**
+
+    기본 처리기는 500 을 `text/plain` 으로 보낸다 — 오류를 `response.json()` 으로
+    읽는 클라이언트는 그 자리에서 **파싱 오류**를 맞고, 무엇이 터졌는지가 아니라
+    자기 파서가 깨진 것으로 본다.
+
+    **안을 싣지 않는다.** 제약 이름도 트레이스도 밖에서는 쓸 수 없는 말이고,
+    실어 보내면 스키마를 그대로 알려 주는 자리가 된다. 어디에 무엇을 남길지는
+    로그의 일이며 그 설비는 아직 없다.
+    """
+    return _refusal(
+        status.HTTP_500_INTERNAL_SERVER_ERROR,
+        [{"loc": ["server"], "msg": "처리하지 못했다", "type": "internal_error"}],
+    )
 
 
 @app.exception_handler(RequestValidationError)
@@ -51,14 +98,12 @@ def refuse_without_echoing_the_body(
     값을 빼면 틀린 자리와 이유는 그대로 남고 되비추는 문제만 사라진다. 검증되지
     않은 입력을 응답에 싣지 않는 것은 그 자체로도 옳다.
     """
-    return JSONResponse(
-        status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
-        content={
-            "detail": [
-                {"loc": error["loc"], "msg": error["msg"], "type": error["type"]}
-                for error in exc.errors()
-            ]
-        },
+    return _refusal(
+        status.HTTP_422_UNPROCESSABLE_CONTENT,
+        [
+            {"loc": list(error["loc"]), "msg": error["msg"], "type": error["type"]}
+            for error in exc.errors()
+        ],
     )
 
 
@@ -83,7 +128,7 @@ def session_scope() -> Iterator[Session]:
 @app.post("/inspections", response_model=InspectionOut, status_code=status.HTTP_201_CREATED)
 def post_inspection(
     payload: InspectionIn, session: Annotated[Session, Depends(session_scope)]
-) -> InspectionOut:
+) -> InspectionOut | JSONResponse:
     """검사 한 건을 받는다.
 
     **받을 수 없는 것은 422 로 이름을 말하고 돌려보낸다.** 데이터베이스가 같은
@@ -109,9 +154,13 @@ def post_inspection(
             ),
         )
     except RefusedInspection as refused:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(refused)
-        ) from refused
+        # **문자열 하나로 돌려보내지 않는다.** 같은 422 인데 본문의 모양이
+        # 갈리면 부르는 쪽이 둘을 따로 처리해야 하고, 한쪽은 스펙에 없다.
+        # `type` 에 실리는 이름은 **고치면 깨지는 약속**이다(`incoming.py`).
+        return _refusal(
+            status.HTTP_422_UNPROCESSABLE_CONTENT,
+            [{"loc": ["body"], "msg": str(refused), "type": refused.code}],
+        )
 
     return InspectionOut(
         inspection_id=judged.inspection_id,
