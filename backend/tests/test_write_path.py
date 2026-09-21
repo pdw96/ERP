@@ -325,6 +325,53 @@ def test_a_measurement_outside_the_spec_makes_no_lot(prepared: Session) -> None:
     assert prepared.query(InspectionMeasurement).count() == 2
 
 
+def test_a_failed_judgement_still_remembers_when_the_material_arrived(
+    prepared: Session,
+) -> None:
+    """**불합격에도 도착일이 남는다** (NC-109).
+
+    도착일이 앉는 자리가 로트뿐이었고 **불합격은 로트를 만들지 않으므로**, 사람이
+    보낸 그 값이 불합격에서만 조용히 버려졌다 — 201 로 성공 응답이 나가면서다.
+    하필 불합격이 **클레임과 반품의 근거**가 되는 판정이다.
+
+    `judged_at` 이 대신이 되지 못한다는 것을 함께 잰다 — 뒤늦게 적은 입고를
+    일부러 받으므로 둘은 갈리고, **갈리는 그 값이 사라지던 것**이다.
+    """
+    arrived = RECEIVED - timedelta(days=20)
+    judged = receive(
+        prepared,
+        _request(
+            received_date=arrived,
+            measurements=(Measurement(_GRAIN, 99.0), Measurement(_MOISTURE, 0.3)),
+        ),
+    )
+
+    assert judged.result == codes.JUDGMENT_FAILED
+    assert prepared.query(Lot).count() == 0
+
+    inspection = prepared.get(Inspection, judged.inspection_id)
+    assert inspection is not None
+    assert inspection.received_date == arrived
+    # **스무 날이 갈린다.** 이 차이가 사라지던 것이고, `judged_at` 으로는 되짚을
+    # 수 없다 — 검사가 얼마나 늦었는지는 어디에도 적혀 있지 않다.
+    assert inspection.judged_at.date() != arrived
+
+
+def test_a_pass_cannot_let_the_two_arrival_dates_drift(prepared: Session) -> None:
+    """**같은 사실이 두 표에 살면 갈린다** — 그래서 쌍으로 가리킨다 (원칙 ⑥).
+
+    로트도 도착일을 드는데, 두 칸이 서로를 모르면 한쪽만 고쳐질 수 있다.
+    `fk_lot_inspection_received_date` 가 그것을 **데이터베이스에서** 막는다 —
+    주석은 규칙이 아니다.
+    """
+    receive(prepared, _request())
+    lot = prepared.query(Lot).one()
+
+    lot.received_date = RECEIVED - timedelta(days=1)
+    with pytest.raises(IntegrityError, match="fk_lot_inspection_received_date"):
+        prepared.flush()
+
+
 def test_a_failed_judgement_can_never_be_attached_to_a_lot(prepared: Session) -> None:
     """**쓰기 경로가 막는 것과 데이터베이스가 막는 것은 다른 겹이다.**
 

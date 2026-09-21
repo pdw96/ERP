@@ -136,6 +136,20 @@ class Lot(Base):
             ["inspections.id", "inspections.result"],
             name="fk_lot_inspection",
         ),
+        # **도착일도 같은 방식으로 묶는다.** 검사가 도착일을 들게 된 뒤로 같은
+        # 사실이 두 표에 살게 됐고, 두 벌은 갈린다(원칙 ⑥). 쌍으로 가리키면
+        # 갈릴 수 없다 — 값을 다시 적는 것이 아니라 **같은 줄을 가리키는** 것이다.
+        #
+        # **이 외래키가 못 보는 부류**: `inspection_id` 나 `received_date` 가 비면
+        # 복합 외래키는 통째로 건너뛰어진다. 앞쪽은 이월 로트(검사를 모른다),
+        # 뒤쪽은 자사 로트다 — 자사 로트에는 `ck_lot_produced_has_produced_date`
+        # 가 도착일을 비우게 하므로, 자사 로트가 검사를 가리키게 되는 날
+        # (관문 2) 이 자리를 다시 봐야 한다.
+        ForeignKeyConstraint(
+            ["inspection_id", "received_date"],
+            ["inspections.id", "inspections.received_date"],
+            name="fk_lot_inspection_received_date",
+        ),
         CheckConstraint(
             "(inspection_id IS NULL) = (inspection_result IS NULL)",
             name="ck_lot_inspection_result_matches_inspection",

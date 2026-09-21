@@ -408,6 +408,10 @@ def receive(session: Session, request: IncomingInspection) -> Judged:
         supplier_type=supplier.partner_type,
         supplier_lot_number=request.supplier_lot_number,
         quantity=request.quantity,
+        # **불합격에도 남는다.** 로트는 합격과 특채에만 서므로 도착일을 로트에만
+        # 적으면 **불합격에서만 사라진다** — 클레임과 반품의 근거가 되는 바로 그
+        # 판정이다(NC-109). 합격한 줄에서는 로트가 외래키로 이 칸을 가리킨다.
+        received_date=request.received_date,
         judged_at=judged_at,
         judged_by=request.judged_by,
         result=result,

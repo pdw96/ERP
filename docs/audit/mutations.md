@@ -75,3 +75,18 @@
 | NC | 무엇을 어긋냈나 | 빨개진 검사 |
 |---|---|---|
 | 112 | 대장의 NC-35 줄 끝에 **칸 하나를 도로 붙였다**(머리가 6 칸인데 7 칸) | `test_a_table_row_does_not_carry_a_cell_the_header_did_not_declare` — 줄 번호까지 가리켰다(`docs/audit/README.md:111`) |
+
+## NC-109 의 고침 — `inspections.received_date` (`9c09a96` 뒤)
+
+**하나가 통과했고 그것이 이 표의 값이다.** 데이터 단계를 「로트에서 옮긴다」에서
+「판정일에서 센다」로 어긋냈는데 전부 초록이었다 — 픽스처의 로트 도착일과 판정일이
+**같은 날**이라 두 구현이 같은 값을 냈다. 테스트가 그 자리를 지나가면서 아무것도
+지키지 않던 자리이고, 도착일을 판정일에서 떼어 두고서야 물었다.
+
+| NC | 무엇을 어긋냈나 | 빨개진 검사 |
+|---|---|---|
+| 109 | `incoming.py` 에서 `received_date=request.received_date` 를 지웠다(검사 쪽) | `test_a_failed_judgement_still_remembers_when_the_material_arrived` 외 여럿 — 쌍 외래키가 합격 경로도 함께 무너뜨린다 |
+| 109 | `fk_lot_inspection_received_date` 를 통째로 뺐다 | `test_a_pass_cannot_let_the_two_arrival_dates_drift` · `test_the_migration_builds_the_same_tables_as_the_models` |
+| 109 | `ck_inspection_judged_after_arrival` 의 비교를 60 일 늦췄다 | `test_an_inspection_cannot_be_judged_before_the_material_arrived` · 대조 테스트 |
+| 109 | 데이터 단계를 `l.received_date` 대신 `i.judged_at::date` 로 | **처음에는 통과했다.** 픽스처의 두 날짜를 떼어 둔 뒤 `test_the_data_step_moves_the_arrival_date_from_the_lot` 이 물었다 |
+| 109 | 되돌림 가드의 `NOT EXISTS` 를 `FALSE AND NOT EXISTS` 로(아무것도 세지 않게) | `test_downgrade_says_whose_arrival_date_has_no_lot_to_fall_back_on` |

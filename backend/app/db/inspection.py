@@ -16,11 +16,12 @@
 마이그레이션이다.
 """
 
-from datetime import datetime
+from datetime import date, datetime
 
 from sqlalchemy import (
     Boolean,
     CheckConstraint,
+    Date,
     DateTime,
     Float,
     ForeignKeyConstraint,
@@ -191,12 +192,21 @@ class Inspection(Base):
             "special_acceptance_allowed IS NOT FALSE",
             name="ck_inspection_special_acceptance_is_allowed",
         ),
+        # **도착이 판정보다 먼저다.** `NULL` 은 통과한다 — 이 칸이 서기 전의
+        # 줄에는 도착일이 없고, 「모른다」를 「위반이다」로 세지 않는다.
+        CheckConstraint(
+            "received_date IS NULL OR judged_at::date >= received_date",
+            name="ck_inspection_judged_after_arrival",
+        ),
         # `id` 가 이미 기본키라 행을 좁히지 않는다 — **측정 줄이 가리킬 상대**다.
         UniqueConstraint("id", "material_group", name="uq_inspection_id_material_group"),
         # **로트가 가리킬 상대.** 「불합격이 로트를 만들지 못한다」는 다른 표의
         # 칸을 보는 조건이라 CHECK 로 적을 수 없다 — 로트가 판정을 함께 들고
         # 이 쌍을 가리키면 그 줄만 보고 막을 수 있다.
         UniqueConstraint("id", "result", name="uq_inspection_id_result"),
+        # **로트가 도착일을 가리킬 상대.** 같은 사실이 두 표에 살면 갈리므로
+        # (원칙 ⑥) 로트 쪽이 값을 다시 적는 대신 이 쌍을 가리킨다.
+        UniqueConstraint("id", "received_date", name="uq_inspection_id_received_date"),
     )
 
     id: Mapped[int] = mapped_column(primary_key=True)
@@ -229,6 +239,19 @@ class Inspection(Base):
     supplier_lot_number: Mapped[str] = mapped_column(String(50))
 
     quantity: Mapped[float] = mapped_column(Float)
+
+    # **물건이 도착한 날.** 로트에도 같은 칸이 있지만 **로트는 불합격에 서지
+    # 않으므로** 그쪽만으로는 불합격의 도착일이 어디에도 남지 않는다 — 클레임과
+    # 반품의 근거가 되는 바로 그 판정에서만 사라지는 자리였다(NC-109).
+    #
+    # **`judged_at` 이 대신이 되지 못한다.** 이 조각은 뒤늦게 적은 입고를 일부러
+    # 받으므로(미래만 막는다) 둘은 며칠씩 갈릴 수 있고, 그 차이가 곧 검사가 늦은
+    # 날수다.
+    #
+    # **옛 줄에는 비어 있을 수 있다.** 이 칸이 서기 전의 불합격은 도착일을 남긴
+    # 자리가 없었고, 없는 값을 지어내지 않는다 — 아래 CHECK 가 `NULL` 을 통과시키는
+    # 이유이며 그 사실은 이 칸을 세우는 리비전이 적는다.
+    received_date: Mapped[date | None] = mapped_column(Date, nullable=True)
 
     judged_at: Mapped[datetime] = mapped_column(DateTime)
     # **판정자.** 사용자 표 없이 식별 칸 하나로 적는다.

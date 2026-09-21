@@ -10,7 +10,7 @@
 가 본다.** 모양이 제약으로 서 있지 않으면 뒤에 오는 조각이 주석을 믿고 짓게 된다.
 """
 
-from datetime import datetime
+from datetime import date, datetime
 
 import pytest
 from sqlalchemy import text
@@ -408,3 +408,49 @@ def test_the_quantity_must_be_a_number_you_can_count(prepared: Session, bad: flo
     prepared.add(_inspection(prepared, quantity=bad))
     with pytest.raises(IntegrityError):
         prepared.flush()
+
+
+# ── 도착일 ──────────────────────────────────────────────────────────────────
+
+
+def test_an_inspection_may_be_written_down_days_after_the_material_arrived(
+    prepared: Session,
+) -> None:
+    """**뒤늦게 적은 입고를 일부러 받는다.**
+
+    물건은 월요일에 오고 검사는 수요일에 한다 — 그것이 현장의 모습이고, 여기서
+    막으면 표가 이미 일어난 일을 부정한다. 그래서 도착일과 판정 시각이 갈리는
+    것이 정상이고, **갈리는 그 값이 불합격에서 사라지던 것**이다(NC-109).
+    """
+    prepared.add(_inspection(prepared, received_date=date(2026, 9, 1)))
+    prepared.flush()
+
+    assert prepared.query(Inspection).one().received_date == date(2026, 9, 1)
+
+
+def test_an_inspection_cannot_be_judged_before_the_material_arrived(
+    prepared: Session,
+) -> None:
+    """**도착이 판정보다 먼저다.** 아직 오지 않은 물건을 판정할 수는 없다.
+
+    쓰기 경로가 미래 입고일을 이름 있는 거절로 막지만, 그것은 **다른 겹**이다 —
+    이 표에 값을 넣는 길이 그 경로뿐이라는 보장이 없다.
+    """
+    prepared.add(_inspection(prepared, received_date=date(2026, 9, 22)))
+    with pytest.raises(IntegrityError, match="ck_inspection_judged_after_arrival"):
+        prepared.flush()
+
+
+def test_an_inspection_from_before_this_column_may_leave_the_date_empty(
+    prepared: Session,
+) -> None:
+    """**「모른다」를 「위반이다」로 세지 않는다.**
+
+    이 칸이 서기 전의 불합격에는 도착일을 적은 자리가 없었고, 없는 값을
+    지어내지 않는다. CHECK 가 `NULL` 을 통과시키는 이유이며, 여기서 막으면
+    **제약이 이미 선 사실을 막는다** — 기초재고에서 한 번 겪은 자리다.
+    """
+    prepared.add(_inspection(prepared, received_date=None))
+    prepared.flush()
+
+    assert prepared.query(Inspection).one().received_date is None

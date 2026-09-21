@@ -63,6 +63,10 @@ def prepared(session: Session) -> Session:
         supplier_type=supplier.partner_type,
         supplier_lot_number="SL-2026-0001",
         quantity=500.0,
+        # **로트와 같은 날이어야 한다** — 둘을 쌍으로 묶은 외래키가 그것을 본다
+        # (`fk_lot_inspection_received_date`). 같은 사실이 두 표에 사는 자리를
+        # 구조로 닫은 것이라 픽스처도 그 구조를 지나간다.
+        received_date=date(2026, 9, 21),
         judged_at=datetime(2026, 9, 21, 9, 0),
         judged_by="검사원 1",
         result=codes.JUDGMENT_PASSED,

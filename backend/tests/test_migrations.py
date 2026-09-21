@@ -18,6 +18,7 @@ import subprocess
 import sys
 from collections.abc import Iterator
 from contextlib import contextmanager
+from datetime import date
 from pathlib import Path
 
 import pytest
@@ -1181,6 +1182,13 @@ def test_downgrade_says_which_lots_would_lose_their_judgement(engine: Engine) ->
         config = _upgrade_with(engine, schema, "head", _BEFORE_WRITE_PATH)
         scoped = _engine_for_schema(engine, schema)
         with scoped.begin() as conn:
+            # **도착일이 먼저다.** 로트가 검사를 가리키는 순간 둘의 도착일이
+            # 같아야 하므로(`a7c14b3e9052` 의 쌍 외래키), 가리키게 하기 전에
+            # 맞춰 둔다 — 그 리비전의 데이터 단계가 옛 줄에 대해 하는 일이고,
+            # 쓰기 경로가 한 트랜잭션 안에서 하는 일이기도 하다.
+            conn.execute(
+                text("UPDATE inspections SET received_date = (SELECT received_date FROM lots)")
+            )
             conn.execute(
                 text(
                     "UPDATE lots SET inspection_id = (SELECT id FROM inspections),"
@@ -1306,3 +1314,114 @@ FROM lots AS l, inspections AS i;
 
         with pytest.raises(Exception, match="SL-2026-0001"):
             command.downgrade(config, "361ec789023c")
+
+
+# ── 조각 6 — 불합격에도 도착일이 남는다 (`a7c14b3e9052`) ─────────────────────
+
+_JUDGED_LOT = """
+UPDATE inspections SET received_date = (SELECT received_date FROM lots);
+UPDATE lots SET inspection_id = (SELECT id FROM inspections), inspection_result = '합격';
+"""
+
+
+def test_the_data_step_moves_the_arrival_date_from_the_lot(engine: Engine) -> None:
+    """**지어내는 것이 아니라 옮기는 것이다.**
+
+    합격한 옛 줄의 도착일은 로트에 이미 적혀 있다 — 같은 입고의 같은 사실이라
+    옮겨 오는 것이 지어내는 것이 아니다. 불합격한 줄에는 짝이 될 로트가 없어
+    비어서 서고, **그것이 이 리비전이 고치는 결함의 모양 그대로**다.
+    """
+    schema = "received_date_data_step"
+    with _schema(engine, schema):
+        config = _upgrade_with(engine, schema, "08d406fa7f3b", _BEFORE_WRITE_PATH)
+        scoped = _engine_for_schema(engine, schema)
+        with scoped.begin() as conn:
+            # **한 문장으로 둘을 채운다** — `ck_lot_inspection_result_matches_inspection`
+            # 이 양방향이라 한 칸씩 채우면 중간 상태에서 물린다.
+            #
+            # **도착일을 판정일에서 떼어 둔다.** 둘이 같은 날이면 「로트에서
+            # 옮겼다」와 「판정일에서 셌다」가 같은 값을 내므로 이 테스트가
+            # 아무것도 지키지 않는다 — 돌연변이를 돌려 실제로 겪은 자리다.
+            conn.execute(
+                text(
+                    "UPDATE lots SET inspection_id = (SELECT id FROM inspections),"
+                    " inspection_result = '합격', received_date = DATE '2026-09-01'"
+                )
+            )
+
+        command.upgrade(config, "head")
+
+        with scoped.connect() as conn:
+            moved = conn.execute(text("SELECT received_date FROM inspections")).scalars().all()
+
+    # 판정은 9월 21일에 했다 — 옮겨 온 것이라야 9월 1일이다.
+    assert moved == [date(2026, 9, 1)], moved
+
+
+def test_the_data_step_leaves_a_judgement_with_no_lot_empty(engine: Engine) -> None:
+    """**없는 값을 지어내지 않는다.**
+
+    로트가 없는 판정 — 불합격 — 의 도착일은 애초에 어디에도 없다. `judged_at`
+    으로 채우면 **검사가 늦은 날수만큼 거짓말**이 되므로 비워 둔다.
+    """
+    schema = "received_date_leaves_it_empty"
+    with _schema(engine, schema):
+        config = _upgrade_with(engine, schema, "08d406fa7f3b", _BEFORE_WRITE_PATH)
+
+        command.upgrade(config, "head")
+
+        scoped = _engine_for_schema(engine, schema)
+        with scoped.connect() as conn:
+            empty = conn.execute(text("SELECT received_date FROM inspections")).scalars().all()
+
+    assert empty == [None], empty
+
+
+def test_downgrade_says_whose_arrival_date_has_no_lot_to_fall_back_on(
+    engine: Engine,
+) -> None:
+    """**되돌리기가 사람이 남긴 것을 조용히 지우지 않는다.**
+
+    세는 것은 「칸이 찬 줄」이 아니라 **로트가 받쳐 주지 않는 줄**이다 — 다시
+    만들 수 있는 것까지 세면 막을 것이 없는데 멈추게 된다(`08d406fa7f3b` 에서
+    실제로 그랬다).
+    """
+    schema = "received_date_downgrade_guard"
+    with _schema(engine, schema):
+        config = _upgrade_with(engine, schema, "head", _BEFORE_WRITE_PATH)
+        scoped = _engine_for_schema(engine, schema)
+        with scoped.begin() as conn:
+            conn.execute(text("UPDATE inspections SET received_date = DATE '2026-09-01'"))
+
+        with pytest.raises(Exception, match="도착일이 사라진다"):
+            command.downgrade(config, "08d406fa7f3b")
+
+
+def test_downgrade_goes_quietly_when_the_lot_still_carries_the_arrival_date(
+    engine: Engine,
+) -> None:
+    """**가드가 정상 경로를 막지 않는다.**
+
+    합격한 줄의 도착일은 로트에 같은 값이 남으므로 되돌려도 사라지지 않는다 —
+    멈추는 것이 설계라면 멈추지 않아야 할 때 멈추지 않는 것도 설계다.
+    """
+    schema = "received_date_downgrade_clean"
+    with _schema(engine, schema):
+        config = _upgrade_with(engine, schema, "head", _BEFORE_WRITE_PATH)
+        scoped = _engine_for_schema(engine, schema)
+        with scoped.begin() as conn:
+            for statement in _JUDGED_LOT.strip().split(";"):
+                if statement.strip():
+                    conn.execute(text(statement))
+
+        command.downgrade(config, "08d406fa7f3b")
+
+        with scoped.connect() as conn:
+            columns = conn.execute(
+                text(
+                    "SELECT column_name FROM information_schema.columns"
+                    " WHERE table_schema = :schema AND table_name = 'inspections'"
+                ),
+                {"schema": schema},
+            ).scalars()
+            assert "received_date" not in set(columns)
