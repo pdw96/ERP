@@ -121,6 +121,44 @@ class Lot(Base):
             " OR expiry_date >= COALESCE(passed_date, received_date, produced_date)",
             name="ck_lot_expires_after_it_exists",
         ),
+        # ── 자기를 만든 검사 ────────────────────────────────────────────────
+        # **특채 표식을 칸으로 두지 않는 이유가 이것이다.** 로트가 자기를 만든
+        # 검사를 가리키면 특채 여부도 판정자도 측정값도 **검사 쪽에 한 번만**
+        # 산다. 칸을 따로 두면 같은 사실이 두 곳에 살고, 두 벌은 갈린다.
+        #
+        # **판정을 함께 가리킨다.** 「불합격이 로트를 만들지 못한다」는 다른 표의
+        # 칸을 보는 조건이라 CHECK 로 적을 수 없다 — 판정을 이 줄에 들고 쌍으로
+        # 가리키면 아래 CHECK 가 그 줄만 보고 막는다. 특채 플래그를 검사 기록에
+        # 건 것과 같은 방식이고, 칸은 외래키에 묶여 **갈릴 수 없다.**
+        ForeignKeyConstraint(
+            ["inspection_id", "inspection_result"],
+            ["inspections.id", "inspections.result"],
+            name="fk_lot_inspection",
+        ),
+        CheckConstraint(
+            "(inspection_id IS NULL) = (inspection_result IS NULL)",
+            name="ck_lot_inspection_result_matches_inspection",
+        ),
+        # **원칙 ① 이 제약이 되는 자리다.** 불합격은 재고가 되지 않는다.
+        CheckConstraint(
+            f"inspection_result IS DISTINCT FROM '{codes.JUDGMENT_FAILED}'",
+            name="ck_lot_is_not_from_a_failed_inspection",
+        ),
+        # **「사 온 로트에는 검사가 있다」를 걸지 않는다.** 걸어 봤더니 기초재고가
+        # 막혔다 — 과거를 소급하지 않기로 했으므로 이월로 깔리는 자재 로트에는
+        # 적을 검사도 합격일도 없고, 그것은 이미 선 사실이다
+        # (`tests/test_inventory.py` 의 「기초재고」 둘).
+        #
+        # 그래서 검사를 **가리키는** 로트만 판정에 묶인다. 「검사 없이 선 자재
+        # 로트」와 「이월로 깔린 자재 로트」를 데이터베이스가 가르려면 이월을
+        # 표시할 자리가 있어야 하고, 그 자리는 전기이월이 서는 조각의 것이다.
+        # **한 판정은 로트를 한 번만 만든다.** 판정이 검사 한 건에 하나이므로
+        # 둘이 서면 같은 합격으로 재고가 두 벌 생긴다.
+        UniqueConstraint("inspection_id", name="uq_lot_inspection"),
+        # `id` 가 이미 기본키라 행을 좁히지 않는다 — **원장 줄이 가리킬 상대**다.
+        # 원장의 입고 줄이 「그 로트를 만든 검사」를 가리키는지는 이 쌍이 없으면
+        # 데이터베이스가 보증하지 못한다.
+        UniqueConstraint("id", "inspection_id", name="uq_lot_id_inspection"),
     )
 
     id: Mapped[int] = mapped_column(primary_key=True)
@@ -161,18 +199,14 @@ class Lot(Base):
     # 폐기된다.
     reworked: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
 
-    # **특채로 들어온 로트에는 아직 표식이 없다.** 원칙 ①의 예외 하나가 특채이고
-    # 거기에는 표식이 남아야 하는데, 그것을 담을 자리가 이 표에 없다.
-    #
-    # **어떻게 답할지는 정해졌다 — 칸이 아니라 구조다.** 로트가 `inspection_id`
-    # 로 자기를 만든 검사를 가리키면 특채 여부도 판정자도 측정값도 검사 쪽에 한
-    # 번만 산다. 칸을 따로 두면 같은 사실이 두 곳에 살고, 두 벌은 반드시 갈린다
-    # (`docs/schema-2단계.md` 의 「`lots` 가 바뀌는 자리」).
-    #
-    # **아직 붙지 않았다.** 붙는 자리는 **로트를 실제로 만드는 쪽**, 곧 쓰기
-    # 경로가 서는 조각이다 — 지금 붙이면 아무도 채우지 않는 칸이 선다. 그때까지
-    # 이 표는 검사를 모르고, 수불 원장의 입고 줄이 가리키는 검사가 그 로트를
-    # 만든 검사인지도 데이터베이스가 보증하지 못한다.
+    # **특채 표식은 이 칸을 통해 검사 쪽에 있다.** 로트에 「특채인가」를 따로 두지
+    # 않는다 — 같은 사실이 두 곳에 살면 갈린다.
+    inspection_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # **값을 나르는 칸이 아니라 구조다.** 위의 외래키가 검사의 판정에 묶으므로
+    # 여기 담기는 것은 「이 로트를 만든 판정이 무엇이었는가」 하나뿐이고, 검사
+    # 쪽 판정이 바뀌면 이 줄이 가리키던 짝이 사라져 그 수정 자체가 막힌다 —
+    # 원칙 ⑦ 이 여기서도 한 겹 선다.
+    inspection_result: Mapped[str | None] = mapped_column(String(10), nullable=True)
 
     item: Mapped[Item] = relationship(foreign_keys=[item_id, item_type])
 
@@ -214,11 +248,14 @@ class StockLedgerEntry(Base):
 
     __tablename__ = "stock_ledger_entries"
     __table_args__ = (
-        ForeignKeyConstraint(["lot_id"], ["lots.id"], name="fk_stock_ledger_entry_lot"),
+        # **그 로트를 만든 검사여야 한다.** `lot_id` 와 `inspection_id` 를 따로
+        # 가리키면 둘 다 실재한다는 것까지만 증명된다 — 남의 검사를 가리키는
+        # 입고 줄이 서고, 그러면 「왜 이 물건이 들어왔는가」로 내려가는 길이
+        # 엉뚱한 판정에 닿는다. 쌍으로 가리키면 그 한 겹이 더 막힌다.
         ForeignKeyConstraint(
-            ["inspection_id"],
-            ["inspections.id"],
-            name="fk_stock_ledger_entry_inspection",
+            ["lot_id", "inspection_id"],
+            ["lots.id", "lots.inspection_id"],
+            name="fk_stock_ledger_entry_lot",
         ),
         # **속성 줄을 가리킨다.** 공통코드를 가리키면 총량 영향이 없는 유형이
         # 원장에 설 수 있고, 그러면 잔량을 세는 쪽이 방향을 알 수 없다.

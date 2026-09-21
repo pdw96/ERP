@@ -55,30 +55,35 @@ def prepared(session: Session) -> Session:
     session.add_all([material, supplier])
     session.flush()
 
-    session.add(
-        Inspection(
-            item_id=material.id,
-            item_type=material.item_type,
-            material_group=material.material_group,
-            supplier_id=supplier.id,
-            supplier_type=supplier.partner_type,
-            supplier_lot_number="SL-2026-0001",
-            quantity=500.0,
-            judged_at=datetime(2026, 9, 21, 9, 0),
-            judged_by="검사원 1",
-            result=codes.JUDGMENT_PASSED,
-        )
+    inspection = Inspection(
+        item_id=material.id,
+        item_type=material.item_type,
+        material_group=material.material_group,
+        supplier_id=supplier.id,
+        supplier_type=supplier.partner_type,
+        supplier_lot_number="SL-2026-0001",
+        quantity=500.0,
+        judged_at=datetime(2026, 9, 21, 9, 0),
+        judged_by="검사원 1",
+        result=codes.JUDGMENT_PASSED,
     )
+    session.add(inspection)
+    session.flush()
+    # **로트가 자기를 만든 검사를 가리킨다.** 원장의 입고 줄이 그 쌍을 가리키므로
+    # 여기서 비워 두면 원장 줄이 설 자리가 없다 — 「그 로트를 만든 검사인가」를
+    # 데이터베이스가 보는 자리다.
     session.add(
         Lot(
             item_id=material.id,
             item_type=material.item_type,
-            lot_number="SL-2026-0001",
+            lot_number="RM-01-260921-01",
             lot_origin=codes.LOT_FROM_SUPPLIER,
             warehouse=codes.WAREHOUSE_RAW,
             stock_type=codes.STOCK_GOOD,
             quantity=500.0,
             received_date=date(2026, 9, 21),
+            inspection_id=inspection.id,
+            inspection_result=inspection.result,
         )
     )
     session.flush()

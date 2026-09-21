@@ -193,6 +193,10 @@ class Inspection(Base):
         ),
         # `id` 가 이미 기본키라 행을 좁히지 않는다 — **측정 줄이 가리킬 상대**다.
         UniqueConstraint("id", "material_group", name="uq_inspection_id_material_group"),
+        # **로트가 가리킬 상대.** 「불합격이 로트를 만들지 못한다」는 다른 표의
+        # 칸을 보는 조건이라 CHECK 로 적을 수 없다 — 로트가 판정을 함께 들고
+        # 이 쌍을 가리키면 그 줄만 보고 막을 수 있다.
+        UniqueConstraint("id", "result", name="uq_inspection_id_result"),
     )
 
     id: Mapped[int] = mapped_column(primary_key=True)

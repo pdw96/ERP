@@ -1108,3 +1108,110 @@ def test_the_data_step_fills_the_material_group_from_the_item(engine: Engine) ->
 
     assert filled == [("분체", "분체")], filled
     assert not_null == "NO"
+
+
+# ── 08d406fa7f3b — 로트가 자기를 만든 검사를 가리킨다 ──────────────────────
+
+# 검사 한 건과 그 검사가 만든 로트. **`inspections` 까지 선 모양**이므로 로트는
+# 아직 검사를 모른다 — 그 칸을 붙이는 것이 시험 대상이다.
+# **검사의 자재군 칸이 이미 선 모양**이라 `_BEFORE_MEASUREMENTS` 를 그대로 쓸 수
+# 없다 — 그 절은 그 칸이 서기 **전**의 데이터베이스를 흉내 내는 것이다.
+_BEFORE_WRITE_PATH = (
+    _BEFORE_MEASUREMENTS.split("INSERT INTO inspections")[0]
+    + """
+INSERT INTO inspections (inspection_stage, stage_group, item_id, item_type, material_group,
+                         supplier_id, supplier_type, supplier_lot_number, quantity,
+                         judged_at, judged_by, result, nonconformity_group)
+SELECT 'IQC', 'INSP_STAGE', i.id, i.item_type, i.material_group, p.id, p.partner_type,
+       'SL-2026-0001', 500.0, TIMESTAMP '2026-09-21 09:00', '검사원 1', '합격', 'NC_REASON'
+FROM items AS i, partners AS p WHERE i.code = 'RM-01' AND p.code = 'SUP-01';
+
+INSERT INTO lots (item_id, item_type, lot_number, lot_origin, warehouse, stock_type,
+                  quantity, received_date)
+SELECT i.id, i.item_type, 'SL-2026-0001', '공급사', '원재료', '양품', 500.0, DATE '2026-09-21'
+FROM items AS i WHERE i.code = 'RM-01';
+"""
+)
+
+
+def _upgrade_with(engine: Engine, schema: str, revision: str, planted: str) -> Config:
+    """그 리비전까지 올리고 **줄을 심는다.**"""
+    config = _config_for_schema(engine, schema)
+    command.upgrade(config, revision)
+    scoped = _engine_for_schema(engine, schema)
+    with scoped.begin() as conn:
+        for statement in planted.strip().split(";"):
+            if statement.strip():
+                conn.execute(text(statement))
+    return config
+
+
+def test_upgrade_does_not_stop_for_a_lot_that_came_before(engine: Engine) -> None:
+    """**제약이 사실을 막으면 안 된다.**
+
+    「사 온 로트에는 검사가 있다」를 양방향으로 걸어 봤더니 **기초재고가
+    막혔다** — 과거를 소급하지 않기로 했으므로 이월로 깔리는 자재 로트에는 적을
+    검사가 없고, 그것은 이미 선 사실이다. 그래서 그 CHECK 를 빼고 **검사를
+    가리키는 로트만** 판정에 묶는다.
+
+    이 테스트가 그 되돌림을 지킨다 — 다시 걸면 여기서 빨개진다.
+    """
+    schema = "write_path_keeps_old_lots"
+    with _schema(engine, schema):
+        config = _upgrade_with(engine, schema, "e84fbec436c0", _BEFORE_WRITE_PATH)
+
+        command.upgrade(config, "head")
+
+        scoped = _engine_for_schema(engine, schema)
+        with scoped.connect() as conn:
+            kept = conn.execute(text("SELECT lot_number, inspection_id FROM lots")).all()
+
+    assert kept == [("SL-2026-0001", None)], kept
+
+
+def test_downgrade_says_which_lots_would_lose_their_judgement(engine: Engine) -> None:
+    """**되돌리기가 사람이 남긴 것을 조용히 지우지 않는다.**
+
+    칸 둘을 지우면 어느 판정이 그 로트를 만들었는지가 사라지고, 특채로 들어온
+    로트는 표식까지 잃는다. 같은 모양이 이 저장소에서 여섯 번 나왔다 — 일곱
+    번째로 만들지 않는다.
+    """
+    schema = "write_path_downgrade_guard"
+    with _schema(engine, schema):
+        config = _upgrade_with(engine, schema, "head", _BEFORE_WRITE_PATH)
+        scoped = _engine_for_schema(engine, schema)
+        with scoped.begin() as conn:
+            conn.execute(
+                text(
+                    "UPDATE lots SET inspection_id = (SELECT id FROM inspections),"
+                    " inspection_result = '합격', lot_number = '판정에서-나온-로트'"
+                )
+            )
+
+        with pytest.raises(Exception, match="판정에서-나온-로트"):
+            command.downgrade(config, "e84fbec436c0")
+
+
+def test_downgrade_goes_quietly_when_no_lot_points_at_a_judgement(engine: Engine) -> None:
+    """**가드가 정상 경로를 막지 않는다.**
+
+    멈추는 것이 설계라면 멈추지 않아야 할 때 멈추지 않는 것도 설계다 — 가리키는
+    로트가 하나도 없으면 조용히 내려간다.
+    """
+    schema = "write_path_downgrade_clean"
+    with _schema(engine, schema):
+        config = _upgrade_with(engine, schema, "head", _BEFORE_WRITE_PATH)
+
+        command.downgrade(config, "e84fbec436c0")
+
+        scoped = _engine_for_schema(engine, schema)
+        with scoped.connect() as conn:
+            columns = conn.execute(
+                text(
+                    "SELECT column_name FROM information_schema.columns"
+                    " WHERE table_schema = :schema AND table_name = 'lots'"
+                ),
+                {"schema": schema},
+            ).scalars()
+
+    assert "inspection_id" not in set(columns)

@@ -1,6 +1,6 @@
-# **아직 상주 서비스가 없다.** 공개 API 가 없으므로 뜨는 것은 데이터베이스
-# 하나뿐이고, backend 는 마이그레이션과 시드를 돌리고 끝나는 일회성 잡이다.
-# 웹 서버는 2단계의 첫 쓰기 엔드포인트와 함께 들어온다 — 화면은 그 뒤다.
+# **상주 서비스가 하나 생겼다 — 쓰기 엔드포인트.** `migrate` 는 여전히
+# 마이그레이션과 시드를 돌리고 끝나는 일회성 잡이고, `api` 는 그것이 끝난 뒤에
+# 뜬다. **화면은 없다** — 부르는 것은 사람의 브라우저가 아니라 다음 층이다.
 services:
   postgres:
     image: postgres:16-alpine
@@ -31,6 +31,24 @@ services:
       # 개발과 시연에서만 켠다.
       ERP_SEED_ENABLED: "true"
     command: ["true"]
+
+  api:
+    build: ./backend
+    depends_on:
+      postgres:
+        condition: service_healthy
+      # **표가 먼저다.** 마이그레이션이 끝나기 전에 뜨면 첫 요청이 없는 표를
+      # 찾는다 — 시드 판단의 조건 ① 이 여기서도 같은 이유로 선다.
+      migrate:
+        condition: service_completed_successfully
+    environment:
+      ERP_DATABASE_URL: postgresql+psycopg://erp:erp@postgres:5432/erp
+    ports:
+      # **루프백에만 연다.** 인증이 없는 쓰기 엔드포인트이고, 모든 인터페이스에
+      # 열면 같은 네트워크의 누구나 로트를 만들 수 있다. 권한 층이 서는 것은
+      # 사람이 늘어나는 날이며 그때까지 경계는 이 한 줄이다.
+      - "127.0.0.1:8000:8000"
+    command: ["uvicorn", "app.api.app:app", "--host", "0.0.0.0", "--port", "8000"]
 
 volumes:
   pgdata:
