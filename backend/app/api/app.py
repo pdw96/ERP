@@ -9,12 +9,13 @@
 """
 
 from collections.abc import Iterator
+from functools import lru_cache
 from typing import Annotated
 
 from fastapi import Depends, FastAPI, Request, status
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, sessionmaker
 
 from app.api.schemas import InspectionIn, InspectionOut
 from app.db.base import create_db_engine, create_session_factory
@@ -45,10 +46,21 @@ app = FastAPI(
     version=API_VERSION,
 )
 
-# **엔진은 앱마다 하나다.** 요청마다 만들면 연결 풀이 요청마다 새로 서고,
-# 그것은 풀이 없는 것과 같다.
-_engine = create_db_engine()
-_session_factory = create_session_factory(_engine)
+
+@lru_cache(maxsize=1)
+def _sessions() -> sessionmaker[Session]:
+    """**엔진은 앱마다 하나다.** 요청마다 만들면 연결 풀이 요청마다 새로 서고,
+    그것은 풀이 없는 것과 같다.
+
+    **다만 import 시점에 만들지 않는다.** 모듈 최상단에서 만들면 이 모듈을
+    import 하는 것만으로 엔진이 서고, 그때 설정의 기본값(개발용 `erp`)을 든다 —
+    `tests/conftest.py` 의 「앱 DB 금지」 가드는 **테스트가 돌 때** 환경변수를
+    덮으므로 **수집 시점에 이미 선 엔진을 구조적으로 보지 못한다.** 덮기를 잊은
+    테스트 하나면 개발자의 로컬에서 운영 성격의 DB 에 실제로 쓰고, CI 에는 그
+    이름의 DB 가 없어 **거기서만 터진다** — 그 가드가 없애려고 선 바로 그
+    사고다. 게으르게 만들면 가드가 자동으로 덮는다.
+    """
+    return create_session_factory(create_db_engine())
 
 
 def _refusal(status_code: int, errors: list[dict[str, object]]) -> JSONResponse:
@@ -114,7 +126,7 @@ def session_scope() -> Iterator[Session]:
     들어가거나 하나도 들어가지 않으며, 「로트는 생겼는데 원장에 줄이 없는」
     상태가 여기서 구조적으로 사라진다.
     """
-    session = _session_factory()
+    session = _sessions()()
     try:
         yield session
         session.commit()
@@ -131,9 +143,10 @@ def post_inspection(
 ) -> InspectionOut | JSONResponse:
     """검사 한 건을 받는다.
 
-    **받을 수 없는 것은 422 로 이름을 말하고 돌려보낸다.** 데이터베이스가 같은
-    것을 한 번 더 막지만, 거기서 나오는 말은 제약 이름이라 검사원에게 아무것도
-    알려 주지 않는다 — 「왜 막혔는지 모르는 실패」는 고칠 수 없는 실패다.
+    **받을 수 없는 것은 422 로 이름을 말하고 돌려보낸다.** 제약이 터지고 나서
+    나오는 말은 제약 이름이라 검사원에게 아무것도 알려 주지 않는다 — 「왜 막혔는지
+    모르는 실패」는 고칠 수 없는 실패다. **어떤 갈래를 무엇이 막는지는 한 자리에만
+    적는다** — `app/services/incoming.py` 의 `RefusedInspection` 이 든다.
     """
     try:
         judged = receive(

@@ -88,9 +88,13 @@ def _reason(
     session.flush()
 
 
-@pytest.fixture
-def prepared(session: Session) -> Session:
-    """시드와 같은 모양의 최소 기준정보 — 분체 하나가 항목 셋을 받는다."""
+def plant_master_data(session: Session) -> None:
+    """시드와 같은 모양의 최소 기준정보 — 분체 하나가 항목 셋을 받는다.
+
+    **픽스처가 아니라 함수다.** 진짜 `session_scope` 를 지나가는 검사는 자기
+    트랜잭션을 **커밋해야** 하므로 통째로 롤백하는 세션 픽스처를 쓸 수 없다.
+    그쪽에서 기준정보를 따로 심으면 목록이 두 벌이 되고, 두 벌은 갈린다.
+    """
     prepare_item_codes(session)
     add_code(session, codes.INSP_STAGE, codes.STAGE_INCOMING, "수입검사")
     add_code(session, codes.WAREHOUSE, codes.WAREHOUSE_RAW, "원재료창고")
@@ -150,6 +154,12 @@ def prepared(session: Session) -> Session:
         ]
     )
     session.flush()
+
+
+@pytest.fixture
+def prepared(session: Session) -> Session:
+    """그 기준정보가 심긴 세션 — 테스트가 끝나면 통째로 되돌아간다."""
+    plant_master_data(session)
     return session
 
 
@@ -215,6 +225,45 @@ def test_a_second_receipt_of_the_same_item_that_day_gets_the_next_serial(
         "RM-01-260921-01",
         "RM-01-260921-02",
     ]
+
+
+# ── 멱등 — **막지 않기로 한 결정을 검사가 든다** (NC-67) ───────────────────
+#
+# `docs/schema.md` 미결이 「막지 않는다」를 **대가와 함께** 적었다: 유일키는
+# 분할 납품을 함께 막고, 잘못 선 입고를 되돌릴 길은 이 조각에 없다. 그 결정이
+# 산문 한 줄에만 서 있으면 **다음 사람이 유일키를 더할 때 아무 검사도 물지
+# 않는다** — 갈래 둘이 그 자리를 든다.
+
+
+def test_the_same_request_twice_makes_two_lots(prepared: Session) -> None:
+    """**오늘의 동작을 못박는다** — 글자까지 같은 요청 둘이 로트 둘을 만든다.
+
+    이것이 NC-67 이 말한 대가다. 막지 않기로 했으므로 **이 검사가 빨개지는
+    변경은 그 결정을 뒤집는 변경**이고, 뒤집을 때는 `docs/schema.md` 의 그 줄을
+    함께 고쳐야 한다.
+    """
+    first = receive(prepared, _request())
+    second = receive(prepared, _request())
+
+    assert first.lot_number == "RM-01-260921-01"
+    assert second.lot_number == "RM-01-260921-02"
+    assert prepared.query(Inspection).count() == 2
+
+
+def test_a_split_delivery_of_the_same_supplier_lot_is_accepted(prepared: Session) -> None:
+    """**분할 납품이 막히지 않는다** — 한 공급사 로트가 나뉘어 와도 둘 다 선다.
+
+    `(공급사 × 공급사 로트번호)` 에 유일키를 더하면 중복 제출은 막히지만 **이
+    경로가 함께 막힌다.** 그것이 막지 않기로 한 이유이고, 이 갈래가 그 자리에서
+    빨개진다 — 「둘째는 그날의 다음 일련을 받는다」를 재는 갈래는 공급사 번호가
+    **서로 달라** 그 변경을 통과시킨다.
+    """
+    receive(prepared, _request(quantity=300.0))
+    receive(prepared, _request(quantity=200.0))
+
+    arrived = prepared.query(Inspection).all()
+    assert [row.supplier_lot_number for row in arrived] == ["SL-2026-0001"] * 2
+    assert sum(row.quantity for row in arrived) == 500.0
 
 
 def test_the_measurements_pin_the_spec_they_were_judged_against(prepared: Session) -> None:

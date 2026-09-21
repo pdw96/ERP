@@ -1173,8 +1173,8 @@ def test_downgrade_says_which_lots_would_lose_their_judgement(engine: Engine) ->
     """**되돌리기가 사람이 남긴 것을 조용히 지우지 않는다.**
 
     칸 둘을 지우면 어느 판정이 그 로트를 만들었는지가 사라지고, 특채로 들어온
-    로트는 표식까지 잃는다. 같은 모양이 이 저장소에서 여섯 번 나왔다 — 일곱
-    번째로 만들지 않는다.
+    로트는 표식까지 잃는다. 같은 모양이 이 저장소에서 거듭 났고, 그 목록을 세는
+    자리는 `docs/audit/README.md` 하나다.
     """
     schema = "write_path_downgrade_guard"
     with _schema(engine, schema):

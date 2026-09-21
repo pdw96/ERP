@@ -359,6 +359,26 @@ def test_a_lot_cannot_pass_before_it_arrives(prepared: Session) -> None:
         prepared.flush()
 
 
+def test_a_lot_that_arrives_and_passes_on_the_same_day_stands(prepared: Session) -> None:
+    """**등호가 경계다** — 오늘 들어와 오늘 합격하는 것이 이 업무의 정상 경로다.
+
+    제약은 `passed_date >= received_date` 인데 그 등호를 재는 갈래가 없었다.
+    위아래의 갈래는 전부 **엄격한 부등**이고, 등호가 실제로 밟히는 곳은 쓰기
+    경로뿐인데 그것은 `RECEIVED` 가 **하필 그날과 같아서** 생긴 우연이었다 —
+    날이 바뀌면 그 갈래가 조용히 사라진다. 제약이 사실을 막으면 안 되고,
+    막히면 합격이 전부 500 이 된다.
+    """
+    raw = make_item(codes.RAW_MATERIAL)
+    prepared.add(raw)
+    prepared.flush()
+
+    same_day = date(2026, 9, 10)
+    prepared.add(_lot(raw, received_date=same_day, passed_date=same_day))
+    prepared.flush()
+
+    assert prepared.query(Lot).one().passed_date == same_day
+
+
 def test_a_lot_cannot_expire_before_it_exists(prepared: Session) -> None:
     """생기기 전에 만료될 수 없다."""
     raw = make_item(codes.RAW_MATERIAL)
