@@ -94,11 +94,11 @@ def session_factory(engine: Engine) -> sessionmaker[Session]:
 def tables(engine: Engine) -> Iterator[None]:
     """표를 세운다.
 
-    **지금은 모델에서 직접 만든다** (`create_all`). 마이그레이션은 조각 7에서
-    하나로 굽기 때문이며, 그 조각이 서면 **마이그레이션이 만든 표와 모델이
-    같은지를 견주는 테스트**가 여기 붙어야 한다 — 그때까지 이 픽스처는
-    「모델이 말하는 표」만 보증하고 「마이그레이션이 만드는 표」는 보증하지
-    않는다.
+    **모델에서 직접 만든다** (`create_all`). 그래서 이 픽스처가 보증하는 것은
+    「모델이 말하는 표」뿐이고 「마이그레이션이 만드는 표」는 보증하지 않는다.
+    둘이 같은지는 `tests/test_migrations.py` 가 **별도 스키마 둘에** 두 길로
+    세워 견준다 — 여기에 붙이지 않은 것은 그 대조가 세션 픽스처 하나로는
+    되지 않기 때문이다.
     """
     Base.metadata.drop_all(engine)
     Base.metadata.create_all(engine)

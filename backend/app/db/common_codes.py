@@ -28,7 +28,7 @@ class CodeGroup(Base):
 
     group_code: Mapped[str] = mapped_column(String(20), primary_key=True)
     name: Mapped[str] = mapped_column(String(50))
-    # 값이 늘 수 있는가. False 면 값마다 프로그램이 분기한다.
+    # 값이 고정인가. **참이면** 값마다 프로그램이 분기하므로 화면에서 늘릴 수 없다.
     value_fixed: Mapped[bool] = mapped_column(Boolean)
     description: Mapped[str] = mapped_column(String(300))
 

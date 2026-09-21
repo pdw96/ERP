@@ -32,8 +32,9 @@ def create_session_factory(engine: Engine) -> sessionmaker[Session]:
 def session_scope(factory: sessionmaker[Session]) -> Iterator[Session]:
     """트랜잭션 하나를 연다 — 터지면 아무것도 남지 않는다.
 
-    시드가 이 모양을 쓴다. 「반쯤 채워짐」이라는 상태를 없애는 것이 목적이며,
-    PostgreSQL 에는 지우고 다시 시작할 파일이 없기 때문이다.
+    시드도 같은 모양이다(그쪽은 `engine.begin()` 을 직접 쓴다). 「반쯤 채워짐」
+    이라는 상태를 없애는 것이 목적이며, PostgreSQL 에는 지우고 다시 시작할
+    파일이 없기 때문이다.
     """
     session = factory()
     try:
