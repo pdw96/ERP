@@ -260,13 +260,28 @@ LOT_ORIGIN_ITEM_TYPES: dict[str, tuple[str, ...]] = {
 #
 # **재검사는 빠져 있다.** 원 단계의 기준을 다시 쓰되 경시 변화 항목만 보므로
 # 단계 하나에 공정 하나가 붙지 않는다.
+STAGE_INCOMING = "IQC"
 STAGE_PROCESSES: dict[str, tuple[str, ...]] = {
-    "IQC": ("수입",),
+    STAGE_INCOMING: ("수입",),
     "IPQC": ("배합", "코팅"),
     "FQC": ("적층경화",),
     "OQC": ("출하",),
 }
 RETEST_STAGE = "재검사"
+
+
+# ── 검사의 판정 ─────────────────────────────────────────────────────────────
+# **로트를 만드는 값이다.** 원칙 ① 이 「재고 로트는 합격 후에 생긴다」이고 예외는
+# 특채 하나이므로, 이 셋은 프로그램이 분기하는 값이다.
+#
+# **공통코드 그룹으로 두지 않는다.** 그룹을 더하는 것은 앵커볼트를 건드리는
+# 일인데, 이 셋은 늘지 않는다 — 넷째 판정이 생기면 그것은 코드값이 느는 것이
+# 아니라 원칙 ① 이 바뀌는 것이다. 처분(`DISPOSITIONS`)을 여기 둔 것과 같은
+# 자리이며, CHECK 가 이것을 박는다.
+JUDGMENT_PASSED = "합격"
+JUDGMENT_FAILED = "불합격"
+JUDGMENT_SPECIAL = "특채"
+JUDGMENTS = (JUDGMENT_PASSED, JUDGMENT_FAILED, JUDGMENT_SPECIAL)
 
 # ── 자재군이 붙는 공정 ──────────────────────────────────────────────────────
 # **자재군은 원자재를 보는 검사에만 붙는다.** 반제품과 완제품에는 자재군이 없다 —
@@ -274,4 +289,4 @@ RETEST_STAGE = "재검사"
 #
 # 원자재를 보는 것은 IQC 하나뿐이므로 위의 대응표에서 그대로 끌어 쓴다. 여기에
 # 따로 적으면 목록이 두 벌이 되고, 두 벌이면 반드시 갈린다.
-MATERIAL_GROUPED_PROCESSES: tuple[str, ...] = STAGE_PROCESSES["IQC"]
+MATERIAL_GROUPED_PROCESSES: tuple[str, ...] = STAGE_PROCESSES[STAGE_INCOMING]

@@ -14,6 +14,8 @@
 **1단계가 끝났고 2단계가 시작됐다.** 1단계가 세운 것은 기준정보 표 열셋과 로트 표
 하나, 마이그레이션, 시드다. 2단계의 첫 조각(자재군 축)이 그 위에 섰다 — 「수입」
 검사 기준이 원자재 열다섯 전부에 똑같이 걸리던 자리를 자재군 셋으로 가른다.
+둘째 조각으로 **검사 기록**이 섰다 — 로트를 만드는 판정이 앉는 표이며, 「특채는
+특채를 여는 사유로만」이 주석이 아니라 외래키로 걸린다.
 
 테스트는 PostgreSQL 16 위에서 돈다. **수는 여기 적지 않는다** — CI 출력이 그것을
 말하고, 산문에 적어 둔 수는 다음 커밋에서 낡는다.
@@ -73,11 +75,12 @@ backend/
   app/db/production.py   근무형태 · 비가동 구간
   app/db/quality.py      공정별 검사 기준
   app/db/inventory.py    로트 한 표
+  app/db/inspection.py   검사 기록 — 관문 1
   app/core/locks.py      자문 잠금 키 — 한 곳에 모은다
   app/core/alembic_url.py  Alembic 에 넘기는 URL
   app/seed.py            세 조건 · 트랜잭션 하나
   app/seed_data/*.sql    기준정보 — 사람이 읽고 고치는 표
-  migrations/            Alembic — 리비전 둘 (초기 스키마 · 자재군 축)
+  migrations/            Alembic — 리비전은 `versions/` 가 센다
   tests/                 실제 PostgreSQL 에 붙는다
 compose.yaml             postgres + 일회성 migrate 잡
 ```

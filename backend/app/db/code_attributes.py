@@ -8,7 +8,13 @@
 그룹은 속성이 없어 본체만으로 끝난다.
 """
 
-from sqlalchemy import Boolean, CheckConstraint, ForeignKeyConstraint, String
+from sqlalchemy import (
+    Boolean,
+    CheckConstraint,
+    ForeignKeyConstraint,
+    String,
+    UniqueConstraint,
+)
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.core import codes
@@ -158,6 +164,24 @@ class NonconformityStageRule(Base):
         CheckConstraint(
             f"disposition IN ({_quoted(codes.DISPOSITIONS)})",
             name="ck_nonconformity_stage_rule_disposition",
+        ),
+        # **네 칸이 이미 기본키라 이 유일키가 행을 더 좁히지 않는다.** 두는
+        # 이유는 `uq_item_id_type` 과 같다 — **복합 외래키의 상대가 되기
+        # 위해서**다. 검사 기록이 「특채는 특채를 여는 사유로만」을 제약으로
+        # 걸려면 그 플래그까지 함께 가리켜야 하고, PostgreSQL 의 외래키는
+        # 기본키나 유일키에만 붙는다.
+        #
+        # 덤으로 **이미 특채를 낸 사유의 플래그를 끄는 것이 막힌다.** 그 검사가
+        # 가리키는 짝이 사라지기 때문이다 — 원칙 ⑦ 이 말하는 「일어난 일은
+        # 지우지 않는다」가 기준정보 쪽에서도 한 겹 서는 자리다. 특채를 낸 적이
+        # 없는 사유는 그대로 끌 수 있다.
+        UniqueConstraint(
+            "reason_group",
+            "reason_code",
+            "stage_group",
+            "stage_code",
+            "special_acceptance_allowed",
+            name="uq_nonconformity_stage_rule_special_acceptance",
         ),
     )
 
