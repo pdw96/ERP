@@ -200,7 +200,8 @@ def test_a_measured_reason_must_name_its_inspection_item(session: Session) -> No
 def test_a_counted_reason_may_stand_alone(session: Session) -> None:
     """계수는 재는 것이 아니라 세는 것이라 가리킬 항목이 없을 수 있다.
 
-    손으로 유지하는 코드가 이 넷뿐이라는 것이 설계의 요점이다.
+    시드의 계수 코드는 다섯이고(`IQ-FM` · `IQ-EXP` · `IQ-PKG` · `IQ-DOC` · `FQ-FM`)
+    그중 가리킬 항목이 없는 것이 `IQ-EXP` 다.
     """
     add_code(session, codes.NC_REASON, "IQ-DOC", "시험성적서 미비")
     session.flush()

@@ -1,6 +1,6 @@
 """테스트가 쓰는 최소 기준정보.
 
-시드는 조각 7의 일이다. 여기 있는 것은 **제약을 검사하기 위해 필요한
+시드는 따로 선다(`tests/test_seed.py`). 여기 있는 것은 **제약을 검사하기 위해 필요한
 최소한**이며, 실제 값이 아니라 자리만 채운다.
 """
 
@@ -35,11 +35,14 @@ def add_code(session: Session, group_code: str, code: str, name: str | None = No
 
 
 def prepare_item_codes(session: Session) -> None:
-    """품목이 가리키는 가변 그룹의 값 — 공정과 단위."""
+    """품목이 가리키는 가변 그룹의 값 — 공정과 단위와 자재군."""
     add_code(session, codes.PROCESS, "배합")
     add_code(session, codes.PROCESS, "코팅")
+    add_code(session, codes.PROCESS, "수입")
     add_code(session, codes.UOM, "EA", "개")
     add_code(session, codes.UOM, "KG", "킬로그램")
+    add_code(session, codes.MATERIAL_GROUP, "분체")
+    add_code(session, codes.MATERIAL_GROUP, "액상수지")
     session.flush()
 
 
@@ -61,9 +64,12 @@ def make_item(
         "process_group": codes.PROCESS,
         "phase": codes.PHASE_MASS_PRODUCTION,
     }
-    # 원자재만 안전재고가 필수다.
+    # 원자재만 안전재고가 필수다. **자재군도 원자재만 갖는다** — 만들어져 나온
+    # 것에는 「무슨 자재인가」를 물을 수 없어 CHECK 가 양방향으로 걸려 있다.
     if item_type == codes.RAW_MATERIAL:
         fields["safety_stock"] = 100.0
+        fields["material_group"] = "분체"
+        fields["material_group_group"] = codes.MATERIAL_GROUP
     fields.update(overrides)
     return Item(**fields)
 

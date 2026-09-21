@@ -1,7 +1,7 @@
 """공통코드 두 표 — 조각 1.
 
 여기서 확인하는 것은 **그룹 목록이 설계와 맞는가**와 **본체가 무엇을
-거부하는가**다. 값(코드 하나하나)은 시드가 넣으므로 조각 7에서 본다.
+거부하는가**다. 값(코드 하나하나)은 시드가 넣으므로 `test_seed.py` 가 본다.
 """
 
 import pytest
@@ -25,14 +25,18 @@ def _group(group_code: str = codes.UOM) -> CodeGroup:
 # ── 그룹 목록 ───────────────────────────────────────────────────────────────
 
 
-def test_there_are_twenty_three_groups() -> None:
-    """그룹 스물셋 — 값 고정 열다섯 · 값 가변 여덟."""
+def test_there_are_twenty_four_groups() -> None:
+    """그룹 스물넷 — 값 고정 열다섯 · 값 가변 아홉.
+
+    자재군이 아홉째 가변 그룹이다. 프로그램은 자재군을 보고 분기하지 않고
+    기준을 찾는 주소로만 쓰므로, 무리가 늘어도 고장 나는 코드가 없다.
+    """
     fixed = [g for g in codes.CODE_GROUPS if g.value_fixed]
     growable = [g for g in codes.CODE_GROUPS if not g.value_fixed]
 
-    assert len(codes.CODE_GROUPS) == 23
+    assert len(codes.CODE_GROUPS) == 24
     assert len(fixed) == 15
-    assert len(growable) == 8
+    assert len(growable) == 9
 
 
 def test_group_codes_are_unique() -> None:

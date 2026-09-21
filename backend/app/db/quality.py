@@ -1,12 +1,13 @@
 """품질 기준정보 — 공정별 검사 기준.
 
-한 항목이 값 여섯을 갖는다 — 규격(상·하한) · 중심선 · 경고선 계수 · σ ·
-σ 출처 · 경시 변화 여부. 품목 코드를 고르면 그 품목의 공정이 정해지고, 공정이
-항목 목록을 정하고, 항목을 고르면 여섯 값이 딸려 온다. **사람이 넣는 것은
-측정값 하나뿐이다.**
+한 항목이 **값 칸 여덟**을 갖는다 — 규격 상·하한 · 중심선 · 경고선 계수 · σ ·
+σ 출처 · 경시 변화 여부 · 단위(마이그레이션의 `_VALUE_COLUMNS` 가 같은 여덟을
+부른다). 품목 코드를 고르면 그 품목의 공정이 정해지고, **공정이 — 수입이면
+자재군까지 — 항목 목록을 정하고**, 항목을 고르면 그 여덟이 딸려 온다.
+**사람이 넣는 것은 측정값 하나뿐이다.**
 """
 
-from sqlalchemy import Boolean, CheckConstraint, Float, String
+from sqlalchemy import Boolean, CheckConstraint, Float, String, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.core import codes
@@ -19,7 +20,7 @@ def _quoted(values: tuple[str, ...]) -> str:
 
 
 class ProcessInspectionStandard(Base):
-    """(공정 × 검사항목) 한 줄.
+    """(공정 × 검사항목 × 자재군) 한 줄 — 자재군은 수입에서만 찬다.
 
     **σ 를 비워 둔다.** 규격에서 뽑은 σ 는 어떤 계수를 쓰든 Cpk 를 그 계수의
     역수로 못박아, 어떤 공정에서든 같은 숫자가 나온다. 경고선과 WE 규칙 4 는
@@ -40,6 +41,34 @@ class ProcessInspectionStandard(Base):
             code_column="item_code",
             group_code=codes.INSP_ITEM,
             name="inspection_standard_item",
+        ),
+        *code_reference(
+            group_column="material_group_group",
+            code_column="material_group",
+            group_code=codes.MATERIAL_GROUP,
+            name="inspection_standard_material_group",
+        ),
+        # **이 줄의 정체성이다.** 자재군이 `NULL` 인 줄(공정검사)은 (공정 ×
+        # 검사항목)으로, 자재군이 있는 줄(수입)은 셋으로 갈린다.
+        #
+        # `NULLS NOT DISTINCT` 가 없으면 PostgreSQL 은 `NULL` 을 서로 다른 값으로
+        # 보아 **같은 (공정 × 검사항목)이 몇 줄이든 선다** — 「배합 · 공정온도」가
+        # 둘이 되면 어느 기준으로 판정했는지 말할 수 없다. PostgreSQL 15 부터
+        # 쓸 수 있고 우리는 16 이다.
+        UniqueConstraint(
+            "process_code",
+            "item_code",
+            "material_group",
+            name="uq_inspection_standard",
+            postgresql_nulls_not_distinct=True,
+        ),
+        # **양방향이다.** 수입인데 자재군이 없으면 기준 여덟이 원자재 열다섯
+        # 전부에 걸리던 옛 자리로 돌아가고, 수입이 아닌데 자재군이 있으면
+        # 반제품·완제품 기준에 「무슨 자재인가」가 적힌 것이다.
+        CheckConstraint(
+            f"(process_code IN ({_quoted(codes.MATERIAL_GROUPED_PROCESSES)}))"
+            " = (material_group IS NOT NULL)",
+            name="ck_inspection_standard_material_group_matches_process",
         ),
         CheckConstraint(
             f"sigma_source IN ({_quoted(codes.SIGMA_SOURCES)})",
@@ -96,21 +125,36 @@ class ProcessInspectionStandard(Base):
         ),
     )
 
-    # **이 PK 는 품목을 가리지 못한다 — 아직.** 「수입」 기준 여덟이 원자재
-    # 열다섯 전부에 똑같이 걸린다. 자재는 한 덩어리가 아니고 재고단위가 그것을
-    # 말한다(KG 아홉 · L 둘 · M2 넷) — 분말에 점도를, 라이너에 입도를 재라고
-    # 내미는 셈이다.
-    #
-    # 품목 축을 더할지 자재군을 둘지는 **읽는 쪽(IQC 화면)이 서는 2단계에서**
-    # 정한다. 지금 축을 더하면 쓰지 않는 칸에 값을 채우게 되고, 그 값은 화면에
-    # 뜨는 순간 진짜로 보인다. `docs/schema.md` 의 미결에 적어 두었다.
-    process_code: Mapped[str] = mapped_column(String(30), primary_key=True)
+    # **대리키를 쓰는 이유는 자재군이 비어 있을 수 있기 때문이다.** 이 줄의
+    # 정체성은 (공정 × 검사항목 × 자재군)이지만 PostgreSQL 의 기본키는 `NULL`
+    # 을 받지 않는다. 공정검사 줄에 「해당없음」 같은 값을 채우면 그것은 빈
+    # 기준정보이고, 화면에 뜨는 순간 진짜로 보인다. 그래서 자리만 맡는 `id` 를
+    # 두고 **정체성은 위의 유일키가 말한다.**
+    id: Mapped[int] = mapped_column(primary_key=True)
+
+    process_code: Mapped[str] = mapped_column(String(30))
     process_group: Mapped[str] = mapped_column(
         String(20), default=codes.PROCESS, server_default=codes.PROCESS
     )
-    item_code: Mapped[str] = mapped_column(String(30), primary_key=True)
+    item_code: Mapped[str] = mapped_column(String(30))
     item_group: Mapped[str] = mapped_column(
         String(20), default=codes.INSP_ITEM, server_default=codes.INSP_ITEM
+    )
+
+    # **자재군 — 수입 기준이 품목을 가리게 하는 축.** 없던 시절에는 「수입」 기준
+    # 여덟이 원자재 열다섯 전부에 똑같이 걸렸다: 분말에 점도를, 라이너에 입도를
+    # 재라고 내미는 셈이었다.
+    #
+    # 품목 축이 아니라 자재군인 이유는, 품목 축을 더하면 원자재 15 × 검사항목
+    # 만큼의 실측값을 누군가 정해야 하고 그 값이 지금 없기 때문이다. 자재군은
+    # **품목 시드가 이미 적어 둔 구분**이다 — 지어낸 축이 아니다
+    # (`seed_data/03_items.sql` 의 `material_group` 열. 재고단위는 그 경계를
+    # 반만 말하므로 근거는 단위가 아니라 그 열이다).
+    #
+    # **공정검사 줄에서는 비어 있다.** 반제품과 완제품에는 자재군이 없다.
+    material_group: Mapped[str | None] = mapped_column(String(30), nullable=True)
+    material_group_group: Mapped[str] = mapped_column(
+        String(20), default=codes.MATERIAL_GROUP, server_default=codes.MATERIAL_GROUP
     )
 
     # 규격은 고객이 정한다 — 지금은 임의 설정이다.

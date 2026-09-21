@@ -2,16 +2,17 @@
 
 그룹은 전부 Major다. 프로그램이 이름으로 부르므로 화면에서 하나도 더할 수
 없고 지울 수 없다. 갈리는 것은 그룹이 아니라 **그 안의 값**이고, 그래서 아래
-목록이 갖는 열은 「값이 늘 수 있는가」다.
+목록이 갖는 열이 `value_fixed` 다 — **참이면 값이 고정**이고, 거짓이면 늘 수 있다.
 
 가르는 잣대는 하나 — **프로그램이 그 값을 보고 분기하는가.** 분기한다면 값을
 더할 때 그것을 처리할 코드가 없으므로 화면에서 늘릴 수 없다: 「수정 불가」의
 이유가 규칙이 아니라 구조다. 분기하지 않고 세기만 한다면 얼마든지 늘어도
 아무 코드도 고장 나지 않는다.
 
-**값은 여기 없다.** 값은 시드 SQL 에 있다 — 사람이 읽고 고치는 표이고, 코드를
-몰라도 한 줄 추가로 늘릴 수 있어야 하기 때문이다. 여기 있는 것은 이름뿐이며,
-둘이 어긋나지 않는지는 테스트가 지킨다.
+**늘 수 있는 그룹의 값은 여기 없다.** 그 값은 시드 SQL 에 있다 — 사람이 읽고
+고치는 표이고, 코드를 몰라도 한 줄 추가로 늘릴 수 있어야 하기 때문이다. 여기 있는
+것은 그룹 이름과, **고정된 그룹의 값**뿐이며(아래 「값이 고정된 그룹의 값」), 시드와
+어긋나지 않는지는 테스트가 지킨다.
 """
 
 from typing import NamedTuple
@@ -22,7 +23,7 @@ class CodeGroupDef(NamedTuple):
 
     group_code: str
     name: str
-    # 값이 늘 수 있는가. False 면 값마다 프로그램이 분기한다.
+    # 값이 고정인가. **참이면** 값마다 프로그램이 분기하므로 화면에서 늘릴 수 없다.
     value_fixed: bool
     description: str
 
@@ -44,7 +45,7 @@ SHIFT = "SHIFT"
 SETTLE_TYPE = "SETTLE_TYPE"
 RISK_STATUS = "RISK_STATUS"
 
-# ── 값이 늘 수 있는 그룹 여덟 — 세기만 한다 ────────────────────────────────
+# ── 값이 늘 수 있는 그룹 아홉 — 세기만 한다 ────────────────────────────────
 NC_REASON = "NC_REASON"
 PO_CLOSE = "PO_CLOSE"
 SP_REASON = "SP_REASON"
@@ -53,6 +54,7 @@ PROCESS = "PROCESS"
 INSP_ITEM = "INSP_ITEM"
 DEPT = "DEPT"
 UOM = "UOM"
+MATERIAL_GROUP = "MATERIAL_GROUP"
 
 
 CODE_GROUPS: tuple[CodeGroupDef, ...] = (
@@ -92,7 +94,7 @@ CODE_GROUPS: tuple[CodeGroupDef, ...] = (
         NC_REASON,
         "불합격사유",
         False,
-        "계량 14는 검사 항목에서 따라 나오고 손으로 두는 것은 계수 4뿐이다.",
+        "열아홉 중 열여덟이 검사 항목을 가리킨다. 가리킬 항목이 없는 것은 IQ-EXP 하나다.",
     ),
     CodeGroupDef(
         PO_CLOSE, "미납종결사유", False, "누구 탓인가와 그 물건이 아직 필요한가를 센다."
@@ -115,9 +117,16 @@ CODE_GROUPS: tuple[CodeGroupDef, ...] = (
         "검사항목",
         False,
         "이름만 여기 있고 규격·중심선·경고선·σ·경시변화는 (공정 × 항목) 표에 있다.",
-    ),  # 설계도는 18이라 적었으나 공정별 표에서 실제로 나오는 것은 17이다 — 시드 주석 참조.
+    ),  # 설계도의 공정표는 18이고, 이 저장소의 값은 16이다 — 그 유도는 시드 주석에 있다.
     CodeGroupDef(DEPT, "부서", False, "조직의 사실. 교차 실사 기록이 이것을 요구한다."),
     CodeGroupDef(UOM, "단위", False, "kg · L · EA · m² — 늘어도 아무것도 고장 나지 않는다."),
+    CodeGroupDef(
+        MATERIAL_GROUP,
+        "자재군",
+        False,
+        "수입 검사 기준이 걸리는 축이다 — 분말에 점도를, 라이너에 입도를 재라고 "
+        "내밀지 않기 위해 있다. 무리가 늘어도 프로그램은 분기하지 않고 주소로만 쓴다.",
+    ),
 )
 
 GROUP_CODES: tuple[str, ...] = tuple(group.group_code for group in CODE_GROUPS)
@@ -258,3 +267,11 @@ STAGE_PROCESSES: dict[str, tuple[str, ...]] = {
     "OQC": ("출하",),
 }
 RETEST_STAGE = "재검사"
+
+# ── 자재군이 붙는 공정 ──────────────────────────────────────────────────────
+# **자재군은 원자재를 보는 검사에만 붙는다.** 반제품과 완제품에는 자재군이 없다 —
+# 만들어져 나온 것이라 「무슨 자재인가」를 물을 수 없기 때문이다.
+#
+# 원자재를 보는 것은 IQC 하나뿐이므로 위의 대응표에서 그대로 끌어 쓴다. 여기에
+# 따로 적으면 목록이 두 벌이 되고, 두 벌이면 반드시 갈린다.
+MATERIAL_GROUPED_PROCESSES: tuple[str, ...] = STAGE_PROCESSES["IQC"]
