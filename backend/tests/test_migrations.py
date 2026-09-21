@@ -1032,3 +1032,79 @@ def test_the_guard_compares_more_than_the_name(engine: Engine) -> None:
 
             with pytest.raises(Exception, match="분체"):
                 command.downgrade(config, "3c602ffaebc3")
+
+
+# ── 361ec789023c — 측정값 줄과 그 결속 ─────────────────────────────────────
+
+# 검사 한 줄이 서는 데 필요한 최소 기준정보. **`inspections` 가 이미 선 모양**
+# 이므로 자재군 칸은 아직 없다 — 그 칸을 붙이는 것이 시험 대상이다.
+_BEFORE_MEASUREMENTS = """
+INSERT INTO code_groups (group_code, name, value_fixed, description) VALUES
+  ('PROCESS', '공정', FALSE, '시험'),
+  ('UOM', '단위', FALSE, '시험'),
+  ('MATERIAL_GROUP', '자재군', FALSE, '시험'),
+  ('INSP_STAGE', '검사단계', TRUE, '시험');
+
+INSERT INTO common_codes (group_code, code, name) VALUES
+  ('PROCESS', '수입', '수입'),
+  ('UOM', 'KG', '킬로그램'),
+  ('MATERIAL_GROUP', '분체', '분체'),
+  ('INSP_STAGE', 'IQC', '수입검사');
+
+INSERT INTO items (code, name, item_type, process, process_group, material_group,
+                   material_group_group, stock_uom, stock_uom_group, phase, safety_stock)
+VALUES ('RM-01', '시험 원자재', '원자재', '수입', 'PROCESS', '분체',
+        'MATERIAL_GROUP', 'KG', 'UOM', '양산', 100.0);
+
+INSERT INTO partners (code, name, partner_type) VALUES ('SUP-01', '시험 공급사', '공급사');
+
+INSERT INTO inspections (inspection_stage, stage_group, item_id, item_type,
+                         supplier_id, supplier_type, supplier_lot_number, quantity,
+                         judged_at, judged_by, result, nonconformity_group)
+SELECT 'IQC', 'INSP_STAGE', i.id, i.item_type, p.id, p.partner_type,
+       'SL-2026-0001', 500.0, TIMESTAMP '2026-09-21 09:00', '검사원 1', '합격', 'NC_REASON'
+FROM items AS i, partners AS p WHERE i.code = 'RM-01' AND p.code = 'SUP-01';
+"""
+
+
+def test_the_data_step_fills_the_material_group_from_the_item(engine: Engine) -> None:
+    """**이미 선 검사에 자재군이 채워진다 — 빈 DB 만 보면 이 단계는 한 번도 돌지 않는다.**
+
+    리비전이 `inspections.material_group` 을 널 허용으로 붙이고, 품목에서 값을
+    끌어와 채우고, 그 다음에 `NOT NULL` 로 조인다. 한 번에 `NOT NULL` 로 붙였다면
+    **줄이 하나라도 있는 데이터베이스에서 그 자리가 터진다** — 그 차이는 검사 줄이
+    실제로 있는 데이터베이스를 올려 보아야 드러난다.
+
+    그리고 채우는 값은 **지어낸 것이 아니라 품목이 이미 아는 것**이어야 한다.
+    """
+    schema = "measurement_data_step"
+    with _schema(engine, schema):
+        config = _config_for_schema(engine, schema)
+        command.upgrade(config, "992bb442d985")
+
+        scoped = _engine_for_schema(engine, schema)
+        with scoped.begin() as conn:
+            for statement in _BEFORE_MEASUREMENTS.strip().split(";"):
+                if statement.strip():
+                    conn.execute(text(statement))
+
+        command.upgrade(config, "head")
+
+        with scoped.connect() as conn:
+            filled = conn.execute(
+                text(
+                    "SELECT i.material_group, it.material_group"
+                    " FROM inspections AS i JOIN items AS it ON it.id = i.item_id"
+                )
+            ).all()
+            not_null = conn.execute(
+                text(
+                    "SELECT is_nullable FROM information_schema.columns"
+                    " WHERE table_schema = :schema AND table_name = 'inspections'"
+                    " AND column_name = 'material_group'"
+                ),
+                {"schema": schema},
+            ).scalar_one()
+
+    assert filled == [("분체", "분체")], filled
+    assert not_null == "NO"

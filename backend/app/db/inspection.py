@@ -26,6 +26,7 @@ from sqlalchemy import (
     ForeignKeyConstraint,
     Integer,
     String,
+    UniqueConstraint,
 )
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -86,6 +87,18 @@ class Inspection(Base):
             ["item_id", "item_type"],
             ["items.id", "items.item_type"],
             name="fk_inspection_item",
+        ),
+        # **자재군은 품목에서 따라온다.** 지어낼 수 있는 값이 아니라 그 품목이
+        # 이미 아는 사실이고, 이 외래키가 둘이 갈리는 것을 막는다 — `item_type`
+        # 을 같은 방식으로 묶은 것과 같은 자리다.
+        #
+        # 이 칸이 여기 있는 이유는 **측정 줄**이다. 측정 줄이 「그 무리의 기준」만
+        # 가리키게 하려면 검사와 기준이 같은 자재군을 말해야 하고, 그 묶음의
+        # 가운데가 이 칸이다.
+        ForeignKeyConstraint(
+            ["item_id", "material_group"],
+            ["items.id", "items.material_group"],
+            name="fk_inspection_material_group",
         ),
         # **관문 1 이 보는 것은 원자재뿐이다.** 반제품과 완제품은 우리가 만드는
         # 것이라 수입검사를 받을 일이 없다 — 열어 두면 「사 온 적 없는 완제품의
@@ -178,6 +191,8 @@ class Inspection(Base):
             "special_acceptance_allowed IS NOT FALSE",
             name="ck_inspection_special_acceptance_is_allowed",
         ),
+        # `id` 가 이미 기본키라 행을 좁히지 않는다 — **측정 줄이 가리킬 상대**다.
+        UniqueConstraint("id", "material_group", name="uq_inspection_id_material_group"),
     )
 
     id: Mapped[int] = mapped_column(primary_key=True)
@@ -196,6 +211,8 @@ class Inspection(Base):
     item_type: Mapped[str] = mapped_column(
         String(20), default=codes.RAW_MATERIAL, server_default=codes.RAW_MATERIAL
     )
+    # 품목이 아는 사실을 그대로 든다 — 위의 외래키가 둘을 묶는다.
+    material_group: Mapped[str] = mapped_column(String(30))
 
     supplier_id: Mapped[int] = mapped_column(Integer)
     supplier_type: Mapped[str] = mapped_column(
@@ -225,3 +242,117 @@ class Inspection(Base):
     # 특채가 열린 사유를 가리키게 하는 **자리**다 — 그래서 이 칸에 담긴 것은
     # 「이 줄이 특채이며 그 사유가 특채를 여는 사유였다」는 사실 하나뿐이다.
     special_acceptance_allowed: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+
+
+class InspectionMeasurement(Base):
+    """검사 한 건의 **항목별 실측값** 한 줄.
+
+    **사람이 넣는 것은 측정값 하나뿐이다.** 품목을 고르면 자재군이 정해지고,
+    자재군이 — 단계와 함께 — 항목 목록을 정하고, 항목을 고르면 규격이 딸려 온다.
+    그 딸려 온 규격을 **이 줄이 박아 둔다.**
+
+    ### 규격을 박아 두는 이유 — 파생값 금지의 그 예외다
+
+    원칙은 「파생값은 저장하지 않는다」이고 예외는 하나다 — **「그 판정의 근거가
+    되었고 밖으로 나간 값」.** 규격은 고객이 정하고 **바뀐다.** 바뀐 뒤에 옛
+    검사를 열면 「측정값 12.4 · 합격」인데 지금 규격으로 재계산하면 불합격이
+    나온다 — 기록이 자기모순을 일으킨다.
+
+    그래서 **합격 여부가 아니라 그때 쓴 규격을 박는다.** 판정은 측정값과 박아 둔
+    규격에서 언제나 같게 계산되므로, 파생값을 저장하지 않으면서도 판정이
+    재현된다.
+
+    ### 규격이 둘 다 비어 있는 항목은 잰 줄이 서지 않는다
+
+    상·하한이 둘 다 `NULL` 인 항목은 **재는 항목이 아니다** — 수입 기준에서 그런
+    것은 `이물` · `포장` · `성적서` 이고, 그 셋은 `nonconformity_attributes` 에서
+    정확히 **계수** 코드다. 세는 것이지 재는 것이 아니므로 관리도에 오를 측정값이
+    없고, 불합격은 `inspections.nonconformity_code` 로 적힌다.
+
+    조용히 합격시키면 「아무것도 걸러 내지 않는 기준」이 되므로 **CHECK 가 막는다.**
+    이 줄이 판정 시점의 규격을 스스로 들고 있어 다른 표를 보지 않고 걸린다 —
+    계수 항목의 기준을 베껴 오면 두 칸이 다 비고, 그 자리에서 거부된다.
+
+    ### 분말에 점도를 재지 않는다
+
+    기준을 가리키는 외래키가 `(공정 × 검사항목 × 자재군)` 셋을 다 본다. 그리고
+    그 자재군은 **검사가 든 자재군**이어야 한다 — 검사는 자기 품목에서 그것을
+    받았으므로, 세 표가 한 줄로 묶여 **품목의 무리가 아닌 기준은 가리킬 수 없다.**
+    자재군 축이 연 것을 한 겹 아래에서 닫는 자리다.
+    """
+
+    __tablename__ = "inspection_measurements"
+    __table_args__ = (
+        # **검사와 같은 자재군이어야 한다.** `inspection_id` 만 가리키면 이 묶음이
+        # 끊기고, 그러면 분체를 받은 검사에 시트필름 기준이 붙는다.
+        ForeignKeyConstraint(
+            ["inspection_id", "material_group"],
+            ["inspections.id", "inspections.material_group"],
+            name="fk_inspection_measurement_inspection",
+        ),
+        # **기준이 실재함을 DB 가 보증한다.** 공정과 항목만 가리키면 자재군이
+        # 풀리므로 셋을 함께 가리킨다 — 기준 표의 정체성이 그 셋이다.
+        ForeignKeyConstraint(
+            ["process_code", "item_code", "material_group"],
+            [
+                "process_inspection_standards.process_code",
+                "process_inspection_standards.item_code",
+                "process_inspection_standards.material_group",
+            ],
+            name="fk_inspection_measurement_standard",
+        ),
+        # **공정을 못박는 CHECK 를 두지 않는다 — 외래키가 이미 그것을 건다.**
+        # 기준 표에 「자재군이 있다 ⇔ 수입」이 양방향으로 걸려 있고, 이 줄은
+        # 자재군을 **반드시 들고** 기준을 가리킨다. 그래서 가리킬 수 있는 기준은
+        # 자재군이 있는 줄, 곧 수입 기준뿐이다. 같은 명제를 CHECK 로 한 번 더
+        # 적으면 관문 2 에서 한 자리가 남는다 — 그 대신 **테스트가 이것을
+        # 이름으로 지킨다**(공정검사 기준을 가리키는 줄이 거부되는지).
+        #
+        # ── 값이 뜻을 갖는가 ────────────────────────────────────────────────
+        # **하한이 없으므로 단독으로 건다.** 측정값에 `NaN` 이 들어가면 규격과의
+        # 비교가 전부 거짓이 되어, 판정하는 쪽에서 합격도 불합격도 나오지 않는다.
+        CheckConstraint(is_finite("measured_value"), name="ck_inspection_measurement_value"),
+        # **규격에 `NaN` 이 들어가면 모든 측정값이 합격한다.** 서로의 순서를 보는
+        # 아래 CHECK 는 그것을 막지 못한다 — `NaN > 하한` 이 참이기 때문이다.
+        # 기준 표가 자기 규격 칸에 같은 것을 걸어 둔 것과 같은 이유다.
+        CheckConstraint(
+            f"applied_upper_spec IS NULL OR ({is_finite('applied_upper_spec')})",
+            name="ck_inspection_measurement_upper_spec_is_finite",
+        ),
+        CheckConstraint(
+            f"applied_lower_spec IS NULL OR ({is_finite('applied_lower_spec')})",
+            name="ck_inspection_measurement_lower_spec_is_finite",
+        ),
+        # **둘 다 비지는 못한다** — 그것은 재는 항목이 아니라는 뜻이다.
+        CheckConstraint(
+            "applied_upper_spec IS NOT NULL OR applied_lower_spec IS NOT NULL",
+            name="ck_inspection_measurement_has_a_spec",
+        ),
+        # 거꾸로 선 규격은 터지지 않고 **조용히 틀린 판정**을 만든다. 기준 표가
+        # 같은 것을 거는데, 박아 둔 쌍이 그것을 물려받지 못할 이유가 없다.
+        CheckConstraint(
+            "applied_upper_spec IS NULL"
+            " OR applied_lower_spec IS NULL"
+            " OR applied_upper_spec > applied_lower_spec",
+            name="ck_inspection_measurement_spec_order",
+        ),
+    )
+
+    # **한 검사에서 같은 항목을 두 번 적지 않는다.** 두 줄이 서면 어느 값으로
+    # 판정했는지 말할 수 없다. 나머지 두 칸은 기준을 가리키는 자리라 정체성에
+    # 넣지 않는다 — 검사가 자재군을 정하고 단계가 공정을 정하므로, 같은
+    # `(검사 × 항목)` 에 다른 값이 올 수 없다.
+    inspection_id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    item_code: Mapped[str] = mapped_column(String(30), primary_key=True)
+
+    # **기본값을 두지 않는다.** 오늘은 값이 하나뿐이지만 그것은 단계가 하나이기
+    # 때문이고, 이 칸이 말하는 것은 「어느 공정의 기준을 썼는가」라는 사실이다.
+    # 구조로 고정된 칸(`stage_group` 같은)과 다르다.
+    process_code: Mapped[str] = mapped_column(String(30))
+    material_group: Mapped[str] = mapped_column(String(30))
+
+    measured_value: Mapped[float] = mapped_column(Float)
+
+    # **판정 시점의 규격.** 기준이 나중에 바뀌어도 그때 그 판정은 재현된다.
+    applied_upper_spec: Mapped[float | None] = mapped_column(Float, nullable=True)
+    applied_lower_spec: Mapped[float | None] = mapped_column(Float, nullable=True)

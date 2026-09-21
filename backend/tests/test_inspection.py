@@ -107,6 +107,8 @@ def _inspection(session: Session, **overrides: object) -> Inspection:
     fields: dict[str, object] = {
         "item_id": item.id,
         "item_type": item.item_type,
+        # 자재군은 품목이 아는 사실이다 — 쓰는 쪽이 지어내지 않고 끌어온다.
+        "material_group": item.material_group,
         "supplier_id": partner.id,
         "supplier_type": partner.partner_type,
         "supplier_lot_number": "SL-2026-0001",
