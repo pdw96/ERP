@@ -49,6 +49,23 @@
 | 92 · 86 | `production.py` 의 문장을 「1단계에서는 표만 선다」로 되돌렸다 | `test_a_stage_that_closed_is_not_written_as_if_it_were_now` |
 | 86 | 저장소 최상위에 `frontend/` 를 만들었다 | `test_there_is_still_no_screen` |
 
+## 감사 ⑩ 의 고침
+
+| NC | 무엇을 어긋냈나 | 빨개진 검사 |
+|---|---|---|
+| 129 | `a7c14b3e9052` 의 `upgrade()` 에서 **조이기 전의 가드**(`판정이 도착보다 앞선 검사가 있다`)를 통째로 지웠다 | `test_upgrading_says_which_judgement_came_before_its_arrival` — 가드가 없으면 `ck_inspection_judged_after_arrival` 이 **제약 이름만** 들고 걸린다 |
+
+**가드를 하나 세우려다 말았고, 그것을 탐침이 정했다.** 감사 ⑩ 이 낸 NC-129 는 두 갈래였는데 둘째(「검사를 가리키는데 도착일이 없는 로트」)는 **옛 줄로 설 수 없었다.** 앞 스키마에서 네 갈래를 실제로 심어 보았고 전부 막혔다 —
+
+| 심어 본 줄 | 막은 것 |
+|---|---|
+| 공급사 로트의 도착일 비우기 | `ck_lot_supplied_has_received_date` |
+| 그 로트를 자사로 바꾸기 | `ck_lot_origin_matches_type` |
+| 자사 반제품 로트 세우기 | `ck_lot_warehouse` — 창고 코드가 없어서였고, 심고 다시 했다 |
+| 자사 반제품 로트가 수입검사를 가리키기 | **`fk_lot_inspection_item`** — NC-118 이 세운 쌍 외래키가 사슬의 마지막 고리다 |
+
+**닿지 않는 가드는 세우지 않는다.** 물지 않는 가드는 그 자리가 지켜지고 있다는 잘못된 안심을 주고, 그것을 무는 검사는 **통과하면서 아무것도 지키지 않는다.** 사슬을 리비전에 이름으로 적어 두었으므로, 관문 2 가 `ck_inspection_item_is_raw_material` 을 넓혀 둘째 고리를 끊는 날 그 자리가 드러난다.
+
 ## 아직 도구가 없다
 
 여기 적힌 것은 **손으로 돌린 것**이다. 돌연변이 러너를 개발 의존성으로 들이는

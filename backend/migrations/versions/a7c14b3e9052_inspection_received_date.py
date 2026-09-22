@@ -1,7 +1,7 @@
 """불합격에도 도착일이 남는다 — 로트가 서지 않는 판정의 사실
 
-표를 세우지 않는다. `inspections` 에 칸 하나와 유일키 하나와 CHECK 하나를,
-`lots` 에 외래키 하나를 붙인다.
+표를 세우지 않는다. `inspections` 에 칸과 유일키와 CHECK 를, `lots` 에 외래키와
+CHECK 를 붙인다(세지 않는다. 세면 갈린다 — 실제로 `lots` 의 CHECK 가 빠져 있었다).
 
 **로트에만 적으면 불합격에서만 사라진다.** 도착일은 사람이 보내는 값인데 그것이
 앉는 자리가 `lots.received_date` 하나였고, **원칙 ① 이 「불합격은 로트가 되지
@@ -33,8 +33,32 @@
 기존 표에 붙는 CHECK 를 Alembic 이 감지하지 않는다. 손으로 적었고
 `tests/test_migrations.py` 가 두 스키마를 견준다.
 
-**올릴 때 아무것도 멈추지 않는다.** 널 허용 칸이라 옛 줄이 그대로 서고, 채움은
-합격한 줄에만 닿는다.
+**올릴 때 멈출 수 있다 — 아래의 자리마다, 이름을 말하고.** 처음에는 「아무것도
+멈추지 않는다」고 적었는데 그것은 **칸을 더하는 것만** 본 말이었다. 칸은 널
+허용이라 옛 줄이 그대로 서고 채움도 합격한 줄에만 닿지만, **채움 뒤에 조이는 것이
+따라오고** 옛 스키마가 허용하던 줄이 거기 걸린다 —
+
+- **판정이 도착보다 앞선 검사.** 앞 스키마는 `lots.received_date` 와
+  `inspections.judged_at` 을 잇는 제약을 갖고 있지 않았으므로 그런 짝이 설 수 있고,
+  데이터 단계가 그 값을 옮겨 오면 아래 CHECK 가 걸린다. 거기서 나오는 말은 제약
+  이름이라 **어느 검사인지** 모른다 — 그래서 조이기 전에 이름으로 묻는다
+
+**나머지 한 자리에는 가드를 두지 않았다.** 「검사를 가리키는데 도착일이 없는
+로트」는 앞 스키마의 제약 사슬이 이미 막고 있어 **옛 줄로는 설 수 없다**(그 사슬은
+아래 코드가 이름으로 적는다). **지어낸 가드는 영원히 물지 않고**, 물지 않는 가드는
+그 자리가 지켜지고 있다는 잘못된 안심을 준다. 그 CHECK 가 보는 것은 옛 줄이 아니라
+**앞으로**다.
+
+**조이기 전에 묻는다** — 제약이 먼저 걸리면 배포하는 사람이 무엇을 고쳐야 하는지
+모른 채로 멈춘다. `b41d7c8e5a92` 가 CodeRabbit 리뷰 NC-126 으로 같은 자리를
+고쳤는데 **자기 리비전 안에서만 고쳤고**, 형제인 이쪽이 남아 있었다(감사 ⑩ NC-129).
+
+**올릴 때 잠근다.** `inspections` 의 유일키가 인덱스를 만들고, CHECK 가
+`inspections` 와 `lots` 의 기존 행 전체를 검사하며, `lots` 의 외래키는 **양쪽을
+잡으므로** 이 리비전의 외래키가 가리키는 표는 전부 함께 잠기고 그동안 쓰기가
+멈춘다(목록을 세지 않는다. 세면 갈린다). `migrations/env.py` 가 전체를 트랜잭션
+하나로 감싸므로 커밋까지 유지된다. **칸을 더하는 것만 무해하다** — 기본값이 없어
+표를 다시 쓰지 않는다(PG11+).
 
 **내릴 때는 멈춘다.** 칸을 지우면 **불합격의 도착일이 사라지고 복구할 방법이
 없다** — 합격한 줄은 로트에 같은 값이 남지만 불합격에는 사본이 없다.
@@ -77,6 +101,25 @@ def upgrade() -> None:
         WHERE l.inspection_id = i.id AND l.received_date IS NOT NULL
         """
     )
+    # **조이기 전에 묻는다.** 앞 스키마는 로트의 도착일과 검사의 판정시각을 잇는
+    # 제약을 갖고 있지 않았으므로 「21일에 받아 20일에 판정」인 짝이 설 수 있었고,
+    # 방금 그 값을 옮겨 왔다. CHECK 가 먼저 서면 나오는 말은 제약 이름뿐이다.
+    op.execute(
+        """
+        DO $$
+        DECLARE backdated text;
+        BEGIN
+          SELECT string_agg(i.id::text, ', ' ORDER BY i.id) INTO backdated
+          FROM inspections AS i
+          WHERE i.received_date IS NOT NULL AND i.judged_at::date < i.received_date;
+          IF backdated IS NOT NULL THEN
+            RAISE EXCEPTION
+              '판정이 도착보다 앞선 검사가 있다: %. 어느 날짜가 오기인지는 사람이 가른다',
+              backdated;
+          END IF;
+        END $$;
+        """
+    )
     op.create_check_constraint(
         "ck_inspection_judged_after_arrival",
         "inspections",
@@ -96,6 +139,18 @@ def upgrade() -> None:
     # `NULL` 이면 통째로 건너뛰므로, 도착일이 비는 자사 로트가 수입검사를
     # 가리키면서 대조만 빠져나갈 수 있다. 오늘 그 줄을 만드는 쓰기 경로가 없다는
     # 것은 제약의 보증이 아니라 우연이다.
+    #
+    # **여기에는 조이기 전의 가드를 두지 않는다 — 옛 줄이 걸릴 수 없기 때문이다.**
+    # 앞 스키마에서 `inspection_id` 가 찬 로트는 `fk_lot_inspection_item` 때문에
+    # 검사와 품목이 같아야 하고, 그 검사는 `ck_inspection_item_is_raw_material` 로
+    # 원자재이며, 그러면 로트도 원자재라 `ck_lot_origin_matches_type` 이 공급사로
+    # 묶고, `ck_lot_supplied_has_received_date` 가 도착일을 채우게 한다. 사슬이
+    # 끊기는 자리가 없다 — **탐침으로 네 갈래를 실제로 막아 보았다.**
+    #
+    # 그러므로 이 CHECK 가 보는 것은 옛 줄이 아니라 **앞으로**다. 관문 2 가
+    # `ck_inspection_item_is_raw_material` 을 넓히는 날 사슬의 둘째 고리가
+    # 끊어지고, 그때는 이 자리에도 가드가 필요해진다 — 넓히는 마이그레이션이
+    # 그것을 함께 들고 와야 한다.
     op.create_check_constraint(
         "ck_lot_from_an_inspection_has_an_arrival_date",
         "lots",
