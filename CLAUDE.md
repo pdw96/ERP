@@ -31,8 +31,9 @@ cd backend
 ERP_TEST_DATABASE_URL="postgresql+psycopg://erp:erp@127.0.0.1:5432/erp_test" .venv/bin/pytest
 ```
 
-`shellcheck ./docker-entrypoint.sh` 와 `docker build .` 도 CI 가 돈다 — 셸과
-도커가 있으면 로컬에서도 같은 명령이다.
+셸 검사와 이미지 빌드, 그리고 **이미지를 띄워 보는 것**도 같은 잡이 돈다. 셸은
+**저장소의 `.sh` 전부**를 훑으므로 파일 이름을 여기 적지 않는다 — 적었더니 목록을
+넓히는 고침이 이 자리를 남겼다(감사 ⑱ NC-167). **명령은 `ci.yml` 이 든다.**
 
 **테스트는 실제 PostgreSQL 에 붙는다.** SQLite 로 대신하면 이 설계가 제약에
 기대는 자리(복합 외래키 · CHECK · 부분 인덱스)를 검증할 수 없다. DB 가 없으면

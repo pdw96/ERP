@@ -2,7 +2,9 @@
 
 ## 항상
 
-- [ ] **CI 의 `backend` 잡이 초록** (목록은 `ci.yml`) — `ruff check` · `ruff format --check` ·
+- [ ] **CI 의 `backend` 잡이 초록** — 그 잡이 무엇을 도는지는 `ci.yml` 한 자리가
+      든다. **아래는 그중 로컬에서 바로 돌릴 수 있는 것들이고 전부가 아니다**
+      (감사 ⑱ NC-167): `ruff check` · `ruff format --check` ·
       `mypy app migrations` · `pytest` (실제 PostgreSQL 에 붙어서)
 - [ ] 관련 테스트 통과 — 실패를 「알려진 실패」로 넘기지 않는다
 - [ ] 테스트를 건너뛰게(`skip`) 만들어 통과시키지 않았다
