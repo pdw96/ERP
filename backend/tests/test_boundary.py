@@ -98,3 +98,47 @@ def test_the_entrypoint_is_executable() -> None:
     assert (
         entrypoint.stat().st_mode & 0o111
     ), f"{entrypoint} 에 실행 비트가 없다 — `ENTRYPOINT` 가 그것을 요구한다"
+
+
+def _test_database_url() -> str:
+    """검사용 DB 주소. `conftest.py` 가 세우는 환경변수를 그대로 읽는다."""
+    import os
+
+    return os.environ["ERP_TEST_DATABASE_URL"]
+
+
+def test_a_database_error_does_not_render_the_values_it_was_given() -> None:
+    """**엔진 층에서도 사람이 보낸 값이 문자열에 실리지 않는다** (감사 ⑰ NC-164).
+
+    SQLAlchemy 는 `StatementError` 에 `[parameters: {…}]` 를 붙인다. 500 처리기는
+    DB 오류의 메시지를 아예 옮기지 않으므로 **오늘 그 문자열이 로그로 나가는
+    길은 없지만**, 그것은 처리기 한 자리가 막고 있는 것이고 이 칸은 **엔진이
+    만드는 모든 문자열**에 걸린다 — 다른 자리가 그 예외를 찍는 날 다시 열린다.
+
+    어긋내 확인했다: `hide_parameters` 만 떼면 처리기가 막아 주어 API 쪽 검사는
+    **초록으로 남는다.** 두 겹을 각각 무는 자리가 필요하다.
+    """
+    from sqlalchemy import text
+
+    from app.db.base import create_db_engine
+
+    # **엔진을 반드시 버린다.** 풀에 남은 연결은 나중에 수거되면서
+    # `ResourceWarning` 을 내고, pytest 는 그것을 **그때 돌던 다른 검사**의
+    # 실패로 올린다 — 실제로 그렇게 한 번 빨개졌다.
+    engine = create_db_engine(_test_database_url())
+    try:
+        with engine.connect() as connection:
+            try:
+                connection.execute(
+                    text("INSERT INTO a_table_that_does_not_exist (who) VALUES (:who)"),
+                    {"who": "검사원 아무개"},
+                )
+            except Exception as exc:  # 문자열만 본다
+                rendered = str(exc)
+            else:  # pragma: no cover — 없는 표라 반드시 터진다
+                raise AssertionError("터지지 않았다")
+    finally:
+        engine.dispose()
+
+    assert "검사원 아무개" not in rendered, rendered
+    assert "[parameters:" not in rendered, rendered
