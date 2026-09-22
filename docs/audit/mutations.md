@@ -116,6 +116,18 @@
 붙지 않았다 — 하필 **축이 가장 필요한 응답**이다. 검사를 먼저 쓰지 않았으면
 「달았다」로 끝났을 자리다.
 
+## Codex 리뷰의 고침 (`d6b350c`)
+
+| NC | 무엇을 어긋냈나 | 빨개진 검사 |
+|---|---|---|
+| 148 | HTTP 예외 처리기에서 `headers=exc.headers` 를 뺐다 | `test_a_method_error_still_says_which_method_works` — 405 의 `Allow` 가 사라진다 |
+| 149 | `_log.error(..., exc_info=exc)` 를 `_log.exception(...)` 으로 되돌렸다 | `test_a_break_leaves_the_cause_not_just_the_axis` — 로그에 `NoneType: None` 이 찍힌다 |
+
+**둘째는 앞 커밋이 세운 검사가 놓친 자리다.** `…names_the_request` 는 로그에 **축이
+있는지**만 물었고 **까닭이 실렸는지**는 묻지 않았다 — 그래서 `NoneType: None` 이
+찍히는 동안에도 초록이었다. 단언을 넓히지 않고 **검사를 따로 세웠다**: 하나는 축을,
+하나는 까닭을 문다.
+
 ## 아직 도구가 없다
 
 여기 적힌 것은 **손으로 돌린 것**이다. 돌연변이 러너를 개발 의존성으로 들이는
