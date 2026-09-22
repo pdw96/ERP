@@ -1455,3 +1455,59 @@ def test_downgrade_goes_quietly_when_the_lot_still_carries_the_arrival_date(
                 {"schema": schema},
             ).scalars()
             assert "received_date" not in set(columns)
+
+
+def test_upgrading_stops_when_a_ledger_line_points_at_another_items_inspection(
+    engine: Engine,
+) -> None:
+    """**옮겨도 되는지 먼저 묻는다** (CodeRabbit 리뷰 NC-118).
+
+    앞 스키마의 외래키 둘은 원장 줄의 로트와 검사가 **각각 실재한다**까지만 봤고,
+    둘이 **같은 품목**인지는 보지 않았다. 어긋난 짝을 그대로 옮기면 「이 로트를
+    만든 검사」가 거짓이 되는데, 뒤따르는 쌍 외래키는 **새 관계가 실재하는지만**
+    보므로 그 거짓을 영영 잡지 못한다.
+
+    부분 유일 인덱스가 보장하는 것은 **로트당 입고 줄이 하나**라는 것뿐이다 —
+    데이터 단계가 기댄 전제가 거기서 한 겹 짧았다.
+    """
+    schema = "write_path_ledger_points_elsewhere"
+    with _schema(engine, schema):
+        config = _upgrade_with(engine, schema, "e84fbec436c0", _WITH_A_LEDGER_LINE)
+        scoped = _engine_for_schema(engine, schema)
+        with scoped.begin() as conn:
+            # 다른 품목(`RM-02`)을 하나 더 세운다 — 기본 픽스처는 `RM-01` 만
+            # 심으므로, 여기서 심지 않으면 아래 삽입이 **빈 동작**이 되고 이
+            # 검사가 아무것도 재지 않는다(실제로 한 번 그랬다).
+            conn.execute(
+                text(
+                    "INSERT INTO items (code, name, item_type, process, process_group,"
+                    " material_group, material_group_group, stock_uom, stock_uom_group,"
+                    " phase, safety_stock)"
+                    " VALUES ('RM-02', '다른 원자재', '원자재', '수입', 'PROCESS', '분체',"
+                    " 'MATERIAL_GROUP', 'KG', 'UOM', '양산', 100.0)"
+                )
+            )
+            # 그 품목을 판정한 검사를 세우고, 원장 줄이 **그쪽**을 가리키게 한다 —
+            # 앞 스키마는 이것을 막지 않는다.
+            conn.execute(
+                text(
+                    "INSERT INTO inspections (inspection_stage, stage_group, item_id,"
+                    " item_type, material_group, supplier_id, supplier_type,"
+                    " supplier_lot_number, quantity, judged_at, judged_by, result,"
+                    " nonconformity_group)"
+                    " SELECT 'IQC', 'INSP_STAGE', i.id, i.item_type, i.material_group,"
+                    " p.id, p.partner_type, 'SL-2026-0002', 100.0,"
+                    " TIMESTAMP '2026-09-21 10:00', '검사원 2', '합격', 'NC_REASON'"
+                    " FROM items AS i, partners AS p"
+                    " WHERE i.code = 'RM-02' AND p.code = 'SUP-01'"
+                )
+            )
+            conn.execute(
+                text(
+                    "UPDATE stock_ledger_entries SET inspection_id ="
+                    " (SELECT id FROM inspections ORDER BY id DESC LIMIT 1)"
+                )
+            )
+
+        with pytest.raises(Exception, match="다른 품목의 검사를 가리킨다"):
+            command.upgrade(config, "head")

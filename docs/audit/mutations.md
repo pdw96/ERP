@@ -99,3 +99,14 @@
 | 115 | `if attribute.inspection_item_code is None:` 을 `if False:` 로 | `test_a_reason_the_system_derives_cannot_be_sent_by_a_person` |
 | 116 | 길이 가드를 접두를 재던 옛 식(`len(prefix) + 2`)으로 되돌렸다 | `test_a_serial_that_grew_a_digit_is_refused_by_name` — 긴 코드 갈래는 **그대로 통과한다**(같은 결과의 두 원인이라 한 갈래로는 갈리지 않는다) |
 | 117 | `08d406fa7f3b` 의 데이터 단계를 `SELECT 1` 로 | `test_upgrading_a_database_that_already_has_a_ledger_line_does_not_stop` |
+
+## CodeRabbit 리뷰의 고침 — `2fc40f3` 뒤
+
+**검사가 아무것도 재지 않는 것을 한 번 더 겪었다.** 어긋난 짝을 만들려고 둘째
+품목의 검사를 심었는데 **그 품목이 픽스처에 없어** 삽입이 빈 동작이 됐고, 원장
+줄은 원래 검사를 그대로 가리켜 가드가 물 자리가 없었다. 가드가 옳은데 검사가
+빨갛지 않아 **가드부터 의심하게 되는** 모양이다 — 품목을 함께 심고서야 물었다.
+
+| NC | 무엇을 어긋냈나 | 빨개진 검사 |
+|---|---|---|
+| 118 | 품목 대조 가드의 조건을 `WHERE FALSE` 로(아무것도 세지 않게) | `test_upgrading_stops_when_a_ledger_line_points_at_another_items_inspection` |
