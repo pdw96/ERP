@@ -9,6 +9,7 @@
 """
 
 import json
+import logging
 from collections.abc import Iterator
 from datetime import date, timedelta
 
@@ -96,7 +97,7 @@ def test_something_we_cannot_judge_comes_back_named(client: TestClient) -> None:
 
     assert response.status_code == 422
     refusal = response.json()["detail"][0]
-    assert refusal["type"] == incoming.UNKNOWN_ITEM
+    assert refusal["type"] == incoming.Refusal.UNKNOWN_ITEM
     assert "없는-품목" in refusal["msg"]
 
 
@@ -135,7 +136,8 @@ def test_a_delivery_that_has_not_arrived_is_refused(client: TestClient) -> None:
     response = client.post("/inspections", json=_PAYLOAD | {"received_date": tomorrow})
 
     assert response.status_code == 422, response.text
-    assert response.json()["detail"][0]["type"] == incoming.RECEIVED_DATE_IS_IN_THE_FUTURE
+    refused = response.json()["detail"][0]
+    assert refused["type"] == incoming.Refusal.RECEIVED_DATE_IS_IN_THE_FUTURE
 
 
 def test_a_field_we_do_not_know_is_refused(client: TestClient) -> None:
@@ -289,3 +291,154 @@ def test_nothing_lands_when_the_ledger_line_cannot_stand(prepared: Session) -> N
 
     assert prepared.query(Lot).count() == 0
     assert prepared.query(StockLedgerEntry).count() == 0
+
+
+def test_a_path_error_answers_in_the_same_shape(client: TestClient) -> None:
+    """**거절의 본문은 라우트 밖에서도 한 모양이다** (감사 ⑫ NC-135).
+
+    404 와 405 는 프레임워크가 `{"detail": "Not Found"}` 처럼 **문자열**로
+    돌려준다. `for error in body["detail"]: error["type"]` 을 쓰는 클라이언트는
+    글자를 돌다 죽으므로 **오류를 처리하는 코드가 오류에서 죽고**, 부르는 쪽은
+    그것을 자기 파서가 깨진 것으로 본다.
+
+    붙는 첫날에 가장 흔히 나는 응답이 바로 이 둘이다.
+    """
+    for response in (client.post("/inspection", json=_PAYLOAD), client.get("/inspections")):
+        assert response.status_code in (404, 405), response.text
+        detail = response.json()["detail"]
+        assert isinstance(detail, list), detail
+        assert detail[0].keys() == {"loc", "msg", "type"}, detail
+
+
+def test_the_spec_lists_every_refusal_name(client: TestClient) -> None:
+    """**거절의 이름을 `/openapi.json` 만 읽고 셀 수 있다** (감사 ⑫ NC-134).
+
+    이름이 코드에만 있으면 소비자는 그것을 **문서화되지 않은 채 하드코딩**하고,
+    이름이 늘어도 그것이 계약 변경으로 보이지 않는다 — `result` 가 `enum` 을
+    싣는 이유와 같다.
+
+    **두 벌을 견준다.** 스펙의 목록과 코드의 목록이 갈리는 순간 여기서 걸린다.
+    """
+    spec = client.get("/openapi.json").json()
+
+    refused = spec["paths"]["/inspections"]["post"]["responses"]["422"]
+    assert refused["content"]["application/json"]["schema"]["$ref"].endswith("/Refused")
+
+    assert spec["components"]["schemas"]["Refusal"]["enum"] == [
+        name.value for name in incoming.Refusal
+    ]
+
+
+def test_every_answer_carries_an_id_that_names_the_request(client: TestClient) -> None:
+    """**부르는 쪽이 「이 요청」이라고 말할 수 있다** (감사 ⑬ NC-145).
+
+    실패한 트랜잭션은 통째로 롤백되어 **DB 에 한 줄도 남지 않는다.** 그래서 500
+    의 유일한 흔적이 로그인데, 그 로그에 요청을 가리키는 축이 없으면 **동시에 두
+    건만 들어와도** 어느 트레이스백이 그 요청인지 가를 수 없다.
+
+    **본문이 아니라 헤더다** — 본문에 넣는 것이 계약 변경인지는 `audit-contract`
+    가 판정할 자리다.
+    """
+    created = client.post("/inspections", json=_PAYLOAD)
+    refused = client.post("/inspections", json={})
+
+    assert created.headers.get("X-Request-Id"), created.headers
+    assert refused.headers.get("X-Request-Id"), refused.headers
+    assert created.headers["X-Request-Id"] != refused.headers["X-Request-Id"]
+
+
+def test_an_id_the_caller_brought_is_not_replaced(client: TestClient) -> None:
+    """**다음 층이 자기 축을 들고 오면 그것을 쓴다.**
+
+    우리가 새로 지으면 축이 둘이 되고, 둘이면 이어 붙일 사람이 필요해진다.
+    """
+    response = client.post("/inspections", json={}, headers={"X-Request-Id": "from-above-01"})
+
+    assert response.headers["X-Request-Id"] == "from-above-01"
+
+
+def test_an_id_we_cannot_use_is_replaced_not_echoed(client: TestClient) -> None:
+    """**밖에서 온 글자가 우리 로그 줄의 모양을 정하지 않는다.**
+
+    이 값은 응답 헤더로 나가고 로그에 찍힌다. 모양을 좁히지 않으면 부르는 쪽이
+    보낸 것이 그대로 그 두 자리에 앉는다 — **버리지는 않고 우리가 새로 짓는다.**
+    """
+    response = client.post("/inspections", json={}, headers={"X-Request-Id": "a b\tc" * 40})
+
+    echoed = response.headers["X-Request-Id"]
+    assert echoed != "a b\tc" * 40
+    assert len(echoed) == 32 and echoed.isalnum(), echoed
+
+
+def test_a_break_leaves_a_log_line_that_names_the_request(
+    prepared: Session,  # noqa: F811
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """**실패는 DB 에 흔적을 남기지 않으므로 로그가 유일한 흔적이다** (감사 ⑬ NC-145).
+
+    터진 트랜잭션은 통째로 롤백되어 한 줄도 남지 않는다. 그러니 그 요청을 다시
+    찾아갈 길은 로그뿐인데, 거기에 **응답이 돌려준 것과 같은 축**이 없으면 부르는
+    쪽이 들고 온 아이디로 아무것도 찾지 못한다.
+
+    **안은 여전히 싣지 않는다** — 본문의 규칙이고, 로그는 그 규칙의 반대편이다.
+    """
+
+    def break_before_the_work() -> Iterator[Session]:
+        raise RuntimeError("연결이 끊겼다")
+        yield prepared  # pragma: no cover — 도달하지 않는다
+
+    app.dependency_overrides[session_scope] = break_before_the_work
+    try:
+        broken = TestClient(app, raise_server_exceptions=False)
+        with caplog.at_level(logging.ERROR, logger="app.api"):
+            response = broken.post(
+                "/inspections", json=_PAYLOAD, headers={"X-Request-Id": "trace-me-01"}
+            )
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 500
+    assert response.headers["X-Request-Id"] == "trace-me-01"
+    assert "trace-me-01" in caplog.text, caplog.text
+    assert "POST" in caplog.text and "/inspections" in caplog.text
+
+
+def test_a_method_error_still_says_which_method_works(client: TestClient) -> None:
+    """**본문의 모양을 맞추느라 헤더를 잃지 않는다** (Codex 리뷰 P2).
+
+    405 에는 프레임워크가 `Allow` 를 얹는다 — 부르는 쪽이 **어느 메서드가
+    되는지**를 그 헤더에서 읽는다. 본문을 한 모양으로 다시 지으면서 응답을
+    새로 만들면 그것이 조용히 사라진다.
+    """
+    response = client.get("/inspections")
+
+    assert response.status_code == 405
+    assert "POST" in response.headers.get("Allow", ""), dict(response.headers)
+
+
+def test_a_break_leaves_the_cause_not_just_the_axis(
+    prepared: Session,  # noqa: F811
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """**축만 있고 까닭이 없는 줄을 남기지 않는다** (Codex 리뷰 P2).
+
+    500 처리기는 동기라 starlette 가 `run_in_threadpool` 로 부르고, 그 워커
+    스레드에는 **활성 예외가 없다** — `logger.exception()` 은 `NoneType: None`
+    만 찍는다. 요청 아이디는 있는데 **무엇이 터졌는지가 없는** 줄이 되고, 그것은
+    이 로그가 세우려던 것의 반쪽이다.
+    """
+
+    def break_with_a_name() -> Iterator[Session]:
+        raise RuntimeError("여기서 터졌다")
+        yield prepared  # pragma: no cover — 도달하지 않는다
+
+    app.dependency_overrides[session_scope] = break_with_a_name
+    try:
+        broken = TestClient(app, raise_server_exceptions=False)
+        with caplog.at_level(logging.ERROR, logger="app.api"):
+            broken.post("/inspections", json=_PAYLOAD)
+    finally:
+        app.dependency_overrides.clear()
+
+    assert "NoneType: None" not in caplog.text, caplog.text
+    assert "RuntimeError" in caplog.text and "여기서 터졌다" in caplog.text, caplog.text

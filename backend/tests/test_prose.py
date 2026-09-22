@@ -104,6 +104,48 @@ def test_there_is_still_no_screen() -> None:
     assert not (REPO_ROOT / "package.json").exists()
 
 
+_MUTATIONS = REPO_ROOT / "docs/audit/mutations.md"
+
+# 묶음 제목이 드는 커밋. 이 파일의 관용구가 백틱이라 백틱까지 본다 — 맨 글자만
+# 세면 산문 속의 우연한 16진 토막이 통과시킨다.
+_COMMIT = re.compile(r"`[0-9a-f]{7,40}`")
+
+
+def test_a_mutation_bundle_says_which_commit_it_was_measured_on() -> None:
+    """**「그때 빨개졌다」는 언제의 「그때」인지가 없으면 되짚을 수 없다** (감사 ⑪ NC-132).
+
+    그 뒤에 코드가 바뀌면 적힌 빨강이 지금도 참인지 알 수 없는데, 커밋이 없으면
+    **무엇이 바뀌었는지조차 물을 수 없다.** 실제로 묶음 둘이 커밋 없이 서 있었고,
+    하필 그 둘이 그 회차가 재감사하던 줄들을 들고 있었다.
+
+    **파일이 사라지는 것도 여기서 빨개진다.** 이 기록은 그 전까지 **아무것도 그것을
+    지키지 않는** 파일이었다 — 통째로 지워도 초록이었다(감사 ⑪ OB-3). 그래서 전수
+    단언에 앵커를 함께 건다: 훑을 것이 **있었다**는 것까지 센다(OB-1).
+
+    **이 게이트가 못 보는 부류**(W-6 ③): 커밋이 적혀 있으나 **그 트리가 아닌**
+    것 — 모양만 보고 값을 보지 않는다. 그리고 「`X` 뒤」처럼 **바탕**을 가리키는
+    옛 형태도 통과한다. 둘 다 기계가 가를 수 없어 규칙이 산문으로 남는다.
+    """
+    assert _MUTATIONS.exists(), f"{_MUTATIONS} 가 없다 — 어긋냄의 기록이 사는 자리다"
+
+    bundles = [
+        (number, line)
+        for number, line in enumerate(_MUTATIONS.read_text().splitlines(), start=1)
+        if line.startswith("## ") and "고침" in line
+    ]
+    assert bundles, "고침 묶음이 하나도 없다 — 이 게이트가 아무것도 세지 않는다"
+
+    anchorless = [
+        f"docs/audit/mutations.md:{number} — {line.strip()}"
+        for number, line in bundles
+        if not _COMMIT.search(line)
+    ]
+
+    assert anchorless == [], "묶음이 어느 커밋에서 잰 것인지 말하지 않는다:\n" + "\n".join(
+        anchorless
+    )
+
+
 def _table_rows(text: str) -> list[tuple[int, str]]:
     """표의 줄만 돌려준다 — 구분선(`|---|`)과 코드 블록 안은 뺀다."""
     rows: list[tuple[int, str]] = []

@@ -59,3 +59,27 @@ jobs:
         env:
           ERP_TEST_DATABASE_URL: postgresql+psycopg://erp:erp@localhost:5432/erp_test
         run: pytest
+
+      # ── 컨테이너 부팅 경로 (감사 ⑪ NC-133) ────────────────────────────────
+      # **이 잡에 붙인다. 새 잡을 만들지 않는다.** 필수 상태 체크는 잡 이름으로
+      # 거는데 새 잡은 그 목록에 없으므로, 초록이어도 아무것도 막지 못한다 —
+      # 「무엇을 잡든 머지를 막지 못하면 잡은 것이 아니다」가 그 자리다(NC-101).
+      #
+      # 셸은 ruff 도 mypy 도 보지 않고 pytest 도 실행하지 않는다 — 이 스텝이
+      # 그 빈자리를 **문법과 흔한 셸 함정까지** 메운다.
+      #
+      # **이 스텝이 못 보는 것**(가드는 자기가 못 보는 부류를 적는다, W-6 ③):
+      # `set -euo pipefail` 이 **사라지는 것**. shellcheck 는 그 줄을 요구하지
+      # 않으므로 지워도 통과한다 — 실제로 돌려 확인했다(감사 ⑬ NC-147). 그 줄이
+      # 없으면 `alembic upgrade head` 가 실패해도 `exec "$@"` 가 돌아 **반쯤
+      # 마이그레이션된 DB 위에 API 가 뜨는데**, 그것을 무는 것은 여전히 사람이다.
+      # 그리고 이 스텝은 **엔트리포인트를 실행하지 않는다.**
+      - name: 셸
+        run: shellcheck ./docker-entrypoint.sh
+
+      # 이미지를 **빌드해 본다.** 이것이 없으면 `Dockerfile` 이나
+      # `requirements.txt` 가 깨져도 CI 는 전부 초록이다 — CI 는 이미지를 쓰지
+      # 않고 `requirements-dev.txt` 로 따로 깔기 때문이다. 띄우지는 않는다:
+      # 기동은 DB 와 환경변수를 요구하고, 그 층은 `audit-ops` 의 자리다.
+      - name: 이미지
+        run: docker build .

@@ -12,6 +12,14 @@
   검사가** 빨개졌는가. 검사 이름이 없으면 재현이 아니라 주장이다
 - **통과한 돌연변이도 적는다.** 값은 오히려 그쪽에 있다 — 검사가 아무것도 지키지
   않는다는 뜻이기 때문이다
+- **묶음마다 잰 커밋을 적는다.** 「그때 빨개졌다」는 그 뒤에 코드가 바뀌면 지금도
+  참인지 알 수 없고, **언제의 「그때」인지가 없으면 무엇이 바뀌었는지조차 물을 수
+  없다.** 적는 것은 **바탕이 아니라 잰 트리의 커밋**이다 — 「`X` 뒤」는 바탕만
+  가리켜 같은 바탕의 두 묶음을 가르지 못한다(실제로 `2fc40f3` 뒤가 둘이고, 옛
+  묶음의 그 형태는 소급해 고치지 않는다 — 잰 트리를 지어내는 것이 되기 때문이다).
+  `backend/tests/test_prose.py` 가 이 규칙을 문다 (감사 ⑪ NC-132).
+  **쓰는 시점에 그 해시를 모르면 회차를 닫을 때 채운다** — 예외를 적지 않았더니
+  규칙을 세운 그 회차의 묶음이 「`X` 의 다음 커밋」으로 섰다(감사 ⑫ NC-143)
 - 이 파일은 **⑧ 부터의 기록이다.** 그 앞 회차의 돌연변이는 PR 본문이 요약만 들고
   있고, 없는 기록을 소급해 지어내지 않는다
 
@@ -38,7 +46,7 @@
 | 81 | `schemas.py` 의 `result` 에서 `json_schema_extra={"enum": …}` 를 뺐다 | `test_the_spec_says_which_version_and_which_judgements` |
 | **79** | `app.py` 의 `version=API_VERSION` 을 뺐다 | **통과했다.** FastAPI 의 기본 판이 하필 고른 값(`0.1.0`)과 같아 「적었다」와 「안 적었다」가 밖에서 구별되지 않았다 — 판을 `0.1` 로 바꾸고 **기본값과 다른지**까지 보게 고친 뒤 같은 돌연변이가 빨개졌다 |
 
-## ⑨ 의 고침
+## ⑨ 의 고침 (`fc940e8`)
 
 | NC | 무엇을 어긋냈나 | 빨개진 검사 |
 |---|---|---|
@@ -48,6 +56,77 @@
 | 90 | `inspections` 에 `UNIQUE (supplier_id, item_id, supplier_lot_number)` 를 **더했다**(NC-67 의 결정을 뒤집는 변경) | `test_the_same_request_twice_makes_two_lots` · `test_a_split_delivery_of_the_same_supplier_lot_is_accepted`. **「둘째는 그날의 다음 일련을 받는다」는 통과했다** — 감사자가 예측한 그대로다 |
 | 92 · 86 | `production.py` 의 문장을 「1단계에서는 표만 선다」로 되돌렸다 | `test_a_stage_that_closed_is_not_written_as_if_it_were_now` |
 | 86 | 저장소 최상위에 `frontend/` 를 만들었다 | `test_there_is_still_no_screen` |
+
+## 감사 ⑩ 의 고침 (`a98f40d`)
+
+| NC | 무엇을 어긋냈나 | 빨개진 검사 |
+|---|---|---|
+| 129 | `a7c14b3e9052` 의 `upgrade()` 에서 **조이기 전의 가드**(`판정이 도착보다 앞선 검사가 있다`)를 통째로 지웠다 | `test_upgrading_says_which_judgement_came_before_its_arrival` — 가드가 없으면 `ck_inspection_judged_after_arrival` 이 **제약 이름만** 들고 걸린다 |
+
+**가드를 하나 세우려다 말았고, 그것을 탐침이 정했다.** 감사 ⑩ 이 낸 NC-129 는 두 갈래였는데 둘째(「검사를 가리키는데 도착일이 없는 로트」)는 **옛 줄로 설 수 없었다.** 앞 스키마에서 네 갈래를 실제로 심어 보았고 전부 막혔다 —
+
+| 심어 본 줄 | 막은 것 |
+|---|---|
+| 공급사 로트의 도착일 비우기 | `ck_lot_supplied_has_received_date` |
+| 그 로트를 자사로 바꾸기 | `ck_lot_origin_matches_type` |
+| 자사 반제품 로트 세우기 | `ck_lot_warehouse` — 창고 코드가 없어서였고, 심고 다시 했다 |
+| 자사 반제품 로트가 수입검사를 가리키기 | **`fk_lot_inspection_item`** — NC-118 이 세운 쌍 외래키가 사슬의 마지막 고리다 |
+
+**닿지 않는 가드는 세우지 않는다.** 물지 않는 가드는 그 자리가 지켜지고 있다는 잘못된 안심을 주고, 그것을 무는 검사는 **통과하면서 아무것도 지키지 않는다.** 사슬을 리비전에 이름으로 적어 두었으므로, 관문 2 가 `ck_inspection_item_is_raw_material` 을 넓혀 둘째 고리를 끊는 날 그 자리가 드러난다.
+
+## 감사 ⑪ 의 고침 (`5f9922c`)
+
+| NC | 무엇을 어긋냈나 | 빨개진 검사 |
+|---|---|---|
+| 132 | `## 감사 ⑩ 의 고침` 제목에서 커밋을 뗐다 | `test_a_mutation_bundle_says_which_commit_it_was_measured_on` |
+| 132 | **이 파일을 통째로 지웠다** | 같은 검사 — 앵커가 물었다. 그 전까지 이 파일은 **지워도 초록**이었다(⑪ OB-3) |
+| 132 | 파일은 두고 **고침 묶음만 전부 없앴다** | 같은 검사 — 둘째 앵커가 물었다(훑을 것이 있었는가) |
+
+**전수 단언에 앵커를 함께 걸었다**(⑪ OB-1). 「어긋난 것이 없다」 꼴은 훑은 집합이
+비면 그대로 통과하므로, **훑을 것이 있었다**는 것까지 같은 검사가 센다. 이 저장소에
+이미 세 자리에 있던 관용구이고 네 자리에 없었다.
+
+## 감사 ⑫ 의 고침 (`f520d26`)
+
+| NC | 무엇을 어긋냈나 | 빨개진 검사 |
+|---|---|---|
+| 135 | `app.py` 의 `@app.exception_handler(StarletteHTTPException)` 를 `ZeroDivisionError` 로 좁혔다 | `test_a_path_error_answers_in_the_same_shape` — 404·405 의 `detail` 이 다시 문자열이 됐다 |
+| 134 | 라우트의 `responses={422: {"model": Refused}}` 를 뺐다 | `test_the_spec_lists_every_refusal_name` |
+| 134 | `RefusalDetail.type` 을 `Refusal` 에서 `str` 로 되돌렸다 | 같은 검사 — 스펙에서 `Refusal` 컴포넌트가 통째로 사라진다 |
+
+**둘째와 셋째가 같은 검사를 다른 이유로 물게 한다.** 하나는 **스펙이 그 모양을
+가리키지 않는 것**이고 하나는 **가리키는데 이름 목록이 비는 것**이다 — 한 검사가
+두 겹을 다 세는지 확인했다.
+
+## 감사 ⑬ 의 고침 (`0d9a96d`)
+
+| NC | 무엇을 어긋냈나 | 빨개진 검사 |
+|---|---|---|
+| 145 | 미들웨어에서 `response.headers[_REQUEST_ID_HEADER] = request_id` 를 지웠다 | `test_every_answer_carries_an_id_that_names_the_request` · `test_an_id_the_caller_brought_is_not_replaced` |
+| 145 | 받은 값의 모양 검사를 빼고 **그대로 되돌려 싣게** 했다 | `test_an_id_we_cannot_use_is_replaced_not_echoed` |
+| 145 | 500 처리기의 `_log.exception` 을 `_log.debug` 로 낮췄다 | `test_a_break_leaves_a_log_line_that_names_the_request` |
+| 145 | 500 처리기에서 헤더를 **다시 다는 줄**을 지웠다 | 같은 검사 |
+
+**첫 어긋냄에서 500 검사만 통과했고 그것이 옳다.** `ServerErrorMiddleware` 가
+사용자 미들웨어 **바깥**에 서므로 그 응답은 미들웨어를 지나오지 않고, 처리기가
+따로 축을 단다 — 네 번째 어긋냄이 그 자리를 따로 문다. **두 자리를 한 검사가
+겹쳐 세지 않는다.**
+
+**그리고 이 검사가 실제로 결함을 하나 잡았다.** 처음 세웠을 때 500 에는 헤더가
+붙지 않았다 — 하필 **축이 가장 필요한 응답**이다. 검사를 먼저 쓰지 않았으면
+「달았다」로 끝났을 자리다.
+
+## Codex 리뷰의 고침 (`d6b350c`)
+
+| NC | 무엇을 어긋냈나 | 빨개진 검사 |
+|---|---|---|
+| 148 | HTTP 예외 처리기에서 `headers=exc.headers` 를 뺐다 | `test_a_method_error_still_says_which_method_works` — 405 의 `Allow` 가 사라진다 |
+| 149 | `_log.error(..., exc_info=exc)` 를 `_log.exception(...)` 으로 되돌렸다 | `test_a_break_leaves_the_cause_not_just_the_axis` — 로그에 `NoneType: None` 이 찍힌다 |
+
+**둘째는 앞 커밋이 세운 검사가 놓친 자리다.** `…names_the_request` 는 로그에 **축이
+있는지**만 물었고 **까닭이 실렸는지**는 묻지 않았다 — 그래서 `NoneType: None` 이
+찍히는 동안에도 초록이었다. 단언을 넓히지 않고 **검사를 따로 세웠다**: 하나는 축을,
+하나는 까닭을 문다.
 
 ## 아직 도구가 없다
 

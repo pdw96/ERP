@@ -33,6 +33,10 @@ services:
     command: ["true"]
 
   api:
+    # **이 서비스도 `migrate` 와 같은 이미지·같은 엔트리포인트다** — 뜰 때마다
+    # `alembic upgrade head` 를 다시 돈다. 그래서 **코드만 되돌리면 뜨지 않는다**
+    # (감사 ⑬ NC-146). 근거와 넓히는 방법은 `backend/docker-entrypoint.sh` 머리에
+    # 있다 — 여기 두 벌로 적지 않는다.
     build: ./backend
     depends_on:
       postgres:

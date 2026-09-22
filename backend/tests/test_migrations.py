@@ -1408,6 +1408,37 @@ def test_the_data_step_leaves_a_judgement_with_no_lot_empty(engine: Engine) -> N
     assert empty == [None], empty
 
 
+def test_upgrading_says_which_judgement_came_before_its_arrival(engine: Engine) -> None:
+    """**조이기 전에 묻는다** (감사 ⑩ NC-129 — NC-126 의 형제 리비전).
+
+    앞 스키마는 `lots.received_date` 와 `inspections.judged_at` 을 잇는 제약을
+    갖고 있지 않으므로 「22일에 받아 21일에 판정」인 짝이 **합법으로 선다.** 데이터
+    단계가 그 값을 옮겨 오면 조이는 CHECK 가 걸리는데, 거기서 나오는 말은 제약
+    이름뿐이라 배포하는 사람은 **어느 검사인지** 알 수 없다.
+
+    **이 자리의 형제는 가드를 두지 않았다** — 「검사를 가리키는데 도착일이 없는
+    로트」는 앞 스키마의 제약 사슬이 이미 막는다(리비전이 그 사슬을 이름으로
+    적는다). 그쪽을 무는 검사는 여기 없다. 없는 갈래를 무는 검사는 세울 수 없고,
+    **세우면 통과하면서 아무것도 지키지 않는다.**
+    """
+    schema = "received_date_backdated_judgement"
+    with _schema(engine, schema):
+        config = _upgrade_with(engine, schema, "08d406fa7f3b", _BEFORE_WRITE_PATH)
+        scoped = _engine_for_schema(engine, schema)
+        with scoped.begin() as conn:
+            # 판정은 9월 21일 09:00 이다. 도착을 그 **뒤로** 둔다 — 앞 스키마가
+            # 막지 않는 짝이고, 한 문장으로 채워야 양방향 CHECK 에 물리지 않는다.
+            conn.execute(
+                text(
+                    "UPDATE lots SET inspection_id = (SELECT id FROM inspections),"
+                    " inspection_result = '합격', received_date = DATE '2026-09-22'"
+                )
+            )
+
+        with pytest.raises(Exception, match="판정이 도착보다 앞선 검사가 있다"):
+            command.upgrade(config, "head")
+
+
 def test_downgrade_says_whose_arrival_date_has_no_lot_to_fall_back_on(
     engine: Engine,
 ) -> None:
