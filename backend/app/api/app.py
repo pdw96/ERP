@@ -11,7 +11,7 @@
 import logging
 import re
 import uuid
-from collections.abc import Awaitable, Callable, Iterator
+from collections.abc import Awaitable, Callable, Iterator, Mapping
 from functools import lru_cache
 from typing import Annotated
 
@@ -120,7 +120,11 @@ def _sessions() -> sessionmaker[Session]:
     return create_session_factory(create_db_engine())
 
 
-def _refusal(status_code: int, errors: list[dict[str, object]]) -> JSONResponse:
+def _refusal(
+    status_code: int,
+    errors: list[dict[str, object]],
+    headers: Mapping[str, str] | None = None,
+) -> JSONResponse:
     """**거절의 본문은 한 모양이다.**
 
     422 가 어떤 때는 배열이고 어떤 때는 문자열이면, `for error in body["detail"]`
@@ -130,8 +134,12 @@ def _refusal(status_code: int, errors: list[dict[str, object]]) -> JSONResponse:
 
     세 칸의 뜻은 pydantic 이 정한 것을 그대로 쓴다 — `type` 이 **기계가 읽는
     자리**이고 `msg` 가 사람이 읽는 자리다.
+
+    **본문의 모양을 맞추느라 헤더를 잃지 않는다.** 프레임워크가 거절에 얹는
+    헤더가 있고(405 의 `Allow`), 응답을 다시 지으면 그것이 조용히 사라진다 —
+    부르는 쪽은 **어느 메서드가 되는지**를 그 헤더에서 읽는다(Codex 리뷰 P2).
     """
-    return JSONResponse(status_code=status_code, content={"detail": errors})
+    return JSONResponse(status_code=status_code, content={"detail": errors}, headers=headers)
 
 
 @app.exception_handler(Exception)
@@ -150,11 +158,17 @@ def do_not_answer_a_break_with_plain_text(request: Request, exc: Exception) -> J
     # 찍지만, 그 줄에는 이 요청을 가리키는 것이 없다. 안을 싣지 않는 것은 본문의
     # 규칙이고 **로그는 그 규칙의 반대편**이다 — 밖으로 나가지 않는다.
     request_id = getattr(request.state, "request_id", "-")
-    _log.exception(
+    # **`exception()` 을 쓰지 않는다.** 이 처리기는 동기라 starlette 가
+    # `run_in_threadpool` 로 부르고, 그 워커 스레드에는 **활성 예외가 없다** —
+    # `sys.exc_info()` 가 비어 `NoneType: None` 만 찍힌다(Codex 리뷰 P2, 실제로
+    # 찍히는 것을 확인했다). 그러면 **축은 있는데 까닭이 없는** 줄이 남고, 이
+    # 줄이 세우려던 것이 바로 그 둘을 한 자리에 두는 것이다. 예외를 손으로 넘긴다.
+    _log.error(
         "요청을 처리하지 못했다 request_id=%s %s %s",
         request_id,
         request.method,
         request.url.path,
+        exc_info=exc,
     )
     # **여기서 헤더를 다시 단다.** 500 은 위의 미들웨어를 지나오지 않는다 —
     # `ServerErrorMiddleware` 가 사용자 미들웨어 **바깥**에 서므로 그 미들웨어의
@@ -187,6 +201,7 @@ def answer_a_path_error_in_the_same_shape(
     return _refusal(
         exc.status_code,
         [{"loc": ["path"], "msg": str(exc.detail), "type": "http_error"}],
+        headers=exc.headers,
     )
 
 

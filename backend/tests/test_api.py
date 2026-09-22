@@ -401,3 +401,44 @@ def test_a_break_leaves_a_log_line_that_names_the_request(
     assert response.headers["X-Request-Id"] == "trace-me-01"
     assert "trace-me-01" in caplog.text, caplog.text
     assert "POST" in caplog.text and "/inspections" in caplog.text
+
+
+def test_a_method_error_still_says_which_method_works(client: TestClient) -> None:
+    """**본문의 모양을 맞추느라 헤더를 잃지 않는다** (Codex 리뷰 P2).
+
+    405 에는 프레임워크가 `Allow` 를 얹는다 — 부르는 쪽이 **어느 메서드가
+    되는지**를 그 헤더에서 읽는다. 본문을 한 모양으로 다시 지으면서 응답을
+    새로 만들면 그것이 조용히 사라진다.
+    """
+    response = client.get("/inspections")
+
+    assert response.status_code == 405
+    assert "POST" in response.headers.get("Allow", ""), dict(response.headers)
+
+
+def test_a_break_leaves_the_cause_not_just_the_axis(
+    prepared: Session,  # noqa: F811
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """**축만 있고 까닭이 없는 줄을 남기지 않는다** (Codex 리뷰 P2).
+
+    500 처리기는 동기라 starlette 가 `run_in_threadpool` 로 부르고, 그 워커
+    스레드에는 **활성 예외가 없다** — `logger.exception()` 은 `NoneType: None`
+    만 찍는다. 요청 아이디는 있는데 **무엇이 터졌는지가 없는** 줄이 되고, 그것은
+    이 로그가 세우려던 것의 반쪽이다.
+    """
+
+    def break_with_a_name() -> Iterator[Session]:
+        raise RuntimeError("여기서 터졌다")
+        yield prepared  # pragma: no cover — 도달하지 않는다
+
+    app.dependency_overrides[session_scope] = break_with_a_name
+    try:
+        broken = TestClient(app, raise_server_exceptions=False)
+        with caplog.at_level(logging.ERROR, logger="app.api"):
+            broken.post("/inspections", json=_PAYLOAD)
+    finally:
+        app.dependency_overrides.clear()
+
+    assert "NoneType: None" not in caplog.text, caplog.text
+    assert "RuntimeError" in caplog.text and "여기서 터졌다" in caplog.text, caplog.text
