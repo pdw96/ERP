@@ -27,7 +27,17 @@
 채우는 것은 **「지금 읽히고 있는 값」을 고정하는 것**이지 복원이 아니다 — 이 리비전
 뒤로는 갈리지 않는다는 것이 이 단계가 주는 전부다.
 
-**올릴 때 멈추지 않는다.** 널 허용 칸이고, 채움은 기준이 있는 줄에만 닿는다.
+**올릴 때 멈출 수 있다 — 두 자리에서, 이름을 말하고.** 처음에는 「멈추지 않는다」고
+적었는데 그것은 이 리비전이 널 허용 칸 하나만 더하던 때의 말이었다. 조이는 것이
+둘 늘면서 옛 스키마가 **허용하던 줄**이 걸릴 수 있게 됐다 —
+
+- **재는 기준인데 단위가 없는 줄.** 앞 스키마는 이것을 막지 않았다. 그 줄이 있으면
+  아래 CHECK 가 걸리는데, 거기서 나오는 말은 제약 이름이라 **어느 기준인지** 모른다
+- **단위를 가져올 데가 없는 측정 줄.** 재지 않는 기준을 가리키는 잰 줄이며, 조이기
+  전에 이름으로 말한다
+
+**둘 다 조이기 전에 묻는다** — 제약이 먼저 걸리면 배포하는 사람이 무엇을 고쳐야
+하는지 모른 채로 멈춘다(CodeRabbit 리뷰 NC-126).
 
 **내릴 때도 멈추지 않는다.** 되돌리면 이 칸이 사라지지만 **그 사실을 다시 만들 수
 있다** — 위의 외래키가 사는 동안 기준의 단위가 이 값이었음을 보증하므로, 다시 올릴
@@ -77,6 +87,29 @@ def upgrade() -> None:
     # `NULL` 이면 검사하지 않으므로, 규격 있는 기준에 단위가 비어 있으면 측정
     # 줄의 단위도 비고 아래의 잠금이 그 줄에서 통째로 건너뛰어진다. 시드는 이미
     # 「재는 것에는 단위가 있다」로 서 있었고, 여기서 그것을 규칙으로 적는다.
+    # **조이기 전에 조일 수 없는 기준을 이름으로 말한다.** 앞 스키마는 재는
+    # 기준의 단위 비움을 막지 않았으므로 그런 줄이 실재할 수 있다. 아래 CHECK 가
+    # 먼저 걸리면 나오는 말이 **제약 이름뿐**이라 배포하는 사람이 어느 기준인지
+    # 모른다 — 이 리비전이 다른 자리에서 하는 것과 같은 모양으로 먼저 묻는다.
+    op.execute(
+        """
+        DO $$
+        DECLARE unitless text;
+        BEGIN
+          SELECT string_agg(s.process_code || '/' || s.item_code
+                            || coalesce('/' || s.material_group, ''), ', '
+                            ORDER BY s.process_code, s.item_code) INTO unitless
+          FROM process_inspection_standards AS s
+          WHERE (s.upper_spec_limit IS NOT NULL OR s.lower_spec_limit IS NOT NULL)
+            AND s.unit IS NULL;
+          IF unitless IS NOT NULL THEN
+            RAISE EXCEPTION
+              '재는 기준인데 단위가 없다: %. 그 숫자가 무엇인지 말할 수 없으므로 사람이 먼저 적는다',
+              unitless;
+          END IF;
+        END $$;
+        """
+    )
     op.create_check_constraint(
         "ck_inspection_standard_measured_has_a_unit",
         "process_inspection_standards",

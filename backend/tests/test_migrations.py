@@ -1677,3 +1677,27 @@ def test_downgrade_says_which_measurements_would_lose_their_unit(engine: Engine)
 
         with pytest.raises(Exception, match="단위를 되찾을 수 없다"):
             command.downgrade(config, "a7c14b3e9052")
+
+
+def test_upgrading_says_which_standard_measures_without_a_unit(engine: Engine) -> None:
+    """**제약이 먼저 걸리면 무엇을 고쳐야 하는지 모른 채로 멈춘다** (CodeRabbit 리뷰 NC-126).
+
+    앞 스키마는 **재는 기준의 단위 비움**을 막지 않았으므로 그런 줄이 실재할 수
+    있다. 조이는 CHECK 가 먼저 서면 나오는 말이 **제약 이름뿐**이고, 배포하는
+    사람은 어느 기준을 고쳐야 하는지 알 수 없다 — 조이기 전에 묻는다.
+    """
+    schema = "applied_unit_unitless_standard"
+    with _schema(engine, schema):
+        config = _config_for_schema(engine, schema)
+        command.upgrade(config, "e84fbec436c0")
+        _code_group_for_inspection_items(engine, schema)
+        scoped = _engine_for_schema(engine, schema)
+        with scoped.begin() as conn:
+            for statement in _WITH_A_MEASUREMENT.strip().split(";"):
+                if statement.strip():
+                    conn.execute(text(statement))
+            # 앞 스키마가 허용하던 줄 — 재는 기준인데 단위가 없다.
+            conn.execute(text("UPDATE process_inspection_standards SET unit = NULL"))
+
+        with pytest.raises(Exception, match="재는 기준인데 단위가 없다"):
+            command.upgrade(config, "head")
