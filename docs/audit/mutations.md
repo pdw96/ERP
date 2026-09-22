@@ -98,6 +98,24 @@
 가리키지 않는 것**이고 하나는 **가리키는데 이름 목록이 비는 것**이다 — 한 검사가
 두 겹을 다 세는지 확인했다.
 
+## 감사 ⑬ 의 고침 (`0d9a96d`)
+
+| NC | 무엇을 어긋냈나 | 빨개진 검사 |
+|---|---|---|
+| 145 | 미들웨어에서 `response.headers[_REQUEST_ID_HEADER] = request_id` 를 지웠다 | `test_every_answer_carries_an_id_that_names_the_request` · `test_an_id_the_caller_brought_is_not_replaced` |
+| 145 | 받은 값의 모양 검사를 빼고 **그대로 되돌려 싣게** 했다 | `test_an_id_we_cannot_use_is_replaced_not_echoed` |
+| 145 | 500 처리기의 `_log.exception` 을 `_log.debug` 로 낮췄다 | `test_a_break_leaves_a_log_line_that_names_the_request` |
+| 145 | 500 처리기에서 헤더를 **다시 다는 줄**을 지웠다 | 같은 검사 |
+
+**첫 어긋냄에서 500 검사만 통과했고 그것이 옳다.** `ServerErrorMiddleware` 가
+사용자 미들웨어 **바깥**에 서므로 그 응답은 미들웨어를 지나오지 않고, 처리기가
+따로 축을 단다 — 네 번째 어긋냄이 그 자리를 따로 문다. **두 자리를 한 검사가
+겹쳐 세지 않는다.**
+
+**그리고 이 검사가 실제로 결함을 하나 잡았다.** 처음 세웠을 때 500 에는 헤더가
+붙지 않았다 — 하필 **축이 가장 필요한 응답**이다. 검사를 먼저 쓰지 않았으면
+「달았다」로 끝났을 자리다.
+
 ## 아직 도구가 없다
 
 여기 적힌 것은 **손으로 돌린 것**이다. 돌연변이 러너를 개발 의존성으로 들이는
