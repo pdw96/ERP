@@ -9,6 +9,7 @@
 """
 
 import json
+import logging
 from collections.abc import Iterator
 from datetime import date, timedelta
 
@@ -326,3 +327,77 @@ def test_the_spec_lists_every_refusal_name(client: TestClient) -> None:
     assert spec["components"]["schemas"]["Refusal"]["enum"] == [
         name.value for name in incoming.Refusal
     ]
+
+
+def test_every_answer_carries_an_id_that_names_the_request(client: TestClient) -> None:
+    """**부르는 쪽이 「이 요청」이라고 말할 수 있다** (감사 ⑬ NC-145).
+
+    실패한 트랜잭션은 통째로 롤백되어 **DB 에 한 줄도 남지 않는다.** 그래서 500
+    의 유일한 흔적이 로그인데, 그 로그에 요청을 가리키는 축이 없으면 **동시에 두
+    건만 들어와도** 어느 트레이스백이 그 요청인지 가를 수 없다.
+
+    **본문이 아니라 헤더다** — 본문에 넣는 것이 계약 변경인지는 `audit-contract`
+    가 판정할 자리다.
+    """
+    created = client.post("/inspections", json=_PAYLOAD)
+    refused = client.post("/inspections", json={})
+
+    assert created.headers.get("X-Request-Id"), created.headers
+    assert refused.headers.get("X-Request-Id"), refused.headers
+    assert created.headers["X-Request-Id"] != refused.headers["X-Request-Id"]
+
+
+def test_an_id_the_caller_brought_is_not_replaced(client: TestClient) -> None:
+    """**다음 층이 자기 축을 들고 오면 그것을 쓴다.**
+
+    우리가 새로 지으면 축이 둘이 되고, 둘이면 이어 붙일 사람이 필요해진다.
+    """
+    response = client.post("/inspections", json={}, headers={"X-Request-Id": "from-above-01"})
+
+    assert response.headers["X-Request-Id"] == "from-above-01"
+
+
+def test_an_id_we_cannot_use_is_replaced_not_echoed(client: TestClient) -> None:
+    """**밖에서 온 글자가 우리 로그 줄의 모양을 정하지 않는다.**
+
+    이 값은 응답 헤더로 나가고 로그에 찍힌다. 모양을 좁히지 않으면 부르는 쪽이
+    보낸 것이 그대로 그 두 자리에 앉는다 — **버리지는 않고 우리가 새로 짓는다.**
+    """
+    response = client.post("/inspections", json={}, headers={"X-Request-Id": "a b\tc" * 40})
+
+    echoed = response.headers["X-Request-Id"]
+    assert echoed != "a b\tc" * 40
+    assert len(echoed) == 32 and echoed.isalnum(), echoed
+
+
+def test_a_break_leaves_a_log_line_that_names_the_request(
+    prepared: Session,  # noqa: F811
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """**실패는 DB 에 흔적을 남기지 않으므로 로그가 유일한 흔적이다** (감사 ⑬ NC-145).
+
+    터진 트랜잭션은 통째로 롤백되어 한 줄도 남지 않는다. 그러니 그 요청을 다시
+    찾아갈 길은 로그뿐인데, 거기에 **응답이 돌려준 것과 같은 축**이 없으면 부르는
+    쪽이 들고 온 아이디로 아무것도 찾지 못한다.
+
+    **안은 여전히 싣지 않는다** — 본문의 규칙이고, 로그는 그 규칙의 반대편이다.
+    """
+
+    def break_before_the_work() -> Iterator[Session]:
+        raise RuntimeError("연결이 끊겼다")
+        yield prepared  # pragma: no cover — 도달하지 않는다
+
+    app.dependency_overrides[session_scope] = break_before_the_work
+    try:
+        broken = TestClient(app, raise_server_exceptions=False)
+        with caplog.at_level(logging.ERROR, logger="app.api"):
+            response = broken.post(
+                "/inspections", json=_PAYLOAD, headers={"X-Request-Id": "trace-me-01"}
+            )
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 500
+    assert response.headers["X-Request-Id"] == "trace-me-01"
+    assert "trace-me-01" in caplog.text, caplog.text
+    assert "POST" in caplog.text and "/inspections" in caplog.text

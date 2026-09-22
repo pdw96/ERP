@@ -8,13 +8,16 @@
 엔드포인트는 빈 기준정보와 같다.
 """
 
-from collections.abc import Iterator
+import logging
+import re
+import uuid
+from collections.abc import Awaitable, Callable, Iterator
 from functools import lru_cache
 from typing import Annotated
 
 from fastapi import Depends, FastAPI, Request, status
 from fastapi.exceptions import RequestValidationError
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, Response
 from sqlalchemy.orm import Session, sessionmaker
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
@@ -56,6 +59,49 @@ app = FastAPI(
     summary="수입검사 한 건을 받아 판정하고, 합격이면 로트를 만든다.",
     version=API_VERSION,
 )
+
+# **요청 하나를 가리킬 것** (감사 ⑬ NC-145).
+#
+# 실패한 트랜잭션은 통째로 롤백되어 **DB 에 한 줄도 남지 않는다.** 그러므로 500
+# 이 났을 때 유일한 흔적이 로그인데, 그 로그에 요청을 가리키는 축이 없었다 —
+# uvicorn 의 접근 줄에는 시각도 식별자도 없고 트레이스백에도 없다. **동시에 두
+# 건만 들어와도 어느 트레이스백이 그 요청인지 가를 수 없다.**
+#
+# **본문에는 싣지 않는다.** 500 본문에 참조 번호를 넣는 것이 계약 변경인지는
+# `audit-contract` 가 판정할 자리이고, 그 판정 없이 넣으면 「안을 싣지 않는다」
+# (NC-78)를 이쪽에서 뒤집는 것이 된다. 헤더는 그 판정 밖이다.
+_REQUEST_ID_HEADER = "X-Request-Id"
+
+# **받은 값을 그대로 되돌려 싣지 않는다.** 이 값은 응답 헤더로 나가고 로그에
+# 찍히므로, 모양을 좁히지 않으면 **밖에서 온 글자가 우리 로그 줄의 모양을
+# 정한다.** HTTP 헤더는 latin-1 이라 그 밖의 글자는 응답을 만들다 터지기도 한다.
+# 좁히는 대신 **버리지 않는다** — 모양이 맞지 않으면 우리가 새로 짓는다.
+_USABLE_REQUEST_ID = re.compile(r"\A[A-Za-z0-9._-]{1,64}\Z")
+
+_log = logging.getLogger("app.api")
+
+# **시각이 없으면 축이 반쪽이다.** uvicorn 은 자기 로거만 설정하므로 이 로거는
+# 루트로 올라가는데, 루트에 핸들러가 없으면 파이썬의 마지막 수단이 **형식 없이**
+# 찍는다. 이미 누가 설정해 두었으면 건드리지 않는다.
+if not logging.getLogger().handlers:  # pragma: no cover - 부팅 한 번
+    logging.basicConfig(format="%(asctime)s %(levelname)s %(name)s %(message)s")
+
+
+@app.middleware("http")
+async def carry_an_id_that_names_this_request(
+    request: Request, call_next: Callable[[Request], Awaitable[Response]]
+) -> Response:
+    """**부르는 쪽이 「이 요청」이라고 말할 수 있게 한다.**
+
+    부르는 쪽이 보낸 것이 있으면 그대로 쓴다 — 다음 층이 자기 축을 이미 들고
+    있을 수 있고, 그때 우리가 새로 지으면 두 축이 갈린다.
+    """
+    brought = request.headers.get(_REQUEST_ID_HEADER, "")
+    request_id = brought if _USABLE_REQUEST_ID.match(brought) else uuid.uuid4().hex
+    request.state.request_id = request_id
+    response = await call_next(request)
+    response.headers[_REQUEST_ID_HEADER] = request_id
+    return response
 
 
 @lru_cache(maxsize=1)
@@ -100,10 +146,26 @@ def do_not_answer_a_break_with_plain_text(request: Request, exc: Exception) -> J
     실어 보내면 스키마를 그대로 알려 주는 자리가 된다. 어디에 무엇을 남길지는
     로그의 일이며 그 설비는 아직 없다.
     """
-    return _refusal(
+    # **여기서 한 줄 찍는다.** 트레이스백은 starlette 가 다시 던져 uvicorn 이
+    # 찍지만, 그 줄에는 이 요청을 가리키는 것이 없다. 안을 싣지 않는 것은 본문의
+    # 규칙이고 **로그는 그 규칙의 반대편**이다 — 밖으로 나가지 않는다.
+    request_id = getattr(request.state, "request_id", "-")
+    _log.exception(
+        "요청을 처리하지 못했다 request_id=%s %s %s",
+        request_id,
+        request.method,
+        request.url.path,
+    )
+    # **여기서 헤더를 다시 단다.** 500 은 위의 미들웨어를 지나오지 않는다 —
+    # `ServerErrorMiddleware` 가 사용자 미들웨어 **바깥**에 서므로 그 미들웨어의
+    # `call_next` 가 예외로 끊기고 응답에 헤더를 달 자리가 오지 않는다. 하필
+    # **축이 가장 필요한 응답**이 그렇다.
+    answer = _refusal(
         status.HTTP_500_INTERNAL_SERVER_ERROR,
         [{"loc": ["server"], "msg": "처리하지 못했다", "type": "internal_error"}],
     )
+    answer.headers[_REQUEST_ID_HEADER] = request_id
+    return answer
 
 
 @app.exception_handler(StarletteHTTPException)
