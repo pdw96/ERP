@@ -18,10 +18,17 @@ from typing import Annotated
 from fastapi import Depends, FastAPI, Request, status
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse, Response
+from fastapi.utils import is_body_allowed_for_status_code
 from sqlalchemy.orm import Session, sessionmaker
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
-from app.api.schemas import InspectionIn, InspectionOut, Refused
+from app.api.schemas import (
+    InspectionIn,
+    InspectionOut,
+    Refused,
+    Transport,
+    TransportRefused,
+)
 from app.db.base import create_db_engine, create_session_factory
 from app.services.incoming import (
     IncomingInspection,
@@ -43,9 +50,17 @@ from app.services.incoming import (
 # 넓어지면 뒷자리가 움직인다」고 적었는데 **그 규칙이 지켜지지 않았다** — 판이 선
 # 뒤에 받던 요청을 거절하게 된 변경이 셋 들어가는 동안(NC-102 · 103 · 115) `0.1`
 # 그대로였다. 적어 두기만 하고 강제하지 않는 규칙은 이 저장소가 금지한 것이라,
-# 규칙을 지금 사실로 고친다 — **소비자가 붙기 전까지 판은 `0.1` 로 고정하고,
-# 계약을 좁히는 것은 그 창이 열려 있는 동안 자유롭다. 첫 소비자가 붙는 날부터
-# 이동 규칙이 선다**(감사 ⑫ NC-136).
+# 규칙을 지금 사실로 고쳤다 — **판은 `0.1` 로 고정하고, 계약을 좁히는 것은 그
+# 창이 열려 있는 동안 자유롭다**(감사 ⑫ NC-136).
+#
+# **그 창이 닫히는 날을 이 저장소가 아는 사건으로 적는다** (감사 ⑯ NC-158).
+# 처음에는 「첫 소비자가 붙는 날부터」라고 적었는데 그것은 **아무것도 가리키지
+# 않는 기한**이었다 — 그날 이 저장소에서 바뀌는 것이 하나도 없어 지나가도 아무도
+# 모른다. 대장이 같은 것을 이미 판정했다(「기한은 담당의 회차를 가리켜야 한다 —
+# 가리키지 않는 기한은 지나가도 아무것도 드러나지 않는다」, W-1 이 세 회차를
+# 놓친 이유). 창이 닫히는 것은 **읽는 엔드포인트가 서는 조각**이다 — 그날은
+# 반드시 이 파일이 바뀌므로 조건이 스스로 드러나고, NC-80 이 `expiry_date` 를
+# 미룰 때 쓴 기한과 같은 형태다.
 #
 # 그날 서는 규칙은 위에 적었던 그것이다 — 깨지면 앞자리, 넓어지면 뒷자리.
 #
@@ -57,6 +72,20 @@ API_VERSION = "0.1"
 app = FastAPI(
     title="조기경보 ERP — 관문 1",
     summary="수입검사 한 건을 받아 판정하고, 합격이면 로트를 만든다.",
+    # **창이 열려 있다는 것을 밖이 읽는 자리에 적는다** (감사 ⑯ NC-158). 밖에서
+    # 보이는 것이 `info.version` 하나뿐이면 **소비자는 이 계약이 좁혀도 되는 창
+    # 안에 있다는 것을 알 길이 없다** — 알았다면 붙지 않았을 수도 있는 정보다.
+    # `description` 은 `/openapi.json` 에 실린다.
+    description=(
+        "읽는 엔드포인트가 서기 전까지 이 계약은 **좁혀질 수 있고 판은"
+        " 움직이지 않는다.** 그 조각이 서는 날부터 이동 규칙이 선다 —"
+        " 깨지면 앞자리, 호환되게 넓어지면 뒷자리."
+        "\n\n거절의 본문은 어느 경로에서나 `detail[]` 한 모양이다."
+        " `detail[].type` 이 기계가 읽는 자리이고 이름 공간이 셋이다 —"
+        " 업무 규칙의 `Refusal`, 라우트 밖의 `Transport`, 그리고 pydantic 이"
+        " 정한 이름(`missing` · `extra_forbidden` 등). 앞의 둘은 이 스펙이"
+        " 열거로 들고, **그 열거에 없는 값은 셋째 무리**다."
+    ),
     version=API_VERSION,
 )
 
@@ -71,6 +100,23 @@ app = FastAPI(
 # `audit-contract` 가 판정할 자리이고, 그 판정 없이 넣으면 「안을 싣지 않는다」
 # (NC-78)를 이쪽에서 뒤집는 것이 된다. 헤더는 그 판정 밖이다.
 _REQUEST_ID_HEADER = "X-Request-Id"
+
+# **스펙이 드는 헤더 규약.** 이름을 두 벌 두지 않으려고 위의 상수를 키로 쓴다.
+_REQUEST_ID_SPEC = {
+    _REQUEST_ID_HEADER: {
+        "description": (
+            "이 요청을 가리키는 값. 보내면 그대로 돌아오고, 없거나 모양이 맞지"
+            " 않으면 우리가 짓는다."
+        ),
+        "schema": {"type": "string"},
+    }
+}
+_ALLOW_SPEC = {
+    "Allow": {
+        "description": "이 경로가 받는 메서드.",
+        "schema": {"type": "string"},
+    }
+}
 
 # **받은 값을 그대로 되돌려 싣지 않는다.** 이 값은 응답 헤더로 나가고 로그에
 # 찍히므로, 모양을 좁히지 않으면 **밖에서 온 글자가 우리 로그 줄의 모양을
@@ -176,7 +222,7 @@ def do_not_answer_a_break_with_plain_text(request: Request, exc: Exception) -> J
     # **축이 가장 필요한 응답**이 그렇다.
     answer = _refusal(
         status.HTTP_500_INTERNAL_SERVER_ERROR,
-        [{"loc": ["server"], "msg": "처리하지 못했다", "type": "internal_error"}],
+        [{"loc": ["server"], "msg": "처리하지 못했다", "type": Transport.INTERNAL_ERROR}],
     )
     answer.headers[_REQUEST_ID_HEADER] = request_id
     return answer
@@ -185,7 +231,7 @@ def do_not_answer_a_break_with_plain_text(request: Request, exc: Exception) -> J
 @app.exception_handler(StarletteHTTPException)
 def answer_a_path_error_in_the_same_shape(
     request: Request, exc: StarletteHTTPException
-) -> JSONResponse:
+) -> Response:
     """**본문을 받는 라우트 밖에서도 거절의 모양은 같다.**
 
     404 와 405 는 프레임워크가 `{"detail": "Not Found"}` 처럼 **문자열**로
@@ -197,10 +243,23 @@ def answer_a_path_error_in_the_same_shape(
     두는데, 그 기본이 문자열을 싣는다. 그래서 **덮는다**(감사 ⑫ NC-135).
 
     경로·메서드 오류라 `loc` 은 본문이 아니라 요청선을 가리킨다.
+
+    **덮으면 기본 처리기가 하던 것을 전부 떠안는다.** 그것은 둘이었다 — 헤더를
+    넘기는 것과, **본문을 실으면 안 되는 상태 코드**를 본문 없이 돌려보내는 것.
+    앞의 것은 Codex 리뷰가(NC-148), 뒤의 것은 감사 ⑯ 이 냈다(NC-160 의 형제
+    NC-161). `304` · `204` 에 본문과 `Content-Length` 를 실으면 응답이 아니라
+    **프로토콜 오류**가 되어 부르는 쪽이 받는 것은 끊긴 연결이다.
+
+    **오늘 그 상태로 던지는 코드는 없다.** 그래도 되돌린 이유는 이것이 *새 가드를
+    세우는* 것이 아니라 *프레임워크가 갖고 있던 갈래를 되찾는* 것이기 때문이다 —
+    「닿지 않는 가드는 세우지 않는다」(NC-129)가 가르는 것은 **없던 것을 짓는**
+    자리이고, 여기는 **덮으면서 잃은** 자리다. NC-148 과 같은 부류다.
     """
+    if not is_body_allowed_for_status_code(exc.status_code):
+        return Response(status_code=exc.status_code, headers=exc.headers)
     return _refusal(
         exc.status_code,
-        [{"loc": ["path"], "msg": str(exc.detail), "type": "http_error"}],
+        [{"loc": ["path"], "msg": str(exc.detail), "type": Transport.HTTP_ERROR}],
         headers=exc.headers,
     )
 
@@ -258,7 +317,33 @@ def session_scope() -> Iterator[Session]:
     # **거절의 이름을 스펙이 든다.** 이것이 없으면 소비자가 `detail[].type` 의
     # 값을 문서화되지 않은 채 하드코딩하고, 이름이 늘어도 그것이 계약 변경으로
     # 보이지 않는다 — `result` 가 `enum` 을 싣는 이유와 같다(감사 ⑫ NC-134).
-    responses={status.HTTP_422_UNPROCESSABLE_CONTENT: {"model": Refused}},
+    #
+    # **실제로 나가는 응답을 다 적는다** (감사 ⑯ NC-160). 처음에는 201 과 422 만
+    # 적었는데, 그러면 **기계가 읽는 계약만 보는 소비자에게 이 API 는 둘만 내는
+    # API** 다 — 404 · 405 · 500 이 같은 `detail[]` 모양으로 나가는데도 그렇다.
+    # NC-134 가 스물셋에 대해 낸 논거가 그대로 남던 자리다.
+    #
+    # `X-Request-Id` 도 함께 적는다. NC-145 가 그것을 **「부르는 쪽이 『이 요청』
+    # 이라고 말할 수 있게」** 세웠는데, 말할 자리가 스펙에 없으면 그 규약은
+    # 우리끼리의 것이다. 받은 값을 존중하는 것까지가 그 규약이다.
+    responses={
+        # **성공도 그 헤더를 단다.** 미들웨어가 모든 응답에 달므로 201 만 빼면
+        # 선언이 다시 실제보다 좁아진다 — NC-160 이 낸 그 모양이다(찍어서 봤다).
+        status.HTTP_201_CREATED: {"headers": _REQUEST_ID_SPEC},
+        status.HTTP_404_NOT_FOUND: {"model": TransportRefused, "headers": _REQUEST_ID_SPEC},
+        status.HTTP_405_METHOD_NOT_ALLOWED: {
+            "model": TransportRefused,
+            "headers": _REQUEST_ID_SPEC | _ALLOW_SPEC,
+        },
+        status.HTTP_422_UNPROCESSABLE_CONTENT: {
+            "model": Refused,
+            "headers": _REQUEST_ID_SPEC,
+        },
+        status.HTTP_500_INTERNAL_SERVER_ERROR: {
+            "model": TransportRefused,
+            "headers": _REQUEST_ID_SPEC,
+        },
+    },
 )
 def post_inspection(
     payload: InspectionIn, session: Annotated[Session, Depends(session_scope)]

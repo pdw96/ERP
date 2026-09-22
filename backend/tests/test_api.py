@@ -14,12 +14,13 @@ from collections.abc import Iterator
 from datetime import date, timedelta
 
 import pytest
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.testclient import TestClient
 from sqlalchemy import text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
+from app.api import schemas
 from app.api.app import API_VERSION, app, session_scope
 from app.core import codes
 from app.db.constraints import blank_characters, is_present
@@ -327,6 +328,102 @@ def test_the_spec_lists_every_refusal_name(client: TestClient) -> None:
     assert spec["components"]["schemas"]["Refusal"]["enum"] == [
         name.value for name in incoming.Refusal
     ]
+
+
+def test_the_spec_declares_every_answer_that_actually_goes_out(client: TestClient) -> None:
+    """**기계가 읽는 계약만 보는 소비자가 이 API 의 전부를 본다** (감사 ⑯ NC-160).
+
+    처음에는 `201` 과 `422` 만 선언했는데, 그때도 404 · 405 · 500 이 같은
+    `detail[]` 모양으로 나가고 있었다 — **스펙만 읽으면 둘만 내는 API** 였다.
+    NC-134 가 스물셋에 대해 낸 논거가 그대로 남던 자리이고, `http_error` 를
+    `path_error` 로 고치는 커밋이 **아무것도 물리지 않고** 소비자의 분기를 깼다.
+
+    **실제로 찍어 견준다.** 선언 목록을 손으로 적으면 그 목록이 사본이 되어
+    갈리므로, 라우트 밖 거절을 **실제로 일으켜** 그 상태 코드가 선언에 있는지를
+    본다.
+
+    **이 검사가 못 보는 부류**(W-6 ③): 이 검사가 일으키지 못하는 응답(500 은
+    다른 검사가 일으킨다)과, 선언은 있는데 **모양이 다른** 경우 — 모양은 위의
+    검사들이 본다.
+    """
+    spec = client.get("/openapi.json").json()
+    declared = spec["paths"]["/inspections"]["post"]["responses"]
+
+    # 라우트 밖 거절을 실제로 일으킨다 — 404 와 405.
+    for response in (client.post("/inspection", json=_PAYLOAD), client.get("/inspections")):
+        assert str(response.status_code) in declared, (response.status_code, sorted(declared))
+
+    # 500 은 다른 검사가 일으키므로 선언만 본다. 세 상태가 같은 모양을 든다.
+    for code in ("404", "405", "500"):
+        schema = declared[code]["content"]["application/json"]["schema"]
+        assert schema["$ref"].endswith("/TransportRefused"), (code, schema)
+
+
+def test_the_spec_lists_every_transport_name(client: TestClient) -> None:
+    """**라우트 밖 거절의 이름도 스펙이 든다** (감사 ⑯ NC-160).
+
+    `Refusal` 과 같은 논거의 셋째 이름 공간이다 — `detail[].type` 은 NC-76 이
+    **「고치면 깨지는 약속」**으로 선언한 칸이고, 그 칸에 약속 밖의 값이 실리면
+    이름을 고치는 커밋이 파괴적 변경이 된다.
+
+    **이 검사가 못 보는 부류**(W-6 ③): **이름의 변동 자체.** 양변이 같은 원천에서
+    나오므로(스펙 쪽 값은 pydantic 이 이 열거에서 만든다) 이름을 더하거나 고치면
+    **두 변이 함께 움직여 초록으로 남는다** — 어긋내 확인했다(`ghost` 를 더해도,
+    `http_error` 를 `path_error` 로 고쳐도 통과한다). 이 검사가 무는 것은
+    **배선이 끊길 때**다: `type` 이 `str` 로 돌아가거나, 열거가 인라인되어
+    `$ref` 가 사라지거나, `responses=` 에서 모델이 빠지면 빨개진다.
+
+    **그것으로 충분한 이유**는 NC-160 이 요구한 것이 「이름이 기계가 읽는 계약에
+    있을 것」이기 때문이다 — 이제 이름을 고치면 `/openapi.json` 이 **함께 바뀌어
+    diff 에 보인다.** 「이름이 바뀌면 검사가 문다」를 원하면 필요한 것은 **찍어 둔
+    스펙과의 대조**이고, 그것은 이 저장소에 없다(감사 ⑯ OB-1).
+    """
+    spec = client.get("/openapi.json").json()
+
+    assert spec["components"]["schemas"]["Transport"]["enum"] == [
+        name.value for name in schemas.Transport
+    ]
+
+
+def test_the_spec_says_which_header_names_the_request(client: TestClient) -> None:
+    """**`X-Request-Id` 의 규약이 밖이 읽는 자리에 있다** (감사 ⑯ NC-160).
+
+    NC-145 가 그것을 「부르는 쪽이 『이 요청』이라고 말할 수 있게」 세웠는데,
+    말할 자리가 스펙에 없으면 그 규약은 **우리끼리의 것**이다. 받은 값을
+    존중하는 것까지가 그 규약이라 그것도 설명에 적힌다.
+    """
+    spec = client.get("/openapi.json").json()
+    declared = spec["paths"]["/inspections"]["post"]["responses"]
+
+    for code in ("201", "404", "405", "422", "500"):
+        assert "X-Request-Id" in declared[code]["headers"], (code, declared[code])
+
+    assert "Allow" in declared["405"]["headers"], declared["405"]
+
+
+def test_a_status_that_may_not_carry_a_body_does_not_get_one(client: TestClient) -> None:
+    """**덮개가 기본 처리기의 갈래를 떠안는다** (감사 ⑯ NC-161).
+
+    `StarletteHTTPException` 의 기본 처리기는 둘을 한다 — 헤더를 넘기는 것과,
+    **본문을 실으면 안 되는 상태 코드**를 본문 없이 돌려보내는 것. 덮으면서 앞의
+    것을 잃은 자리가 NC-148 이고, 뒤의 것이 이것이다. `304` 에 본문과
+    `Content-Length` 를 실으면 응답이 아니라 **프로토콜 오류**가 된다.
+
+    앱에 그 상태로 던지는 라우트가 없으므로 **처리기를 직접 부른다** — 없는
+    라우트를 세우면 그것이 계약면이 되어 버린다.
+    """
+    from starlette.exceptions import HTTPException as StarletteHTTPException
+
+    from app.api import app as api
+
+    answer = api.answer_a_path_error_in_the_same_shape(
+        Request({"type": "http", "method": "GET", "path": "/", "headers": []}),
+        StarletteHTTPException(status_code=304, headers={"ETag": '"x"'}),
+    )
+
+    assert answer.body == b"", answer.body
+    assert answer.headers["ETag"] == '"x"'
+    assert "content-length" not in {name.lower() for name in answer.headers}
 
 
 def test_every_answer_carries_an_id_that_names_the_request(client: TestClient) -> None:
