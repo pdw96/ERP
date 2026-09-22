@@ -86,6 +86,18 @@
 비면 그대로 통과하므로, **훑을 것이 있었다**는 것까지 같은 검사가 센다. 이 저장소에
 이미 세 자리에 있던 관용구이고 네 자리에 없었다.
 
+## 감사 ⑫ 의 고침 (`f520d26`)
+
+| NC | 무엇을 어긋냈나 | 빨개진 검사 |
+|---|---|---|
+| 135 | `app.py` 의 `@app.exception_handler(StarletteHTTPException)` 를 `ZeroDivisionError` 로 좁혔다 | `test_a_path_error_answers_in_the_same_shape` — 404·405 의 `detail` 이 다시 문자열이 됐다 |
+| 134 | 라우트의 `responses={422: {"model": Refused}}` 를 뺐다 | `test_the_spec_lists_every_refusal_name` |
+| 134 | `RefusalDetail.type` 을 `Refusal` 에서 `str` 로 되돌렸다 | 같은 검사 — 스펙에서 `Refusal` 컴포넌트가 통째로 사라진다 |
+
+**둘째와 셋째가 같은 검사를 다른 이유로 물게 한다.** 하나는 **스펙이 그 모양을
+가리키지 않는 것**이고 하나는 **가리키는데 이름 목록이 비는 것**이다 — 한 검사가
+두 겹을 다 세는지 확인했다.
+
 ## 아직 도구가 없다
 
 여기 적힌 것은 **손으로 돌린 것**이다. 돌연변이 러너를 개발 의존성으로 들이는
