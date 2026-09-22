@@ -128,3 +128,10 @@
 | 122 | `fk_inspection_measurement_unit` 을 통째로 뺐다 | `test_a_standard_cannot_change_its_unit_while_a_measurement_cites_it` · 대조 테스트 |
 | 122 | 리비전의 데이터 단계를 `SELECT 1` 로 | `test_the_data_step_moves_the_unit_from_the_standard` 외 하나 |
 | 122 | 되돌림 가드의 값 대조를 `AND FALSE` 로(외래키에 기대게) | `test_downgrade_says_which_measurements_would_lose_their_unit` |
+
+## NC-123 의 고침 — `fcb7570` 뒤
+
+| NC | 무엇을 어긋냈나 | 빨개진 검사 |
+|---|---|---|
+| 123 | `ck_inspection_standard_measured_has_a_unit` 의 식을 `TRUE` 로 | `test_a_standard_that_measures_must_say_in_what_unit` · 대조 테스트 |
+| 123 | 시드의 `입도` 에서 단위를 지웠다 | **CHECK 가 심는 단계에서 거부해** 시드를 쓰는 검사가 전부 빨갛다 — 시드 쪽 검사는 그 위의 덧대기이고, 무는 것은 제약이다 |

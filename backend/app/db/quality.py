@@ -62,6 +62,22 @@ class ProcessInspectionStandard(Base):
             name="uq_inspection_standard",
             postgresql_nulls_not_distinct=True,
         ),
+        # **재는 값에는 단위가 있다.** 규격이 하나라도 있으면 그 기준은 재는
+        # 것이고, 재는데 단위가 없으면 그 숫자는 뜻을 갖지 못한다.
+        #
+        # **이것이 없으면 그 아래의 잠금이 통째로 새어 나간다** — 측정 줄은
+        # `applied_unit` 을 이 칸에서 가져오고, 복합 외래키는 한 칸이라도 `NULL`
+        # 이면 **검사하지 않는다.** 그래서 규격 있는 기준에 단위를 비워 두면
+        # 측정 줄의 단위도 비고, 기준의 단위를 나중에 바꾸는 것을 아무것도 막지
+        # 못한다(CodeRabbit 리뷰 NC-123).
+        #
+        # 시드가 이미 그렇게 서 있었다 — 규격 있는 기준은 전부 단위를 갖고
+        # 규격 없는 것만 비어 있다. **그것이 우연이 아니라 규칙임을 여기서
+        # 적는다.**
+        CheckConstraint(
+            "(upper_spec_limit IS NULL AND lower_spec_limit IS NULL) OR unit IS NOT NULL",
+            name="ck_inspection_standard_measured_has_a_unit",
+        ),
         # **행을 좁히지 않는다** — 위의 셋이 이미 유일하므로 넷째를 더해도 같은
         # 줄이다. **측정 줄이 단위를 가리킬 상대**를 만드는 것이 목적이고,
         # 그러면 가리키는 줄이 있는 동안 이 칸을 바꿀 수 없게 된다

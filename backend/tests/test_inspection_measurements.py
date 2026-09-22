@@ -322,3 +322,46 @@ def test_an_inspection_cannot_claim_another_material_group(prepared: Session) ->
     )
     with pytest.raises(IntegrityError):
         prepared.flush()
+
+
+def test_a_standard_that_measures_must_say_in_what_unit(prepared: Session) -> None:
+    """**재는 값에는 단위가 있다** (CodeRabbit 리뷰 NC-123).
+
+    이것이 없으면 그 아래의 잠금이 **통째로 새어 나간다** — 측정 줄은
+    `applied_unit` 을 이 칸에서 가져오고, 복합 외래키는 한 칸이라도 `NULL` 이면
+    **검사하지 않는다.** 규격 있는 기준에 단위를 비워 두면 측정 줄의 단위도
+    비고, 기준의 단위를 나중에 바꾸는 것을 아무것도 막지 못한다.
+
+    시드는 이미 그렇게 서 있었다 — **우연이 아니라 규칙임을 여기서 잰다.**
+    """
+    # 재는 기준(규격이 있다)인데 단위를 비운다 — 아직 쓰이지 않은 무리에 세운다.
+    prepared.add(_standard("이물", material_group=OTHER_GROUP, unit=None))
+    with pytest.raises(IntegrityError, match="ck_inspection_standard_measured_has_a_unit"):
+        prepared.flush()
+
+
+def test_a_standard_that_only_counts_needs_no_unit(prepared: Session) -> None:
+    """**가드가 정상 경로를 막지 않는다.**
+
+    세는 항목(`이물` · `포장` · `성적서`)은 재지 않으므로 단위가 없다. 여기까지
+    막으면 기준정보가 설 수 없다 — 「제약이 사실을 막으면 안 된다」.
+    """
+    prepared.add(
+        _standard(
+            "이물",
+            process_code="배합",
+            material_group=None,
+            upper_spec_limit=None,
+            lower_spec_limit=None,
+            center_line=None,
+            unit=None,
+        )
+    )
+    prepared.flush()
+
+    row = (
+        prepared.query(ProcessInspectionStandard)
+        .filter_by(item_code="이물", process_code="배합")
+        .one()
+    )
+    assert row.unit is None

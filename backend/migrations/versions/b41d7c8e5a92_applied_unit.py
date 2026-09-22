@@ -73,6 +73,15 @@ def upgrade() -> None:
           AND s.material_group = m.material_group
         """
     )
+    # **잠금이 새어 나가는 자리를 먼저 막는다.** 복합 외래키는 한 칸이라도
+    # `NULL` 이면 검사하지 않으므로, 규격 있는 기준에 단위가 비어 있으면 측정
+    # 줄의 단위도 비고 아래의 잠금이 그 줄에서 통째로 건너뛰어진다. 시드는 이미
+    # 「재는 것에는 단위가 있다」로 서 있었고, 여기서 그것을 규칙으로 적는다.
+    op.create_check_constraint(
+        "ck_inspection_standard_measured_has_a_unit",
+        "process_inspection_standards",
+        "(upper_spec_limit IS NULL AND lower_spec_limit IS NULL) OR unit IS NOT NULL",
+    )
     op.create_unique_constraint(
         "uq_inspection_standard_unit",
         "process_inspection_standards",
@@ -120,5 +129,10 @@ def downgrade() -> None:
     )
     op.drop_constraint(
         "uq_inspection_standard_unit", "process_inspection_standards", type_="unique"
+    )
+    op.drop_constraint(
+        "ck_inspection_standard_measured_has_a_unit",
+        "process_inspection_standards",
+        type_="check",
     )
     op.drop_column("inspection_measurements", "applied_unit")

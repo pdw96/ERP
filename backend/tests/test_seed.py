@@ -487,3 +487,26 @@ def test_no_process_standard_carries_a_material_group(blank: Engine) -> None:
         )
         == 0
     )
+
+
+def test_every_measured_standard_says_in_what_unit(blank: Engine) -> None:
+    """**재는 값에는 단위가 있다** (CodeRabbit 리뷰 NC-123).
+
+    시드는 이미 그렇게 서 있었다 — 규격 있는 기준은 전부 단위를 갖고, 규격 없는
+    것(세는 항목)만 비어 있다. **그것이 우연이 아니라 규칙임을** CHECK 가 걸고
+    이 검사가 시드 쪽에서 잰다.
+
+    이것이 새면 판정 시점의 단위를 잠그는 외래키가 **그 줄에서 통째로
+    건너뛰어진다** — 복합 외래키는 한 칸이라도 `NULL` 이면 검사하지 않는다.
+    """
+    seed_module.seed(blank)
+
+    assert (
+        _count(
+            blank,
+            "process_inspection_standards",
+            "(upper_spec_limit IS NOT NULL OR lower_spec_limit IS NOT NULL)"
+            " AND unit IS NULL",
+        )
+        == 0
+    )

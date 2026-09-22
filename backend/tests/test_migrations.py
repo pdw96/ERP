@@ -1259,8 +1259,8 @@ INSERT INTO common_codes (group_code, code, name) VALUES ('INSP_ITEM', '입도',
 
 INSERT INTO process_inspection_standards (process_code, process_group, item_code, item_group,
                                           material_group, material_group_group,
-                                          upper_spec_limit, lower_spec_limit)
-VALUES ('수입', 'PROCESS', '입도', 'INSP_ITEM', '분체', 'MATERIAL_GROUP', 50.0, 10.0);
+                                          upper_spec_limit, lower_spec_limit, unit)
+VALUES ('수입', 'PROCESS', '입도', 'INSP_ITEM', '분체', 'MATERIAL_GROUP', 50.0, 10.0, 'µm');
 
 INSERT INTO inspection_measurements (inspection_id, item_code, process_code, material_group,
                                      measured_value, applied_upper_spec, applied_lower_spec)
