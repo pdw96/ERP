@@ -16,8 +16,9 @@ from fastapi import Depends, FastAPI, Request, status
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session, sessionmaker
+from starlette.exceptions import HTTPException as StarletteHTTPException
 
-from app.api.schemas import InspectionIn, InspectionOut
+from app.api.schemas import InspectionIn, InspectionOut, Refused
 from app.db.base import create_db_engine, create_session_factory
 from app.services.incoming import (
     IncomingInspection,
@@ -32,8 +33,18 @@ from app.services.incoming import (
 # 못한다** — 소비자가 붙은 뒤에는 「조용히 깬다」와 「경로를 갈아 한 번에 옮긴다」
 # 둘만 남고, **병행 지원이라는 셋째 길이 지금 열리고 나중에는 열리지 않는다.**
 #
-# **자리를 둘만 쓴다.** 배포 번호가 아니라 계약의 판이라, 계약이 깨지면 앞자리가
-# 호환되게 넓어지면 뒷자리가 움직인다. 셋째 자리는 움직일 일이 없다.
+# **자리를 둘만 쓴다.** 배포 번호가 아니라 계약의 판이라 셋째 자리는 움직일 일이
+# 없다.
+#
+# **그리고 지금은 움직이지 않는다.** 처음에는 「계약이 깨지면 앞자리가, 호환되게
+# 넓어지면 뒷자리가 움직인다」고 적었는데 **그 규칙이 지켜지지 않았다** — 판이 선
+# 뒤에 받던 요청을 거절하게 된 변경이 셋 들어가는 동안(NC-102 · 103 · 115) `0.1`
+# 그대로였다. 적어 두기만 하고 강제하지 않는 규칙은 이 저장소가 금지한 것이라,
+# 규칙을 지금 사실로 고친다 — **소비자가 붙기 전까지 판은 `0.1` 로 고정하고,
+# 계약을 좁히는 것은 그 창이 열려 있는 동안 자유롭다. 첫 소비자가 붙는 날부터
+# 이동 규칙이 선다**(감사 ⑫ NC-136).
+#
+# 그날 서는 규칙은 위에 적었던 그것이다 — 깨지면 앞자리, 넓어지면 뒷자리.
 #
 # **그리고 프레임워크의 기본값과 달라야 한다.** 기본값이 하필 `0.1.0` 이라, 그
 # 값을 쓰면 「적었다」와 「안 적었다」가 밖에서 구별되지 않는다 — 검사가 통과하면서
@@ -95,6 +106,28 @@ def do_not_answer_a_break_with_plain_text(request: Request, exc: Exception) -> J
     )
 
 
+@app.exception_handler(StarletteHTTPException)
+def answer_a_path_error_in_the_same_shape(
+    request: Request, exc: StarletteHTTPException
+) -> JSONResponse:
+    """**본문을 받는 라우트 밖에서도 거절의 모양은 같다.**
+
+    404 와 405 는 프레임워크가 `{"detail": "Not Found"}` 처럼 **문자열**로
+    돌려준다. `for error in body["detail"]: error["type"]` 을 쓰는 클라이언트는
+    글자를 돌다 `TypeError` 로 죽으므로, **오류를 처리하는 코드가 오류에서
+    죽는다** — 그리고 부르는 쪽은 그것을 자기 파서가 깨진 것으로 본다.
+
+    **처리기가 없어서가 아니다.** FastAPI 는 이 예외의 처리기를 기본으로 등록해
+    두는데, 그 기본이 문자열을 싣는다. 그래서 **덮는다**(감사 ⑫ NC-135).
+
+    경로·메서드 오류라 `loc` 은 본문이 아니라 요청선을 가리킨다.
+    """
+    return _refusal(
+        exc.status_code,
+        [{"loc": ["path"], "msg": str(exc.detail), "type": "http_error"}],
+    )
+
+
 @app.exception_handler(RequestValidationError)
 def refuse_without_echoing_the_body(
     request: Request, exc: RequestValidationError
@@ -141,7 +174,15 @@ def session_scope() -> Iterator[Session]:
         session.close()
 
 
-@app.post("/inspections", response_model=InspectionOut, status_code=status.HTTP_201_CREATED)
+@app.post(
+    "/inspections",
+    response_model=InspectionOut,
+    status_code=status.HTTP_201_CREATED,
+    # **거절의 이름을 스펙이 든다.** 이것이 없으면 소비자가 `detail[].type` 의
+    # 값을 문서화되지 않은 채 하드코딩하고, 이름이 늘어도 그것이 계약 변경으로
+    # 보이지 않는다 — `result` 가 `enum` 을 싣는 이유와 같다(감사 ⑫ NC-134).
+    responses={status.HTTP_422_UNPROCESSABLE_CONTENT: {"model": Refused}},
+)
 def post_inspection(
     payload: InspectionIn, session: Annotated[Session, Depends(session_scope)]
 ) -> InspectionOut | JSONResponse:

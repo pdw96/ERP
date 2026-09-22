@@ -13,6 +13,7 @@ from pydantic import AfterValidator, BaseModel, ConfigDict, Field
 
 from app.core import codes
 from app.db.constraints import blank_characters
+from app.services.incoming import Refusal
 
 # **데이터베이스가 깎는 글자와 같은 목록이다.** 두 벌로 적지 않는다 —
 # `app/db/constraints.py` 가 SQL 쪽 형태를 들고, 여기서는 그것을 푼 것을 쓴다.
@@ -79,6 +80,20 @@ class InspectionOut(BaseModel):
     다시 물어보게 하면 한 사실을 두 번 읽게 된다.
     """
 
+    # **자동 증가 키를 돌려주는 이유를 적는다.** 「부르는 쪽 없는 칸을 미리 두지
+    # 않는다」가 NC-80 에서 `expiry_date` 를 거절한 규칙이고, 이 셋은 그 규칙을
+    # 지나는 값이어야 한다(감사 ⑫ NC-137).
+    #
+    # - `inspection_id` — 검사에는 다른 손잡이가 없다. 클레임과 반품이 **뒤에 그
+    #   건을 가리킬 유일한 값**이고, 불합격에도 남는다(로트는 서지 않는다)
+    # - `lot_id` — 라벨에 찍히는 것은 `lot_number` 이지만, 그 번호는 **같은 품목의
+    #   이월 로트와 겹칠 수 있다**(유일 제약이 없다). 원장 줄이 가리키는 것도
+    #   `lot_id` 이므로, 방금 만든 로트를 **모호하지 않게** 가리키는 값은 이것뿐이다
+    # - `ledger_entry_id` — 원장 줄에는 업무 키가 아예 없다. 「로트는 생겼는데
+    #   원장 줄이 없는」 상태가 없다는 것을 부르는 쪽이 확인할 자리다
+    #
+    # **읽는 엔드포인트가 서는 날 이 셋이 그 경로의 열쇠가 된다.** 그때까지는
+    # 위가 그 쓰임이며, 빼는 것은 필드 삭제라 파괴적 변경이다.
     inspection_id: int
     # **값 집합을 스펙에 적는다.** 자유 문자열로 두면 소비자가 「합격」을
     # **문서화되지 않은 채** 하드코딩해야 하고, 관문 2 가 값을 늘려도 그것이
@@ -89,3 +104,42 @@ class InspectionOut(BaseModel):
     lot_id: int | None
     lot_number: str | None
     ledger_entry_id: int | None
+
+
+# ── 거절의 본문 — **스펙이 그 이름을 든다** ────────────────────────────────
+
+
+class RefusalDetail(BaseModel):
+    """업무 규칙이 거절할 때 `detail[]` 에 실리는 줄.
+
+    `type` 이 **기계가 읽는 자리**다. 이름 목록은 `Refusal` 한 벌이고 여기 다시
+    적지 않는다 — 두 벌이면 갈린다.
+    """
+
+    loc: list[str]
+    msg: str
+    type: Refusal
+
+
+class ValidationDetail(BaseModel):
+    """pydantic 이 거절할 때 `detail[]` 에 실리는 줄.
+
+    **같은 칸에 두 벌의 이름 공간이 산다.** `missing` · `extra_forbidden` 은
+    pydantic 이 정한 이름이고 위의 `Refusal` 은 우리가 정한 이름인데, 둘 다
+    `type` 으로 나간다. 그래서 `type` 을 하나의 닫힌 열거로 적으면 **거짓**이
+    된다 — 두 모양을 함께 적어 부르는 쪽이 어느 쪽인지 가릴 수 있게 한다.
+    """
+
+    loc: list[str | int]
+    msg: str
+    type: str
+
+
+class Refused(BaseModel):
+    """422 의 본문.
+
+    **두 경로가 한 모양이다**(NC-75). 다른 것은 `type` 의 이름 공간뿐이고,
+    그것을 위의 두 모델이 스펙에 적는다(감사 ⑫ NC-134).
+    """
+
+    detail: list[RefusalDetail | ValidationDetail]

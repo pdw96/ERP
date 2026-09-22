@@ -33,10 +33,15 @@
 `POST /inspections` 하나이고 **루프백에만 연다.** 부르는 것은 사람의 브라우저가
 아니라 다음 층이고, 화면은 그 뒤다.
 
-**다만 공개면은 그것만이 아니다.** FastAPI 가 `/docs` · `/redoc` · `/openapi.json`
-을 함께 세우고 우리는 그것을 끄지 않는다 — `/openapi.json` 이 **기계가 읽는
-계약**이라 다음 층이 거기서 코드를 만들 자리다. 문서에 적지 않으면 아무도 계약으로
-관리하지 않으므로 여기 적는다.
+**다만 공개면은 그것만이 아니다.** FastAPI 가 `/docs` · `/redoc` ·
+`/openapi.json` 과 **`/docs/oauth2-redirect`** 를 함께 세우고 우리는 그것을 끄지
+않는다 — `/openapi.json` 이 **기계가 읽는 계약**이라 다음 층이 거기서 코드를 만들
+자리다. 문서에 적지 않으면 아무도 계약으로 관리하지 않으므로 여기 적는다.
+
+마지막 것은 `docs_url` 이 살아 있으면 따라 서는 `swagger_ui_oauth2_redirect_url`
+의 기본값이고 **실제로 200 을 돌려준다.** 셋만 적어 두었던 것을 감사 ⑫ 가 냈다
+(NC-84) — **눈으로 센 목록이라 프레임워크가 얹은 것을 빠뜨렸고**, 라우트를 찍어
+확인했다.
 
 ## 돌리는 법
 
@@ -51,7 +56,7 @@ docker compose exec -T postgres psql -U erp -d erp -c 'CREATE DATABASE erp_test 
 cd backend
 python3 -m venv .venv && .venv/bin/pip install -r requirements-dev.txt
 
-# 검사 넷 — CI 가 도는 것과 같다
+# 로컬에서 도는 검사 — 무엇이 도는지는 `.github/workflows/ci.yml` 이 든다
 .venv/bin/ruff check .
 .venv/bin/ruff format --check .
 .venv/bin/mypy app migrations
@@ -95,5 +100,5 @@ backend/
   app/seed_data/*.sql    기준정보 — 사람이 읽고 고치는 표
   migrations/            Alembic — 리비전은 `versions/` 가 센다
   tests/                 실제 PostgreSQL 에 붙는다
-compose.yaml             postgres + 일회성 migrate 잡
+compose.yaml             postgres + 일회성 migrate 잡 + 상주 api
 ```

@@ -96,7 +96,7 @@ def test_something_we_cannot_judge_comes_back_named(client: TestClient) -> None:
 
     assert response.status_code == 422
     refusal = response.json()["detail"][0]
-    assert refusal["type"] == incoming.UNKNOWN_ITEM
+    assert refusal["type"] == incoming.Refusal.UNKNOWN_ITEM
     assert "없는-품목" in refusal["msg"]
 
 
@@ -135,7 +135,8 @@ def test_a_delivery_that_has_not_arrived_is_refused(client: TestClient) -> None:
     response = client.post("/inspections", json=_PAYLOAD | {"received_date": tomorrow})
 
     assert response.status_code == 422, response.text
-    assert response.json()["detail"][0]["type"] == incoming.RECEIVED_DATE_IS_IN_THE_FUTURE
+    refused = response.json()["detail"][0]
+    assert refused["type"] == incoming.Refusal.RECEIVED_DATE_IS_IN_THE_FUTURE
 
 
 def test_a_field_we_do_not_know_is_refused(client: TestClient) -> None:
@@ -289,3 +290,39 @@ def test_nothing_lands_when_the_ledger_line_cannot_stand(prepared: Session) -> N
 
     assert prepared.query(Lot).count() == 0
     assert prepared.query(StockLedgerEntry).count() == 0
+
+
+def test_a_path_error_answers_in_the_same_shape(client: TestClient) -> None:
+    """**거절의 본문은 라우트 밖에서도 한 모양이다** (감사 ⑫ NC-135).
+
+    404 와 405 는 프레임워크가 `{"detail": "Not Found"}` 처럼 **문자열**로
+    돌려준다. `for error in body["detail"]: error["type"]` 을 쓰는 클라이언트는
+    글자를 돌다 죽으므로 **오류를 처리하는 코드가 오류에서 죽고**, 부르는 쪽은
+    그것을 자기 파서가 깨진 것으로 본다.
+
+    붙는 첫날에 가장 흔히 나는 응답이 바로 이 둘이다.
+    """
+    for response in (client.post("/inspection", json=_PAYLOAD), client.get("/inspections")):
+        assert response.status_code in (404, 405), response.text
+        detail = response.json()["detail"]
+        assert isinstance(detail, list), detail
+        assert detail[0].keys() == {"loc", "msg", "type"}, detail
+
+
+def test_the_spec_lists_every_refusal_name(client: TestClient) -> None:
+    """**거절의 이름을 `/openapi.json` 만 읽고 셀 수 있다** (감사 ⑫ NC-134).
+
+    이름이 코드에만 있으면 소비자는 그것을 **문서화되지 않은 채 하드코딩**하고,
+    이름이 늘어도 그것이 계약 변경으로 보이지 않는다 — `result` 가 `enum` 을
+    싣는 이유와 같다.
+
+    **두 벌을 견준다.** 스펙의 목록과 코드의 목록이 갈리는 순간 여기서 걸린다.
+    """
+    spec = client.get("/openapi.json").json()
+
+    refused = spec["paths"]["/inspections"]["post"]["responses"]["422"]
+    assert refused["content"]["application/json"]["schema"]["$ref"].endswith("/Refused")
+
+    assert spec["components"]["schemas"]["Refusal"]["enum"] == [
+        name.value for name in incoming.Refusal
+    ]

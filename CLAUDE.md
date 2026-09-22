@@ -16,7 +16,12 @@
 - **프론트엔드 없음.** 2단계도 **화면이 없는 단계다** — 쓰기 엔드포인트까지만
   선다. 화면을 먼저 만들면 스키마가 화면을 따라가게 된다
 
-### 검사 넷 — CI 가 도는 것과 같다
+### 로컬에서 도는 검사 — 목록은 `ci.yml` 이 든다
+
+**수를 적지 않는다.** 한때 「검사 넷」이라 적었는데 NC-133 의 고침이 CI 에 둘을
+더하면서 그 말이 거짓이 됐다(감사 ⑫ NC-138). 무는 것은 `backend` 잡 하나이고
+**그 잡이 필수 체크**이므로, 무엇이 도는지는 `.github/workflows/ci.yml` 한 자리가
+든다 — 아래는 그중 로컬에서 바로 돌릴 수 있는 것들이다.
 
 ```sh
 cd backend
@@ -25,6 +30,9 @@ cd backend
 .venv/bin/mypy app migrations
 ERP_TEST_DATABASE_URL="postgresql+psycopg://erp:erp@127.0.0.1:5432/erp_test" .venv/bin/pytest
 ```
+
+`shellcheck ./docker-entrypoint.sh` 와 `docker build .` 도 CI 가 돈다 — 셸과
+도커가 있으면 로컬에서도 같은 명령이다.
 
 **테스트는 실제 PostgreSQL 에 붙는다.** SQLite 로 대신하면 이 설계가 제약에
 기대는 자리(복합 외래키 · CHECK · 부분 인덱스)를 검증할 수 없다. DB 가 없으면
