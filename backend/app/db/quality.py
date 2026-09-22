@@ -12,7 +12,7 @@ from sqlalchemy.orm import Mapped, mapped_column
 
 from app.core import codes
 from app.db.base import Base
-from app.db.constraints import code_reference, is_finite
+from app.db.constraints import code_reference, is_finite, is_present
 
 
 def _quoted(values: tuple[str, ...]) -> str:
@@ -60,6 +60,49 @@ class ProcessInspectionStandard(Base):
             "item_code",
             "material_group",
             name="uq_inspection_standard",
+            postgresql_nulls_not_distinct=True,
+        ),
+        # **재는 값에는 단위가 있다.** 규격이 하나라도 있으면 그 기준은 재는
+        # 것이고, 재는데 단위가 없으면 그 숫자는 뜻을 갖지 못한다.
+        #
+        # **이것이 없으면 그 아래의 잠금이 통째로 새어 나간다** — 측정 줄은
+        # `applied_unit` 을 이 칸에서 가져오고, 복합 외래키는 한 칸이라도 `NULL`
+        # 이면 **검사하지 않는다.** 그래서 규격 있는 기준에 단위를 비워 두면
+        # 측정 줄의 단위도 비고, 기준의 단위를 나중에 바꾸는 것을 아무것도 막지
+        # 못한다(CodeRabbit 리뷰 NC-123).
+        #
+        # 시드가 이미 그렇게 서 있었다 — 규격 있는 기준은 전부 단위를 갖고
+        # 규격 없는 것만 비어 있다. **그것이 우연이 아니라 규칙임을 여기서
+        # 적는다.**
+        CheckConstraint(
+            "(upper_spec_limit IS NULL AND lower_spec_limit IS NULL) OR unit IS NOT NULL",
+            name="ck_inspection_standard_measured_has_a_unit",
+        ),
+        # **「있다」로는 모자라 「뜻이 있다」를 묻는다** (Codex 리뷰 NC-127).
+        # `IS NOT NULL` 만 보면 빈 문자열과 탭·전각 공백이 지나가고, 그러면 위의
+        # CHECK 도 아래의 유일키도 전부 통과하는데 **그 단위에 아무 뜻이 없다.**
+        # 이 저장소에 이미 `is_present()` 가 있었고 그것을 쓰지 않은 것이 빠뜨린
+        # 자리다.
+        #
+        # **재는 기준만 묻지 않는다.** 세는 기준의 단위가 비어 있는 것은 「잴 것이
+        # 없다」는 뜻이고 그 자리는 `NULL` 이다 — 거기에 빈 문자열이 앉으면 「빈
+        # 기준정보」가 되고, 그 줄을 가리키는 측정 줄이 **빈 단위를 들고 설 수
+        # 있다**(아래 외래키가 같은 빈 값을 찾아 준다). 그래서 이 표의 모든 줄에
+        # 건다 — 그리고 **측정 줄 쪽에 같은 명제를 또 적지 않는 근거**가 그것이다.
+        CheckConstraint(
+            f"unit IS NULL OR {is_present('unit')}",
+            name="ck_inspection_standard_unit_means_something",
+        ),
+        # **행을 좁히지 않는다** — 위의 셋이 이미 유일하므로 넷째를 더해도 같은
+        # 줄이다. **측정 줄이 단위를 가리킬 상대**를 만드는 것이 목적이고,
+        # 그러면 가리키는 줄이 있는 동안 이 칸을 바꿀 수 없게 된다
+        # (`inspection_measurements` 의 `fk_inspection_measurement_unit`).
+        UniqueConstraint(
+            "process_code",
+            "item_code",
+            "material_group",
+            "unit",
+            name="uq_inspection_standard_unit",
             postgresql_nulls_not_distinct=True,
         ),
         # **양방향이다.** 수입인데 자재군이 없으면 기준 여덟이 원자재 열다섯

@@ -122,6 +122,32 @@ def test_the_groups_in_the_database_match_the_ones_the_program_calls(
     assert planted == set(codes.GROUP_CODES)
 
 
+def test_the_transaction_type_the_program_names_is_in_the_seed(blank: Engine) -> None:
+    """**프로그램이 이름으로 부르는 수불유형이 시드에 있어야 한다.**
+
+    수불유형 열둘의 값은 시드에만 있고 `codes.py` 에는 **부르는 쪽이 있는 하나만**
+    적혀 있다(`TXN_PURCHASE_RECEIPT`). 한 벌 반이라 갈릴 수 있는 자리이므로 —
+    시드에서 그 줄의 이름을 바꾸면 원장의 CHECK 가 아무 줄도 받지 않게 되고,
+    그것은 **아무도 터지지 않는 고장**이다 — 여기서 둘을 견준다.
+
+    **속성 줄까지 본다.** 코드만 있고 속성이 없으면 원장이 가리킬 수 없다.
+    """
+    seed_module.seed(blank)
+
+    with blank.connect() as conn:
+        planted = conn.execute(
+            text(
+                "SELECT a.total_effect FROM txn_type_attributes AS a"
+                " JOIN common_codes AS c"
+                " ON c.group_code = a.group_code AND c.code = a.code"
+                " WHERE a.code = :code"
+            ),
+            {"code": codes.TXN_PURCHASE_RECEIPT},
+        ).all()
+
+    assert planted == [(codes.EFFECT_INCREASE,)], planted
+
+
 def test_every_measured_reason_points_at_an_item_that_exists(blank: Engine) -> None:
     """계량 코드는 검사 항목의 판정 결과일 뿐이다 — 가리킬 항목이 있어야 한다."""
     seed_module.seed(blank)
@@ -458,6 +484,52 @@ def test_no_process_standard_carries_a_material_group(blank: Engine) -> None:
             blank,
             "process_inspection_standards",
             "process_code <> '수입' AND material_group IS NOT NULL",
+        )
+        == 0
+    )
+
+
+def test_every_measured_standard_says_in_what_unit(blank: Engine) -> None:
+    """**재는 값에는 단위가 있다** (CodeRabbit 리뷰 NC-123).
+
+    시드는 이미 그렇게 서 있었다 — 규격 있는 기준은 전부 단위를 갖고, 규격 없는
+    것(세는 항목)만 비어 있다. **그것이 우연이 아니라 규칙임을** CHECK 가 걸고
+    이 검사가 시드 쪽에서 잰다.
+
+    이것이 새면 판정 시점의 단위를 잠그는 외래키가 **그 줄에서 통째로
+    건너뛰어진다** — 복합 외래키는 한 칸이라도 `NULL` 이면 검사하지 않는다.
+    """
+    seed_module.seed(blank)
+
+    assert (
+        _count(
+            blank,
+            "process_inspection_standards",
+            "(upper_spec_limit IS NOT NULL OR lower_spec_limit IS NOT NULL)"
+            " AND unit IS NULL",
+        )
+        == 0
+    )
+
+
+def test_no_counted_reason_points_at_a_measured_standard(blank: Engine) -> None:
+    """**사유가 계수라고 말하는 항목은 기준도 계수여야 한다** (Codex 리뷰 NC-125).
+
+    갈리면 그 사유로 **규격 안인데 불합격**을 만들 수 있다 — 사람이 계산을
+    덮는 자리이고 원칙 ③ 이 없애려는 것이다. 쓰기 경로가 요청을 거절하지만
+    **거절이 나는 것 자체가 기준정보가 어긋났다는 뜻**이라, 시드 쪽에서도
+    잰다.
+    """
+    seed_module.seed(blank)
+
+    assert (
+        _count(
+            blank,
+            "nonconformity_attributes AS a"
+            " JOIN process_inspection_standards AS s"
+            " ON s.item_code = a.inspection_item_code AND s.process_code = '수입'",
+            "a.measure_kind = '계수' AND a.inspection_item_code IS NOT NULL"
+            " AND (s.upper_spec_limit IS NOT NULL OR s.lower_spec_limit IS NOT NULL)",
         )
         == 0
     )

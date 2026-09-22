@@ -1,0 +1,166 @@
+# 돌연변이 기록
+
+**「물게 하는 돌연변이를 실제로 돌려 빨갛게 한 기록이 있을 것」**이 `CLAUDE.md` 의
+조건이고, 그 기록이 사는 자리가 정해져 있지 않았다 — 남아 있던 것은 **산문의
+주장**뿐이었다(NC-89). `.gitignore` 가 돌연변이를 돌리는 워크트리를 버전관리에서
+빼므로 근거가 저장소에 들어올 길이 설계상 닫혀 있었다.
+
+## 이 파일의 규칙
+
+- **돌린 것만 적는다.** 「돌렸을 것이다」는 적지 않는다 — 그것이 NC-89 가 낸 말이다
+- **다음 사람이 손으로 재현할 수 있게 적는다**: 무엇을 · 어떻게 어긋냈고 · **어느
+  검사가** 빨개졌는가. 검사 이름이 없으면 재현이 아니라 주장이다
+- **통과한 돌연변이도 적는다.** 값은 오히려 그쪽에 있다 — 검사가 아무것도 지키지
+  않는다는 뜻이기 때문이다
+- 이 파일은 **⑧ 부터의 기록이다.** 그 앞 회차의 돌연변이는 PR 본문이 요약만 들고
+  있고, 없는 기록을 소급해 지어내지 않는다
+
+## ⑧ 의 고침 (`03b6c1f`)
+
+| NC | 무엇을 어긋냈나 | 빨개진 검사 |
+|---|---|---|
+| 65 | `992bb442d985` · `361ec789023c` · `e84fbec436c0` 의 `downgrade()` 에서 `DO $$ … RAISE EXCEPTION` 블록을 지웠다(각각 따로) | `test_downgrade_says_whose_judgements_would_vanish` · `…whose_measurements_would_vanish` · `…which_lots_would_lose_their_ledger` |
+| 64 | `backend/.dockerignore` 를 지웠다 | `test_the_build_context_does_not_carry_the_secret_file` |
+| 64 | `compose.yaml` 의 `"127.0.0.1:8000:8000"` 을 `"8000:8000"` 으로 | `test_every_published_port_is_bound_to_loopback` |
+| 68 | `incoming.py` 의 `if not any(_measures(...)):` 를 `if False:` 로 | `test_a_material_group_with_nothing_to_measure_is_refused` |
+| 72 | `incoming.py` 의 `if twice:` 를 `if False:` 로 | `test_measuring_the_same_item_twice_is_refused` |
+| 71 | `incoming.py` 의 `if request.nonconformity_code is not None:` 를 `if False:` 로 | `test_a_reason_sent_with_an_out_of_spec_value_is_refused` |
+| 74 | `schemas.py` 의 `_present` 에서 `if not value.strip(_BLANK):` 를 `if False:` 로 | `test_the_boundary_refuses_what_only_looks_empty` — **갈래 열둘 전부** |
+
+## ⑧(`audit-contract`) 의 고침 (`72392cf`)
+
+| NC | 무엇을 어긋냈나 | 빨개진 검사 |
+|---|---|---|
+| 77 | `incoming.py` 의 `if request.received_date > date.today():` 를 `if False:` 로 | `test_a_delivery_that_has_not_arrived_is_refused` |
+| 82 | `schemas.py` 의 `ConfigDict(extra="forbid")` 를 `extra="ignore"` 로 | `test_a_field_we_do_not_know_is_refused` |
+| 78 | `app.py` 의 `@app.exception_handler(Exception)` 를 `ZeroDivisionError` 로 좁혔다 | `test_a_break_answers_with_json_and_says_nothing_about_the_inside` |
+| 75 | `app.py` 의 거절 본문을 `[{"loc": …, "type": refused.code}]` 에서 `[str(refused)]` 로 | `test_both_kinds_of_422_have_the_same_shape` |
+| 81 | `schemas.py` 의 `result` 에서 `json_schema_extra={"enum": …}` 를 뺐다 | `test_the_spec_says_which_version_and_which_judgements` |
+| **79** | `app.py` 의 `version=API_VERSION` 을 뺐다 | **통과했다.** FastAPI 의 기본 판이 하필 고른 값(`0.1.0`)과 같아 「적었다」와 「안 적었다」가 밖에서 구별되지 않았다 — 판을 `0.1` 로 바꾸고 **기본값과 다른지**까지 보게 고친 뒤 같은 돌연변이가 빨개졌다 |
+
+## ⑨ 의 고침
+
+| NC | 무엇을 어긋냈나 | 빨개진 검사 |
+|---|---|---|
+| 87 | `app.py` 의 `session_scope` 에서 `session.commit()` 을 지웠다 | `test_a_pass_is_actually_committed` — **그 전에는 294 개가 전부 초록이었다** |
+| 88 | `_sessions()` 를 게으른 형태에서 **모듈 최상단**으로 되돌렸다 | `test_the_app_does_not_reach_for_the_default_database` · `test_a_pass_is_actually_committed` |
+| 91 | `ck_lot_passed_after_arrival` 의 `>=` 를 `>` 로 | `test_a_lot_that_arrives_and_passes_on_the_same_day_stands` |
+| 90 | `inspections` 에 `UNIQUE (supplier_id, item_id, supplier_lot_number)` 를 **더했다**(NC-67 의 결정을 뒤집는 변경) | `test_the_same_request_twice_makes_two_lots` · `test_a_split_delivery_of_the_same_supplier_lot_is_accepted`. **「둘째는 그날의 다음 일련을 받는다」는 통과했다** — 감사자가 예측한 그대로다 |
+| 92 · 86 | `production.py` 의 문장을 「1단계에서는 표만 선다」로 되돌렸다 | `test_a_stage_that_closed_is_not_written_as_if_it_were_now` |
+| 86 | 저장소 최상위에 `frontend/` 를 만들었다 | `test_there_is_still_no_screen` |
+
+## 아직 도구가 없다
+
+여기 적힌 것은 **손으로 돌린 것**이다. 돌연변이 러너를 개발 의존성으로 들이는
+쪽(NC-89 의 제안 ②)은 아직 하지 않았다 — 먼저 **기록의 자리**를 정하는 것이 싸고,
+그 자리가 없으면 러너를 들여도 결과가 다시 저장소 밖에 남는다.
+
+## Codex 리뷰의 고침 (`ebeef8a` 뒤)
+
+| NC | 무엇을 어긋냈나 | 빨개진 검사 |
+|---|---|---|
+| 104 | `app.py` 에서 커밋을 **의존성 뒤로 되돌렸다**(`yield` 다음) | `test_a_commit_that_fails_does_not_answer_201` — 커밋이 터졌는데 **201 이 나갔다.** 그것이 이 부적합의 모양 그대로다 |
+| 103 | `incoming.py` 의 `_must_be_a_counted_reason(...)` 호출을 지웠다 | `test_a_measured_reason_cannot_be_sent_by_a_person` |
+| 107 | `if counted_items:` 를 `if False:` 로 | `test_a_value_for_a_counted_item_is_refused` |
+| 106 | `if not partner.is_active:` 를 `if False:` 로 | `test_an_inactive_supplier_cannot_deliver` |
+| 105 | 로트 번호 길이 가드를 `if False:` 로 | `test_an_item_code_too_long_for_the_lot_number_is_refused` |
+| 102 | 유효기간을 `request.received_date` 대신 **`judged_at.date()`** 에서 세게 되돌렸다 | `test_the_expiry_counts_from_the_day_it_arrived` · `test_material_that_already_expired_on_arrival_is_refused` |
+
+## CodeRabbit 리뷰의 고침 (`e3b3eeb` 뒤)
+
+넷 중 **하나만** 기계가 셀 수 있는 모양이었다. 나머지 셋(110 · 111 · 113)은 산문의
+뜻이 갈린 자리라 게이트가 서지 않는다 — 그 셋이 못 세는 부류라는 것이
+`test_prose.py` 머리말의 「이 게이트가 못 보는 부류」다.
+
+| NC | 무엇을 어긋냈나 | 빨개진 검사 |
+|---|---|---|
+| 112 | 대장의 NC-35 줄 끝에 **칸 하나를 도로 붙였다**(머리가 6 칸인데 7 칸) | `test_a_table_row_does_not_carry_a_cell_the_header_did_not_declare` — 줄 번호까지 가리켰다(`docs/audit/README.md:111`) |
+
+## NC-109 의 고침 — `inspections.received_date` (`9c09a96` 뒤)
+
+**하나가 통과했고 그것이 이 표의 값이다.** 데이터 단계를 「로트에서 옮긴다」에서
+「판정일에서 센다」로 어긋냈는데 전부 초록이었다 — 픽스처의 로트 도착일과 판정일이
+**같은 날**이라 두 구현이 같은 값을 냈다. 테스트가 그 자리를 지나가면서 아무것도
+지키지 않던 자리이고, 도착일을 판정일에서 떼어 두고서야 물었다.
+
+| NC | 무엇을 어긋냈나 | 빨개진 검사 |
+|---|---|---|
+| 109 | `incoming.py` 에서 `received_date=request.received_date` 를 지웠다(검사 쪽) | `test_a_failed_judgement_still_remembers_when_the_material_arrived` 외 여럿 — 쌍 외래키가 합격 경로도 함께 무너뜨린다 |
+| 109 | `fk_lot_inspection_received_date` 를 통째로 뺐다 | `test_a_pass_cannot_let_the_two_arrival_dates_drift` · `test_the_migration_builds_the_same_tables_as_the_models` |
+| 109 | `ck_inspection_judged_after_arrival` 의 비교를 60 일 늦췄다 | `test_an_inspection_cannot_be_judged_before_the_material_arrived` · 대조 테스트 |
+| 109 | 데이터 단계를 `l.received_date` 대신 `i.judged_at::date` 로 | **처음에는 통과했다.** 픽스처의 두 날짜를 떼어 둔 뒤 `test_the_data_step_moves_the_arrival_date_from_the_lot` 이 물었다 |
+| 109 | 되돌림 가드의 `NOT EXISTS` 를 `FALSE AND NOT EXISTS` 로(아무것도 세지 않게) | `test_downgrade_says_whose_arrival_date_has_no_lot_to_fall_back_on` |
+| 114 | `ck_lot_from_an_inspection_has_an_arrival_date` 를 항상 참으로(`OR TRUE`) | `test_an_own_lot_cannot_borrow_an_incoming_inspection` · 대조 테스트. **CHECK 를 걸기 전에 그 검사가 실제로 통과하는 것**(DID NOT RAISE)을 먼저 확인했다 — 구멍이 있다는 주장과 구멍이 있다는 사실은 다르다 |
+
+## Codex 리뷰의 고침 — `931a400` 뒤
+
+| NC | 무엇을 어긋냈나 | 빨개진 검사 |
+|---|---|---|
+| 115 | `if attribute.inspection_item_code is None:` 을 `if False:` 로 | `test_a_reason_the_system_derives_cannot_be_sent_by_a_person` |
+| 116 | 길이 가드를 접두를 재던 옛 식(`len(prefix) + 2`)으로 되돌렸다 | `test_a_serial_that_grew_a_digit_is_refused_by_name` — 긴 코드 갈래는 **그대로 통과한다**(같은 결과의 두 원인이라 한 갈래로는 갈리지 않는다) |
+| 117 | `08d406fa7f3b` 의 데이터 단계를 `SELECT 1` 로 | `test_upgrading_a_database_that_already_has_a_ledger_line_does_not_stop` |
+
+## CodeRabbit 리뷰의 고침 — `2fc40f3` 뒤
+
+**검사가 아무것도 재지 않는 것을 한 번 더 겪었다.** 어긋난 짝을 만들려고 둘째
+품목의 검사를 심었는데 **그 품목이 픽스처에 없어** 삽입이 빈 동작이 됐고, 원장
+줄은 원래 검사를 그대로 가리켜 가드가 물 자리가 없었다. 가드가 옳은데 검사가
+빨갛지 않아 **가드부터 의심하게 되는** 모양이다 — 품목을 함께 심고서야 물었다.
+
+| NC | 무엇을 어긋냈나 | 빨개진 검사 |
+|---|---|---|
+| 118 | 품목 대조 가드의 조건을 `WHERE FALSE` 로(아무것도 세지 않게) | `test_upgrading_stops_when_a_ledger_line_points_at_another_items_inspection` |
+
+## Codex 리뷰의 고침 — `2fc40f3` 뒤
+
+| NC | 무엇을 어긋냈나 | 빨개진 검사 |
+|---|---|---|
+| 118(구조) | `fk_lot_inspection_item` 을 통째로 뺐다 | `test_a_lot_cannot_point_at_another_items_inspection` · 대조 테스트 |
+| 119 | 역방향 가드의 `HAVING count(DISTINCT lot_id) > 1` 을 `HAVING FALSE` 로 | `test_upgrading_stops_when_two_lots_share_one_inspection` |
+| 120 | `startswith(..., autoescape=True)` 를 `like(prefix + '%')` 로 되돌렸다 | `test_a_wildcard_in_the_item_code_does_not_reach_the_like` |
+| 121 | `if attribute.inspection_item_code not in standards:` 를 `if False:` 로 | `test_a_reason_this_material_is_not_inspected_for_is_refused` |
+
+## NC-122 의 고침 — `186207e` 뒤
+
+| NC | 무엇을 어긋냈나 | 빨개진 검사 |
+|---|---|---|
+| 122 | `applied_unit=standard.unit` 를 `None` 으로 | `test_the_measurement_pins_the_unit_the_number_meant` · 잠금 검사 |
+| 122 | `fk_inspection_measurement_unit` 을 통째로 뺐다 | `test_a_standard_cannot_change_its_unit_while_a_measurement_cites_it` · 대조 테스트 |
+| 122 | 리비전의 데이터 단계를 `SELECT 1` 로 | `test_the_data_step_moves_the_unit_from_the_standard` 외 하나 |
+| 122 | 되돌림 가드의 값 대조를 `AND FALSE` 로(외래키에 기대게) | `test_downgrade_says_which_measurements_would_lose_their_unit` |
+
+## NC-123 의 고침 — `fcb7570` 뒤
+
+| NC | 무엇을 어긋냈나 | 빨개진 검사 |
+|---|---|---|
+| 123 | `ck_inspection_standard_measured_has_a_unit` 의 식을 `TRUE` 로 | `test_a_standard_that_measures_must_say_in_what_unit` · 대조 테스트 |
+| 123 | 시드의 `입도` 에서 단위를 지웠다 | **CHECK 가 심는 단계에서 거부해** 시드를 쓰는 검사가 전부 빨갛다 — 시드 쪽 검사는 그 위의 덧대기이고, 무는 것은 제약이다 |
+
+## Codex 리뷰의 고침 — `94cbd51` 뒤
+
+| NC | 무엇을 어긋냈나 | 빨개진 검사 |
+|---|---|---|
+| 124 | `applied_unit` 을 널 허용으로 되돌렸다(모델과 리비전을 함께) | `test_a_measurement_cannot_be_written_without_its_unit` — **대조 테스트는 초록이다**(둘을 함께 어긋냈으므로). 구조가 갈렸는지가 아니라 **무엇을 막는지**를 재는 검사라야 무는 자리다 |
+| 125 | `if _measures(standards[...]):` 를 `if False:` 로 | `test_a_counted_reason_whose_standard_measures_is_refused` |
+| 125 | 시드에서 `IQ-FM` 이 `이물` 대신 `입도`(재는 항목)를 가리키게 했다 | `test_no_counted_reason_points_at_a_measured_standard` · `test_every_standard_has_a_reason_that_can_use_it` |
+
+## NC-126 의 고침 — `9bad48b` 뒤
+
+| NC | 무엇을 어긋냈나 | 빨개진 검사 |
+|---|---|---|
+| 126 | 단위 없는 기준을 세는 가드의 조건을 `AND FALSE` 로(CHECK 가 먼저 걸리게) | `test_upgrading_says_which_standard_measures_without_a_unit` |
+
+## NC-127 의 고침 — `3e2e703` 뒤
+
+| NC | 무엇을 어긋냈나 | 빨개진 검사 |
+|---|---|---|
+| 127 | `ck_inspection_standard_measured_has_a_unit` 의 식을 `TRUE` 로 | `test_a_standard_that_measures_must_say_in_what_unit` · 대조 테스트 |
+| 127 | `ck_inspection_standard_unit_means_something` 의 식을 `TRUE` 로 | `test_a_unit_that_only_looks_like_one_is_refused` · `test_even_a_standard_that_only_counts_cannot_hold_a_hollow_unit` · 대조 테스트 |
+| 127 | `fk_inspection_measurement_unit` 을 통째로 지웠다 | `test_a_measurement_unit_that_only_looks_like_one_has_nowhere_to_land` · 대조 테스트 |
+| 127 | 빈 단위 기준을 세는 **올릴 때 가드**를 `SELECT 1` 로 | `test_upgrading_says_which_standard_holds_a_unit_that_only_looks_like_one` |
+
+**여기서 하나가 거뒀다.** 측정 줄에도 `is_present("applied_unit")` 를 걸었다가 **지워도
+대조 테스트만 빨개졌다** — 그 CHECK 를 물게 하려면 「빈 단위를 든 기준」이 있어야 하는데,
+같은 고침이 그런 기준을 설 수 없게 만들었기 때문이다. **물게 할 수 없는 제약**은 같은
+명제의 둘째 자리라 거두고, 외래키가 그것을 이 줄까지 나른다는 것을 검사로 적었다.
+

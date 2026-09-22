@@ -1,0 +1,291 @@
+"""쓰기 엔드포인트 — 조각 11.
+
+**첫 공개 계약이다.** 여기서 검사하는 것은 업무 규칙이 아니라 **경계**다 —
+밖에서 들어온 것을 어디까지 믿는가, 받을 수 없는 것을 어떻게 돌려보내는가,
+그리고 **터졌을 때 무엇이 남는가.**
+
+업무 규칙 자체는 `tests/test_write_path.py` 가 본다. 같은 것을 두 층에서 다시
+확인하면 규칙이 바뀔 때 고칠 자리가 둘이 된다.
+"""
+
+import json
+from collections.abc import Iterator
+from datetime import date, timedelta
+
+import pytest
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
+from sqlalchemy import text
+from sqlalchemy.exc import IntegrityError
+from sqlalchemy.orm import Session
+
+from app.api.app import API_VERSION, app, session_scope
+from app.core import codes
+from app.db.constraints import blank_characters, is_present
+from app.db.inventory import Lot, StockLedgerEntry
+from app.services import incoming
+from tests.test_write_path import _GRAIN, _MOISTURE, RECEIVED, prepared  # noqa: F401
+
+_PAYLOAD = {
+    "item_code": "RM-01",
+    "supplier_code": "SUP-01",
+    "supplier_lot_number": "SL-2026-0001",
+    "quantity": 500.0,
+    "judged_by": "검사원 1",
+    "received_date": RECEIVED.isoformat(),
+    "measurements": [
+        {"item_code": _GRAIN, "value": 30.0},
+        {"item_code": _MOISTURE, "value": 0.3},
+    ],
+}
+
+
+@pytest.fixture
+def client(prepared: Session) -> Iterator[TestClient]:  # noqa: F811
+    """테스트 세션에 붙은 앱.
+
+    **엔진을 갈아 끼우지 않고 의존성을 덮는다.** 앱이 자기 엔진을 만드는 것은
+    운영의 모습이고, 테스트가 그 자리를 흉내 내면 흉내가 맞는지 아무도 모른다.
+    """
+    app.dependency_overrides[session_scope] = lambda: prepared
+    try:
+        yield TestClient(app)
+    finally:
+        app.dependency_overrides.clear()
+
+
+def test_a_pass_comes_back_with_the_lot_number(client: TestClient) -> None:
+    """**로트 번호를 돌려준다** — 부르는 쪽이 그것을 다시 물어보게 하지 않는다."""
+    response = client.post("/inspections", json=_PAYLOAD)
+
+    assert response.status_code == 201, response.text
+    body = response.json()
+    assert body["result"] == codes.JUDGMENT_PASSED
+    assert body["lot_number"] == "RM-01-260921-01"
+    assert body["ledger_entry_id"] is not None
+
+
+def test_a_failure_comes_back_without_a_lot(client: TestClient) -> None:
+    """불합격도 **201 이다** — 검사는 정상적으로 받아졌고 판정이 불합격일 뿐이다.
+
+    오류로 돌려보내면 부르는 쪽이 「적히지 않았다」로 읽는다. 적히지 않은 것과
+    적혔는데 떨어진 것은 다른 사실이다.
+    """
+    payload = _PAYLOAD | {
+        "measurements": [
+            {"item_code": _GRAIN, "value": 99.0},
+            {"item_code": _MOISTURE, "value": 0.3},
+        ]
+    }
+
+    response = client.post("/inspections", json=payload)
+
+    assert response.status_code == 201, response.text
+    body = response.json()
+    assert body["result"] == codes.JUDGMENT_FAILED
+    assert body["lot_id"] is None and body["lot_number"] is None
+
+
+def test_something_we_cannot_judge_comes_back_named(client: TestClient) -> None:
+    """**왜 막혔는지 모르는 실패는 고칠 수 없다.**
+
+    제약이 터지면 나오는 말은 제약 이름이다. 그 앞에서 이름으로 말하고
+    돌려보낸다 — 사람에게는 산문으로, **기계에게는 `type` 으로.**
+    """
+    response = client.post("/inspections", json=_PAYLOAD | {"item_code": "없는-품목"})
+
+    assert response.status_code == 422
+    refusal = response.json()["detail"][0]
+    assert refusal["type"] == incoming.UNKNOWN_ITEM
+    assert "없는-품목" in refusal["msg"]
+
+
+def test_both_kinds_of_422_have_the_same_shape(client: TestClient) -> None:
+    """**같은 코드에 두 모양을 두지 않는다.**
+
+    경계가 막은 것(모양이 틀렸다)과 업무가 막은 것(모양은 맞는데 받을 수 없다)이
+    같은 422 로 나가는데 본문이 배열이기도 문자열이기도 하면, `for error in
+    body["detail"]` 을 쓰는 클라이언트가 **422 를 처리하다 죽는다.** 그리고
+    `/openapi.json` 은 그중 한 모양만 적으므로 다른 하나는 **스펙에 없는 응답**이다.
+    """
+    refused_by_the_boundary = client.post("/inspections", json=_PAYLOAD | {"quantity": -1.0})
+    refused_by_the_work = client.post(
+        "/inspections", json=_PAYLOAD | {"item_code": "없는-품목"}
+    )
+
+    for response in (refused_by_the_boundary, refused_by_the_work):
+        assert response.status_code == 422, response.text
+        body = response.json()
+        assert isinstance(body["detail"], list), body
+        for error in body["detail"]:
+            assert {"loc", "msg", "type"} <= set(error), error
+            assert isinstance(error["loc"], list), error
+
+
+def test_a_delivery_that_has_not_arrived_is_refused(client: TestClient) -> None:
+    """**아직 오지 않은 물건은 검사하지 못한다.**
+
+    막지 않으면 합격일(오늘)이 입고일보다 앞서 `ck_lot_passed_after_arrival` 이
+    물고, **잘 만들어진 요청 하나가 실마리 없는 500 으로 나간다.** 그리고 같은
+    값이 불합격이면 201 로 지나간다 — 불합격은 로트를 만들지 않아 그 CHECK 에
+    닿지 않기 때문이다. **경계가 그 갈림을 없앤다.**
+    """
+    tomorrow = (date.today() + timedelta(days=1)).isoformat()
+
+    response = client.post("/inspections", json=_PAYLOAD | {"received_date": tomorrow})
+
+    assert response.status_code == 422, response.text
+    assert response.json()["detail"][0]["type"] == incoming.RECEIVED_DATE_IS_IN_THE_FUTURE
+
+
+def test_a_field_we_do_not_know_is_refused(client: TestClient) -> None:
+    """**오타가 조용히 성공하지 않는다.**
+
+    `specialAcceptance` 로 보내면 모르는 칸을 버리는 기본값에서는 **201 로
+    성공하면서** 특채가 꺼진 채 읽힌다 — 받으려던 자재가 로트 없이 끝나고, 부르는
+    쪽은 자기가 보낸 것이 반영됐다고 읽는다.
+    """
+    out_of_spec = _PAYLOAD | {
+        "measurements": [
+            {"item_code": _GRAIN, "value": 99.0},
+            {"item_code": _MOISTURE, "value": 0.3},
+        ],
+        "specialAcceptance": True,
+    }
+
+    response = client.post("/inspections", json=out_of_spec)
+
+    assert response.status_code == 422, response.text
+    assert response.json()["detail"][0]["loc"] == ["body", "specialAcceptance"]
+
+
+def test_a_break_answers_with_json_and_says_nothing_about_the_inside(
+    prepared: Session,  # noqa: F811
+) -> None:
+    """**터져도 본문의 모양은 그대로다.**
+
+    기본 처리기는 500 을 `text/plain` 으로 보낸다 — 오류를 `response.json()` 으로
+    읽는 클라이언트는 그 자리에서 **파싱 오류**를 맞고, 무엇이 터졌는지가 아니라
+    자기 파서가 깨진 것으로 본다. 그리고 제약 이름도 트레이스도 싣지 않는다.
+    """
+
+    def break_before_the_work() -> Iterator[Session]:
+        raise RuntimeError("연결이 끊겼다 — 제약 이름 ck_something 과 함께")
+        yield prepared  # pragma: no cover — 도달하지 않는다
+
+    app.dependency_overrides[session_scope] = break_before_the_work
+    try:
+        broken = TestClient(app, raise_server_exceptions=False)
+        response = broken.post("/inspections", json=_PAYLOAD)
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 500
+    body = response.json()
+    assert body["detail"][0]["type"] == "internal_error"
+    assert "ck_something" not in response.text
+
+
+def test_the_spec_says_which_version_and_which_judgements(client: TestClient) -> None:
+    """**기계가 읽는 계약이 자기 판과 값 집합을 말한다.**
+
+    버전이 없으면 소비자가 붙은 뒤에 남는 길이 「조용히 깬다」와 「경로를 갈아 한
+    번에 옮긴다」 둘뿐이다. `result` 가 자유 문자열이면 소비자는 「합격」을
+    **문서화되지 않은 채** 하드코딩해야 한다.
+    """
+    spec = client.get("/openapi.json").json()
+
+    assert spec["info"]["version"] == API_VERSION
+    # **기본값은 「말하지 않은 것」이다.** 프레임워크의 기본 판과 같으면 적었는지
+    # 여부가 밖에서 구별되지 않는다 — 이 줄이 없을 때 돌연변이가 통과했다.
+    assert spec["info"]["version"] != FastAPI().version
+    judged = spec["components"]["schemas"]["InspectionOut"]["properties"]["result"]
+    assert judged["enum"] == list(codes.JUDGMENTS)
+
+
+@pytest.mark.parametrize(
+    ("field", "value"), [("quantity", -1.0), ("judged_by", ""), ("item_code", "")]
+)
+def test_the_boundary_refuses_what_it_cannot_believe(
+    client: TestClient, field: str, value: object
+) -> None:
+    """**밖에서 들어온 것은 못 믿는다.**
+
+    데이터베이스도 같은 것을 막지만, 그 자리까지 가기 전에 경계가 먼저
+    돌려보낸다 — 제약 이름으로 나오는 말은 부르는 쪽에게 아무것도 알려 주지
+    않는다.
+    """
+    response = client.post("/inspections", json=_PAYLOAD | {field: value})
+
+    assert response.status_code == 422
+
+
+@pytest.mark.parametrize("field", ["judged_by", "supplier_lot_number"])
+@pytest.mark.parametrize("blank", list(blank_characters()))
+def test_the_boundary_refuses_what_only_looks_empty(
+    client: TestClient,
+    prepared: Session,  # noqa: F811
+    field: str,
+    blank: str,
+) -> None:
+    """**눈에는 비어 보이는데 비어 있지 않은 값** — 경계가 놓치면 500 이 나간다.
+
+    `min_length=1` 은 길이만 본다. 공백 한 칸 · 탭 · 전각 공백(U+3000)은 그것을
+    통과하고 `is_present()` CHECK 가 문다 — 그러면 검사원이 보는 것은 **제약
+    이름이 담긴 500** 이고, 그것이 바로 이 엔드포인트가 없애려고 적어 둔 「왜
+    막혔는지 모르는 실패」다.
+
+    **두 층이 같은 목록을 말하는지 여기서 견준다.** 목록은 한 벌이지만
+    (`app/db/constraints.py`) SQL 쪽 형태를 파이썬 글자로 푸는 자리가 있고, 그
+    푸는 것이 틀리면 두 층이 조용히 갈린다 — 그래서 **데이터베이스에게 직접
+    물어보고** 나서 경계를 두드린다.
+    """
+    seen_as_present = prepared.execute(
+        text(f"SELECT {is_present(':value')}"), {"value": blank}
+    ).scalar_one()
+    assert seen_as_present is False, f"DB 는 {blank!r} 를 값이 있는 것으로 본다"
+
+    response = client.post("/inspections", json=_PAYLOAD | {field: blank})
+
+    assert response.status_code == 422, response.text
+
+
+@pytest.mark.parametrize("literal", ["NaN", "Infinity"])
+def test_the_boundary_refuses_a_number_you_cannot_count(
+    client: TestClient, literal: str
+) -> None:
+    """**`NaN` 은 JSON 으로 실려 온다.**
+
+    파이썬의 인코더는 내보내지 못해도 파서는 받는다. 들어오면 규격과의 비교가
+    전부 거짓이 되어 합격도 불합격도 나오지 않고, 수량이면 이후의 모든 합계가
+    `NaN` 이 된다 — 그래서 **본문을 손으로 지어** 그 문을 직접 두드린다.
+    """
+    body = json.dumps(_PAYLOAD).replace("500.0", literal)
+
+    response = client.post(
+        "/inspections", content=body, headers={"content-type": "application/json"}
+    )
+
+    assert response.status_code == 422
+
+
+def test_nothing_lands_when_the_ledger_line_cannot_stand(prepared: Session) -> None:  # noqa: F811
+    """**로트는 생겼는데 원장에 줄이 없는 상태가 없다** (성공기준 ③).
+
+    원장 줄이 설 수 없게 만들어 두고 — 수불유형의 속성 줄을 없앤다 — 검사를
+    받아 본다. 로트가 먼저 들어가므로 **한 트랜잭션이 아니면 로트만 남는다.**
+    """
+    from sqlalchemy import text as sql_text
+
+    from app.services.incoming import receive
+    from tests.test_write_path import _request
+
+    prepared.execute(sql_text("DELETE FROM txn_type_attributes"))
+    prepared.flush()
+
+    with pytest.raises(IntegrityError):
+        receive(prepared, _request())
+    prepared.rollback()
+
+    assert prepared.query(Lot).count() == 0
+    assert prepared.query(StockLedgerEntry).count() == 0

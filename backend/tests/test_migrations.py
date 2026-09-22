@@ -18,6 +18,7 @@ import subprocess
 import sys
 from collections.abc import Iterator
 from contextlib import contextmanager
+from datetime import date
 from pathlib import Path
 
 import pytest
@@ -1032,3 +1033,697 @@ def test_the_guard_compares_more_than_the_name(engine: Engine) -> None:
 
             with pytest.raises(Exception, match="분체"):
                 command.downgrade(config, "3c602ffaebc3")
+
+
+# ── 361ec789023c — 측정값 줄과 그 결속 ─────────────────────────────────────
+
+# 검사 한 줄이 서는 데 필요한 최소 기준정보. **`inspections` 가 이미 선 모양**
+# 이므로 자재군 칸은 아직 없다 — 그 칸을 붙이는 것이 시험 대상이다.
+_BEFORE_MEASUREMENTS = """
+INSERT INTO code_groups (group_code, name, value_fixed, description) VALUES
+  ('PROCESS', '공정', FALSE, '시험'),
+  ('UOM', '단위', FALSE, '시험'),
+  ('MATERIAL_GROUP', '자재군', FALSE, '시험'),
+  ('INSP_STAGE', '검사단계', TRUE, '시험');
+
+INSERT INTO common_codes (group_code, code, name) VALUES
+  ('PROCESS', '수입', '수입'),
+  ('UOM', 'KG', '킬로그램'),
+  ('MATERIAL_GROUP', '분체', '분체'),
+  ('INSP_STAGE', 'IQC', '수입검사');
+
+INSERT INTO items (code, name, item_type, process, process_group, material_group,
+                   material_group_group, stock_uom, stock_uom_group, phase, safety_stock)
+VALUES ('RM-01', '시험 원자재', '원자재', '수입', 'PROCESS', '분체',
+        'MATERIAL_GROUP', 'KG', 'UOM', '양산', 100.0);
+
+INSERT INTO partners (code, name, partner_type) VALUES ('SUP-01', '시험 공급사', '공급사');
+
+INSERT INTO inspections (inspection_stage, stage_group, item_id, item_type,
+                         supplier_id, supplier_type, supplier_lot_number, quantity,
+                         judged_at, judged_by, result, nonconformity_group)
+SELECT 'IQC', 'INSP_STAGE', i.id, i.item_type, p.id, p.partner_type,
+       'SL-2026-0001', 500.0, TIMESTAMP '2026-09-21 09:00', '검사원 1', '합격', 'NC_REASON'
+FROM items AS i, partners AS p WHERE i.code = 'RM-01' AND p.code = 'SUP-01';
+"""
+
+
+def test_the_data_step_fills_the_material_group_from_the_item(engine: Engine) -> None:
+    """**이미 선 검사에 자재군이 채워진다 — 빈 DB 만 보면 이 단계는 한 번도 돌지 않는다.**
+
+    리비전이 `inspections.material_group` 을 널 허용으로 붙이고, 품목에서 값을
+    끌어와 채우고, 그 다음에 `NOT NULL` 로 조인다. 한 번에 `NOT NULL` 로 붙였다면
+    **줄이 하나라도 있는 데이터베이스에서 그 자리가 터진다** — 그 차이는 검사 줄이
+    실제로 있는 데이터베이스를 올려 보아야 드러난다.
+
+    그리고 채우는 값은 **지어낸 것이 아니라 품목이 이미 아는 것**이어야 한다.
+    """
+    schema = "measurement_data_step"
+    with _schema(engine, schema):
+        config = _config_for_schema(engine, schema)
+        command.upgrade(config, "992bb442d985")
+
+        scoped = _engine_for_schema(engine, schema)
+        with scoped.begin() as conn:
+            for statement in _BEFORE_MEASUREMENTS.strip().split(";"):
+                if statement.strip():
+                    conn.execute(text(statement))
+
+        command.upgrade(config, "head")
+
+        with scoped.connect() as conn:
+            filled = conn.execute(
+                text(
+                    "SELECT i.material_group, it.material_group"
+                    " FROM inspections AS i JOIN items AS it ON it.id = i.item_id"
+                )
+            ).all()
+            not_null = conn.execute(
+                text(
+                    "SELECT is_nullable FROM information_schema.columns"
+                    " WHERE table_schema = :schema AND table_name = 'inspections'"
+                    " AND column_name = 'material_group'"
+                ),
+                {"schema": schema},
+            ).scalar_one()
+
+    assert filled == [("분체", "분체")], filled
+    assert not_null == "NO"
+
+
+# ── 08d406fa7f3b — 로트가 자기를 만든 검사를 가리킨다 ──────────────────────
+
+# 검사 한 건과 그 검사가 만든 로트. **`inspections` 까지 선 모양**이므로 로트는
+# 아직 검사를 모른다 — 그 칸을 붙이는 것이 시험 대상이다.
+# **검사의 자재군 칸이 이미 선 모양**이라 `_BEFORE_MEASUREMENTS` 를 그대로 쓸 수
+# 없다 — 그 절은 그 칸이 서기 **전**의 데이터베이스를 흉내 내는 것이다.
+_BEFORE_WRITE_PATH = (
+    _BEFORE_MEASUREMENTS.split("INSERT INTO inspections")[0]
+    + """
+INSERT INTO inspections (inspection_stage, stage_group, item_id, item_type, material_group,
+                         supplier_id, supplier_type, supplier_lot_number, quantity,
+                         judged_at, judged_by, result, nonconformity_group)
+SELECT 'IQC', 'INSP_STAGE', i.id, i.item_type, i.material_group, p.id, p.partner_type,
+       'SL-2026-0001', 500.0, TIMESTAMP '2026-09-21 09:00', '검사원 1', '합격', 'NC_REASON'
+FROM items AS i, partners AS p WHERE i.code = 'RM-01' AND p.code = 'SUP-01';
+
+INSERT INTO lots (item_id, item_type, lot_number, lot_origin, warehouse, stock_type,
+                  quantity, received_date)
+SELECT i.id, i.item_type, 'SL-2026-0001', '공급사', '원재료', '양품', 500.0, DATE '2026-09-21'
+FROM items AS i WHERE i.code = 'RM-01';
+"""
+)
+
+
+_WITH_A_LEDGER_LINE = (
+    _BEFORE_WRITE_PATH
+    + """
+INSERT INTO code_groups (group_code, name, value_fixed, description) VALUES
+  ('TXN_TYPE', '수불유형', TRUE, '시험');
+
+INSERT INTO common_codes (group_code, code, name) VALUES ('TXN_TYPE', '구매입고', '구매입고');
+
+INSERT INTO txn_type_attributes (group_code, code, total_effect, source_document_type)
+VALUES ('TXN_TYPE', '구매입고', '증가', '가입고');
+
+INSERT INTO stock_ledger_entries (lot_id, txn_type, txn_type_group, quantity, occurred_at,
+                                  inspection_id)
+SELECT l.id, '구매입고', 'TXN_TYPE', 500.0, TIMESTAMP '2026-09-21 09:30', i.id
+FROM lots AS l, inspections AS i;
+"""
+)
+
+
+def _upgrade_with(engine: Engine, schema: str, revision: str, planted: str) -> Config:
+    """그 리비전까지 올리고 **줄을 심는다.**"""
+    config = _config_for_schema(engine, schema)
+    command.upgrade(config, revision)
+    scoped = _engine_for_schema(engine, schema)
+    with scoped.begin() as conn:
+        for statement in planted.strip().split(";"):
+            if statement.strip():
+                conn.execute(text(statement))
+    return config
+
+
+def test_upgrade_does_not_stop_for_a_lot_that_came_before(engine: Engine) -> None:
+    """**제약이 사실을 막으면 안 된다.**
+
+    「사 온 로트에는 검사가 있다」를 양방향으로 걸어 봤더니 **기초재고가
+    막혔다** — 과거를 소급하지 않기로 했으므로 이월로 깔리는 자재 로트에는 적을
+    검사가 없고, 그것은 이미 선 사실이다. 그래서 그 CHECK 를 빼고 **검사를
+    가리키는 로트만** 판정에 묶는다.
+
+    이 테스트가 그 되돌림을 지킨다 — 다시 걸면 여기서 빨개진다.
+    """
+    schema = "write_path_keeps_old_lots"
+    with _schema(engine, schema):
+        config = _upgrade_with(engine, schema, "e84fbec436c0", _BEFORE_WRITE_PATH)
+
+        command.upgrade(config, "head")
+
+        scoped = _engine_for_schema(engine, schema)
+        with scoped.connect() as conn:
+            kept = conn.execute(text("SELECT lot_number, inspection_id FROM lots")).all()
+
+    assert kept == [("SL-2026-0001", None)], kept
+
+
+def test_downgrade_says_which_lots_would_lose_their_judgement(engine: Engine) -> None:
+    """**되돌리기가 사람이 남긴 것을 조용히 지우지 않는다.**
+
+    칸 둘을 지우면 어느 판정이 그 로트를 만들었는지가 사라지고, 특채로 들어온
+    로트는 표식까지 잃는다. 같은 모양이 이 저장소에서 거듭 났고, 그 목록을 세는
+    자리는 `docs/audit/README.md` 하나다.
+    """
+    schema = "write_path_downgrade_guard"
+    with _schema(engine, schema):
+        config = _upgrade_with(engine, schema, "head", _BEFORE_WRITE_PATH)
+        scoped = _engine_for_schema(engine, schema)
+        with scoped.begin() as conn:
+            # **도착일이 먼저다.** 로트가 검사를 가리키는 순간 둘의 도착일이
+            # 같아야 하므로(`a7c14b3e9052` 의 쌍 외래키), 가리키게 하기 전에
+            # 맞춰 둔다 — 그 리비전의 데이터 단계가 옛 줄에 대해 하는 일이고,
+            # 쓰기 경로가 한 트랜잭션 안에서 하는 일이기도 하다.
+            conn.execute(
+                text("UPDATE inspections SET received_date = (SELECT received_date FROM lots)")
+            )
+            conn.execute(
+                text(
+                    "UPDATE lots SET inspection_id = (SELECT id FROM inspections),"
+                    " inspection_result = '합격', lot_number = '판정에서-나온-로트'"
+                )
+            )
+
+        with pytest.raises(Exception, match="판정에서-나온-로트"):
+            command.downgrade(config, "e84fbec436c0")
+
+
+def test_downgrade_goes_quietly_when_no_lot_points_at_a_judgement(engine: Engine) -> None:
+    """**가드가 정상 경로를 막지 않는다.**
+
+    멈추는 것이 설계라면 멈추지 않아야 할 때 멈추지 않는 것도 설계다 — 가리키는
+    로트가 하나도 없으면 조용히 내려간다.
+    """
+    schema = "write_path_downgrade_clean"
+    with _schema(engine, schema):
+        config = _upgrade_with(engine, schema, "head", _BEFORE_WRITE_PATH)
+
+        command.downgrade(config, "e84fbec436c0")
+
+        scoped = _engine_for_schema(engine, schema)
+        with scoped.connect() as conn:
+            columns = conn.execute(
+                text(
+                    "SELECT column_name FROM information_schema.columns"
+                    " WHERE table_schema = :schema AND table_name = 'lots'"
+                ),
+                {"schema": schema},
+            ).scalars()
+
+    assert "inspection_id" not in set(columns)
+
+
+# ── 표를 세우는 리비전 셋 — **표는 내 것이고 줄은 사람의 것이다** ──────────
+
+# 검사 한 건에 측정값 한 줄까지 선 모양. `_BEFORE_WRITE_PATH` 의 로트는 검사를
+# 가리키지 않으므로 **`08d406fa7f3b` 의 가드가 조용히 지나간다** — 그 뒤에 서는
+# 리비전들이 무엇을 말하는지가 여기서 갈린다.
+_JUDGED_AND_MEASURED = (
+    _BEFORE_WRITE_PATH
+    + """
+INSERT INTO code_groups (group_code, name, value_fixed, description) VALUES
+  ('INSP_ITEM', '검사항목', FALSE, '시험');
+
+INSERT INTO common_codes (group_code, code, name) VALUES ('INSP_ITEM', '입도', '입도');
+
+INSERT INTO process_inspection_standards (process_code, process_group, item_code, item_group,
+                                          material_group, material_group_group,
+                                          upper_spec_limit, lower_spec_limit, unit)
+VALUES ('수입', 'PROCESS', '입도', 'INSP_ITEM', '분체', 'MATERIAL_GROUP', 50.0, 10.0, 'µm');
+
+INSERT INTO inspection_measurements (inspection_id, item_code, process_code, material_group,
+                                     measured_value, applied_upper_spec, applied_lower_spec,
+                                     applied_unit)
+SELECT i.id, '입도', '수입', '분체', 30.0, 50.0, 10.0, 'µm' FROM inspections AS i;
+"""
+)
+
+
+def test_downgrade_says_whose_judgements_would_vanish(engine: Engine) -> None:
+    """**표가 내 것이라고 그 안의 줄까지 내 것은 아니다.**
+
+    세 리비전이 「이 리비전이 세운 표라 사람이 먼저 넣어 둔 값이 있을 수 없다」고
+    적고 조용히 내려갔다. **명제는 참이고 함의가 거짓이다** — 물어야 하는 것은
+    「먼저 넣었는가」가 아니라 **「그 줄을 이 리비전이 만들었는가」**이고,
+    `create_table` 은 줄을 하나도 만들지 않는다.
+
+    그리고 `08d406fa7f3b` 의 가드가 이 자리를 대신하지 못한다 — 그쪽은 검사를
+    가리키는 **로트**를 세므로 **로트를 만들지 않는 판정을 구조적으로 보지
+    못한다.** 여기 심은 로트는 이월이라 검사를 가리키지 않는다.
+    """
+    schema = "judgement_downgrade_guard"
+    with _schema(engine, schema):
+        config = _upgrade_with(engine, schema, "head", _BEFORE_WRITE_PATH)
+
+        with pytest.raises(Exception, match="검사원 1"):
+            command.downgrade(config, "65d31f8b7918")
+
+
+def test_downgrade_says_whose_measurements_would_vanish(engine: Engine) -> None:
+    """**판정의 근거는 기준 표에서 다시 만들 수 없다.**
+
+    측정값 줄에는 **그때 쓴 규격**이 박혀 있다. 기준이 나중에 바뀌어도 그 판정은
+    그 규격으로 내려졌기 때문이며, 그래서 이 줄은 어디에서도 복원되지 않는다.
+    """
+    schema = "measurement_downgrade_guard"
+    with _schema(engine, schema):
+        config = _upgrade_with(engine, schema, "head", _JUDGED_AND_MEASURED)
+
+        with pytest.raises(Exception, match="측정값과 그때 쓴 규격"):
+            command.downgrade(config, "992bb442d985")
+
+
+def test_downgrade_says_which_lots_would_lose_their_ledger(engine: Engine) -> None:
+    """**원장 줄은 로트가 움직인 사실이다** (원칙 ⑦).
+
+    이 리비전이 머리인 데이터베이스에는 `08d406fa7f3b` 의 가드가 없다 — 뒤에 선
+    리비전의 가드에 기대면 그 자리에서 조용히 지워진다. **가드는 자기 리비전에서
+    사라지는 것을 본다.**
+    """
+    schema = "ledger_downgrade_guard"
+    with _schema(engine, schema):
+        config = _upgrade_with(engine, schema, "e84fbec436c0", _WITH_A_LEDGER_LINE)
+
+        with pytest.raises(Exception, match="SL-2026-0001"):
+            command.downgrade(config, "361ec789023c")
+
+
+def test_upgrading_a_database_that_already_has_a_ledger_line_does_not_stop(
+    engine: Engine,
+) -> None:
+    """**값이 다른 표에 있는 함정** (Codex 리뷰 NC-117).
+
+    `e84fbec436c0` 에 멈춰 있던 데이터베이스의 원장 줄은 **검사를 알고 로트도
+    안다.** 그런데 `08d406fa7f3b` 가 세우는 `lots.inspection_id` 는 비어서 서므로,
+    원장의 쌍 외래키가 `(lot_id, inspection_id)` 에서 상대를 찾지 못해 **올리는
+    것 자체가 멈춘다.**
+
+    NC-65 와 같은 함정의 다른 얼굴이다 — 그때는 「이 리비전이 세운 표라 사람의
+    줄이 있을 수 없다」였고, 여기서는 **「이 리비전이 세운 칸이라 값이 있을 수
+    없다」**인데 값이 **다른 표에** 있었다.
+    """
+    schema = "write_path_upgrade_with_a_ledger"
+    with _schema(engine, schema):
+        config = _upgrade_with(engine, schema, "e84fbec436c0", _WITH_A_LEDGER_LINE)
+
+        command.upgrade(config, "head")
+
+        scoped = _engine_for_schema(engine, schema)
+        with scoped.connect() as conn:
+            linked = conn.execute(text("SELECT lot_number, inspection_result FROM lots")).all()
+
+    # 원장이 알던 짝이 로트로 옮겨 왔다 — 비어 있으면 위에서 멈췄을 것이다.
+    assert linked == [("SL-2026-0001", "합격")], linked
+
+
+# ── 조각 6 — 불합격에도 도착일이 남는다 (`a7c14b3e9052`) ─────────────────────
+
+_JUDGED_LOT = """
+UPDATE inspections SET received_date = (SELECT received_date FROM lots);
+UPDATE lots SET inspection_id = (SELECT id FROM inspections), inspection_result = '합격';
+"""
+
+
+def test_the_data_step_moves_the_arrival_date_from_the_lot(engine: Engine) -> None:
+    """**지어내는 것이 아니라 옮기는 것이다.**
+
+    합격한 옛 줄의 도착일은 로트에 이미 적혀 있다 — 같은 입고의 같은 사실이라
+    옮겨 오는 것이 지어내는 것이 아니다. 불합격한 줄에는 짝이 될 로트가 없어
+    비어서 서고, **그것이 이 리비전이 고치는 결함의 모양 그대로**다.
+    """
+    schema = "received_date_data_step"
+    with _schema(engine, schema):
+        config = _upgrade_with(engine, schema, "08d406fa7f3b", _BEFORE_WRITE_PATH)
+        scoped = _engine_for_schema(engine, schema)
+        with scoped.begin() as conn:
+            # **한 문장으로 둘을 채운다** — `ck_lot_inspection_result_matches_inspection`
+            # 이 양방향이라 한 칸씩 채우면 중간 상태에서 물린다.
+            #
+            # **도착일을 판정일에서 떼어 둔다.** 둘이 같은 날이면 「로트에서
+            # 옮겼다」와 「판정일에서 셌다」가 같은 값을 내므로 이 테스트가
+            # 아무것도 지키지 않는다 — 돌연변이를 돌려 실제로 겪은 자리다.
+            conn.execute(
+                text(
+                    "UPDATE lots SET inspection_id = (SELECT id FROM inspections),"
+                    " inspection_result = '합격', received_date = DATE '2026-09-01'"
+                )
+            )
+
+        command.upgrade(config, "head")
+
+        with scoped.connect() as conn:
+            moved = conn.execute(text("SELECT received_date FROM inspections")).scalars().all()
+
+    # 판정은 9월 21일에 했다 — 옮겨 온 것이라야 9월 1일이다.
+    assert moved == [date(2026, 9, 1)], moved
+
+
+def test_the_data_step_leaves_a_judgement_with_no_lot_empty(engine: Engine) -> None:
+    """**없는 값을 지어내지 않는다.**
+
+    로트가 없는 판정 — 불합격 — 의 도착일은 애초에 어디에도 없다. `judged_at`
+    으로 채우면 **검사가 늦은 날수만큼 거짓말**이 되므로 비워 둔다.
+    """
+    schema = "received_date_leaves_it_empty"
+    with _schema(engine, schema):
+        config = _upgrade_with(engine, schema, "08d406fa7f3b", _BEFORE_WRITE_PATH)
+
+        command.upgrade(config, "head")
+
+        scoped = _engine_for_schema(engine, schema)
+        with scoped.connect() as conn:
+            empty = conn.execute(text("SELECT received_date FROM inspections")).scalars().all()
+
+    assert empty == [None], empty
+
+
+def test_downgrade_says_whose_arrival_date_has_no_lot_to_fall_back_on(
+    engine: Engine,
+) -> None:
+    """**되돌리기가 사람이 남긴 것을 조용히 지우지 않는다.**
+
+    세는 것은 「칸이 찬 줄」이 아니라 **로트가 받쳐 주지 않는 줄**이다 — 다시
+    만들 수 있는 것까지 세면 막을 것이 없는데 멈추게 된다(`08d406fa7f3b` 에서
+    실제로 그랬다).
+    """
+    schema = "received_date_downgrade_guard"
+    with _schema(engine, schema):
+        config = _upgrade_with(engine, schema, "head", _BEFORE_WRITE_PATH)
+        scoped = _engine_for_schema(engine, schema)
+        with scoped.begin() as conn:
+            conn.execute(text("UPDATE inspections SET received_date = DATE '2026-09-01'"))
+
+        with pytest.raises(Exception, match="도착일이 사라진다"):
+            command.downgrade(config, "08d406fa7f3b")
+
+
+def test_downgrade_goes_quietly_when_the_lot_still_carries_the_arrival_date(
+    engine: Engine,
+) -> None:
+    """**가드가 정상 경로를 막지 않는다.**
+
+    합격한 줄의 도착일은 로트에 같은 값이 남으므로 되돌려도 사라지지 않는다 —
+    멈추는 것이 설계라면 멈추지 않아야 할 때 멈추지 않는 것도 설계다.
+    """
+    schema = "received_date_downgrade_clean"
+    with _schema(engine, schema):
+        config = _upgrade_with(engine, schema, "head", _BEFORE_WRITE_PATH)
+        scoped = _engine_for_schema(engine, schema)
+        with scoped.begin() as conn:
+            for statement in _JUDGED_LOT.strip().split(";"):
+                if statement.strip():
+                    conn.execute(text(statement))
+
+        command.downgrade(config, "08d406fa7f3b")
+
+        with scoped.connect() as conn:
+            columns = conn.execute(
+                text(
+                    "SELECT column_name FROM information_schema.columns"
+                    " WHERE table_schema = :schema AND table_name = 'inspections'"
+                ),
+                {"schema": schema},
+            ).scalars()
+            assert "received_date" not in set(columns)
+
+
+def test_upgrading_stops_when_a_ledger_line_points_at_another_items_inspection(
+    engine: Engine,
+) -> None:
+    """**옮겨도 되는지 먼저 묻는다** (CodeRabbit 리뷰 NC-118).
+
+    앞 스키마의 외래키 둘은 원장 줄의 로트와 검사가 **각각 실재한다**까지만 봤고,
+    둘이 **같은 품목**인지는 보지 않았다. 어긋난 짝을 그대로 옮기면 「이 로트를
+    만든 검사」가 거짓이 되는데, 뒤따르는 쌍 외래키는 **새 관계가 실재하는지만**
+    보므로 그 거짓을 영영 잡지 못한다.
+
+    부분 유일 인덱스가 보장하는 것은 **로트당 입고 줄이 하나**라는 것뿐이다 —
+    데이터 단계가 기댄 전제가 거기서 한 겹 짧았다.
+    """
+    schema = "write_path_ledger_points_elsewhere"
+    with _schema(engine, schema):
+        config = _upgrade_with(engine, schema, "e84fbec436c0", _WITH_A_LEDGER_LINE)
+        scoped = _engine_for_schema(engine, schema)
+        with scoped.begin() as conn:
+            # 다른 품목(`RM-02`)을 하나 더 세운다 — 기본 픽스처는 `RM-01` 만
+            # 심으므로, 여기서 심지 않으면 아래 삽입이 **빈 동작**이 되고 이
+            # 검사가 아무것도 재지 않는다(실제로 한 번 그랬다).
+            conn.execute(
+                text(
+                    "INSERT INTO items (code, name, item_type, process, process_group,"
+                    " material_group, material_group_group, stock_uom, stock_uom_group,"
+                    " phase, safety_stock)"
+                    " VALUES ('RM-02', '다른 원자재', '원자재', '수입', 'PROCESS', '분체',"
+                    " 'MATERIAL_GROUP', 'KG', 'UOM', '양산', 100.0)"
+                )
+            )
+            # 그 품목을 판정한 검사를 세우고, 원장 줄이 **그쪽**을 가리키게 한다 —
+            # 앞 스키마는 이것을 막지 않는다.
+            conn.execute(
+                text(
+                    "INSERT INTO inspections (inspection_stage, stage_group, item_id,"
+                    " item_type, material_group, supplier_id, supplier_type,"
+                    " supplier_lot_number, quantity, judged_at, judged_by, result,"
+                    " nonconformity_group)"
+                    " SELECT 'IQC', 'INSP_STAGE', i.id, i.item_type, i.material_group,"
+                    " p.id, p.partner_type, 'SL-2026-0002', 100.0,"
+                    " TIMESTAMP '2026-09-21 10:00', '검사원 2', '합격', 'NC_REASON'"
+                    " FROM items AS i, partners AS p"
+                    " WHERE i.code = 'RM-02' AND p.code = 'SUP-01'"
+                )
+            )
+            conn.execute(
+                text(
+                    "UPDATE stock_ledger_entries SET inspection_id ="
+                    " (SELECT id FROM inspections ORDER BY id DESC LIMIT 1)"
+                )
+            )
+
+        with pytest.raises(Exception, match="다른 품목의 검사를 가리킨다"):
+            command.upgrade(config, "head")
+
+
+def test_upgrading_stops_when_two_lots_share_one_inspection(engine: Engine) -> None:
+    """**방향이 반대인 자리** (Codex 리뷰 NC-119).
+
+    부분 유일 인덱스는 `lot_id` 에만 걸려 있고 원장의 `inspection_id` 에는 유일
+    제약이 없다 — **한 검사를 두 로트의 입고 줄이 가리킬 수 있다.** 그대로
+    옮기면 `uq_lot_inspection` 이 물어 멈추는데, 거기서 나오는 말은 제약 이름이라
+    배포하는 사람이 **어느 줄 때문인지** 모른다.
+    """
+    schema = "write_path_two_lots_one_inspection"
+    with _schema(engine, schema):
+        config = _upgrade_with(engine, schema, "e84fbec436c0", _WITH_A_LEDGER_LINE)
+        scoped = _engine_for_schema(engine, schema)
+        with scoped.begin() as conn:
+            # 같은 품목의 둘째 로트를 세우고 **같은 검사**를 가리키는 입고 줄을
+            # 붙인다 — 부분 유일 인덱스는 로트가 다르므로 이것을 막지 않는다.
+            conn.execute(
+                text(
+                    "INSERT INTO lots (item_id, item_type, lot_number, lot_origin,"
+                    " warehouse, stock_type, quantity, received_date)"
+                    " SELECT i.id, i.item_type, 'SL-2026-0002', '공급사', '원재료',"
+                    " '양품', 100.0, DATE '2026-09-21'"
+                    " FROM items AS i WHERE i.code = 'RM-01'"
+                )
+            )
+            conn.execute(
+                text(
+                    "INSERT INTO stock_ledger_entries (lot_id, txn_type, txn_type_group,"
+                    " quantity, occurred_at, inspection_id)"
+                    " SELECT l.id, '구매입고', 'TXN_TYPE', 100.0,"
+                    " TIMESTAMP '2026-09-21 10:00', e.inspection_id"
+                    " FROM lots AS l, stock_ledger_entries AS e"
+                    " WHERE l.lot_number = 'SL-2026-0002'"
+                )
+            )
+
+        with pytest.raises(Exception, match="여러 로트의 입고 줄이 가리킨다"):
+            command.upgrade(config, "head")
+
+
+# ── 조각 7 — 판정 시점의 단위 (`b41d7c8e5a92`) ──────────────────────────────
+
+_WITH_A_MEASUREMENT = (
+    _BEFORE_WRITE_PATH
+    + """
+INSERT INTO common_codes (group_code, code, name) VALUES ('INSP_ITEM', '입도', '입도');
+
+INSERT INTO process_inspection_standards
+  (process_group, process_code, item_group, item_code, material_group, material_group_group,
+   upper_spec_limit, lower_spec_limit, center_line, warning_ratio, sigma_source, time_variant,
+   unit)
+VALUES ('PROCESS','수입','INSP_ITEM','입도','분체','MATERIAL_GROUP',
+        50.0, 10.0, 30.0, 0.70, '미정', FALSE, 'µm');
+
+INSERT INTO inspection_measurements
+  (inspection_id, item_code, process_code, material_group, measured_value,
+   applied_upper_spec, applied_lower_spec)
+SELECT i.id, '입도', '수입', '분체', 30.0, 50.0, 10.0 FROM inspections AS i;
+"""
+)
+
+
+def _code_group_for_inspection_items(engine: Engine, schema: str) -> None:
+    """`INSP_ITEM` 그룹은 기본 픽스처에 없다 — 기준 줄이 그것을 가리킨다."""
+    scoped = _engine_for_schema(engine, schema)
+    with scoped.begin() as conn:
+        conn.execute(
+            text(
+                "INSERT INTO code_groups (group_code, name, value_fixed, description)"
+                " VALUES ('INSP_ITEM', '검사항목', FALSE, '시험')"
+            )
+        )
+
+
+def test_the_data_step_moves_the_unit_from_the_standard(engine: Engine) -> None:
+    """**복원이 아니라 고정이다** (Codex 리뷰 NC-122).
+
+    옛 줄에는 그때의 단위가 없고 되찾을 방법도 없다 — 여기서 하는 일은 **지금
+    읽히는 값**을 그 줄에 박아 **이 뒤로는 갈리지 않게** 하는 것뿐이다.
+    """
+    schema = "applied_unit_data_step"
+    with _schema(engine, schema):
+        config = _config_for_schema(engine, schema)
+        command.upgrade(config, "e84fbec436c0")
+        _code_group_for_inspection_items(engine, schema)
+        scoped = _engine_for_schema(engine, schema)
+        with scoped.begin() as conn:
+            for statement in _WITH_A_MEASUREMENT.strip().split(";"):
+                if statement.strip():
+                    conn.execute(text(statement))
+
+        command.upgrade(config, "head")
+
+        with scoped.connect() as conn:
+            pinned = (
+                conn.execute(text("SELECT applied_unit FROM inspection_measurements"))
+                .scalars()
+                .all()
+            )
+
+    assert pinned == ["µm"], pinned
+
+
+def test_downgrade_goes_quietly_when_the_standard_still_says_the_same(engine: Engine) -> None:
+    """**멈추지 않아야 할 때 멈추지 않는 것도 설계다.**
+
+    외래키가 사는 동안 이 칸은 기준의 단위와 같음이 보증되므로, 지워도 기준에서
+    다시 만들 수 있다 — 그 가능성의 근거가 바로 그 외래키다(W-6).
+    """
+    schema = "applied_unit_downgrade_clean"
+    with _schema(engine, schema):
+        config = _config_for_schema(engine, schema)
+        command.upgrade(config, "e84fbec436c0")
+        _code_group_for_inspection_items(engine, schema)
+        scoped = _engine_for_schema(engine, schema)
+        with scoped.begin() as conn:
+            for statement in _WITH_A_MEASUREMENT.strip().split(";"):
+                if statement.strip():
+                    conn.execute(text(statement))
+        command.upgrade(config, "head")
+
+        command.downgrade(config, "a7c14b3e9052")
+
+        with scoped.connect() as conn:
+            columns = conn.execute(
+                text(
+                    "SELECT column_name FROM information_schema.columns"
+                    " WHERE table_schema = :schema AND table_name = 'inspection_measurements'"
+                ),
+                {"schema": schema},
+            ).scalars()
+            assert "applied_unit" not in set(columns)
+
+
+def test_downgrade_says_which_measurements_would_lose_their_unit(engine: Engine) -> None:
+    """**가드가 외래키에 기대지 않는다.**
+
+    되돌림의 근거는 「기준에서 다시 만들 수 있다」이고 그것을 보증하는 것이
+    외래키인데, **가드가 그 외래키가 서 있다고 전제하면** 누군가 그것을 떼어 낸
+    데이터베이스에서 값이 조용히 사라진다. 그래서 가드는 외래키가 아니라
+    **실제 값**을 견준다 — 여기서는 떼어 내고 갈라 놓아 그것을 잰다.
+    """
+    schema = "applied_unit_downgrade_guard"
+    with _schema(engine, schema):
+        config = _config_for_schema(engine, schema)
+        command.upgrade(config, "e84fbec436c0")
+        _code_group_for_inspection_items(engine, schema)
+        scoped = _engine_for_schema(engine, schema)
+        with scoped.begin() as conn:
+            for statement in _WITH_A_MEASUREMENT.strip().split(";"):
+                if statement.strip():
+                    conn.execute(text(statement))
+        command.upgrade(config, "head")
+        with scoped.begin() as conn:
+            conn.execute(
+                text(
+                    "ALTER TABLE inspection_measurements"
+                    " DROP CONSTRAINT fk_inspection_measurement_unit"
+                )
+            )
+            conn.execute(text("UPDATE process_inspection_standards SET unit = 'mm'"))
+
+        with pytest.raises(Exception, match="단위를 되찾을 수 없다"):
+            command.downgrade(config, "a7c14b3e9052")
+
+
+def test_upgrading_says_which_standard_measures_without_a_unit(engine: Engine) -> None:
+    """**제약이 먼저 걸리면 무엇을 고쳐야 하는지 모른 채로 멈춘다** (CodeRabbit 리뷰 NC-126).
+
+    앞 스키마는 **재는 기준의 단위 비움**을 막지 않았으므로 그런 줄이 실재할 수
+    있다. 조이는 CHECK 가 먼저 서면 나오는 말이 **제약 이름뿐**이고, 배포하는
+    사람은 어느 기준을 고쳐야 하는지 알 수 없다 — 조이기 전에 묻는다.
+    """
+    schema = "applied_unit_unitless_standard"
+    with _schema(engine, schema):
+        config = _config_for_schema(engine, schema)
+        command.upgrade(config, "e84fbec436c0")
+        _code_group_for_inspection_items(engine, schema)
+        scoped = _engine_for_schema(engine, schema)
+        with scoped.begin() as conn:
+            for statement in _WITH_A_MEASUREMENT.strip().split(";"):
+                if statement.strip():
+                    conn.execute(text(statement))
+            # 앞 스키마가 허용하던 줄 — 재는 기준인데 단위가 없다.
+            conn.execute(text("UPDATE process_inspection_standards SET unit = NULL"))
+
+        with pytest.raises(Exception, match="재는 기준인데 단위가 없다"):
+            command.upgrade(config, "head")
+
+
+def test_upgrading_says_which_standard_holds_a_unit_that_only_looks_like_one(
+    engine: Engine,
+) -> None:
+    """**「있다」를 통과하는 빈 단위도 이름으로 말한다** (Codex 리뷰 NC-127).
+
+    빈 문자열과 탭 · 전각 공백은 위의 가드도 `IS NOT NULL` 도 지나간다. 그런
+    기준이 서 있으면 측정 줄이 **빈 단위를 들고** 쌍 외래키를 지나므로, 조이는
+    CHECK 가 그것을 막는다 — 그리고 막히는 줄을 **조이기 전에** 묻는다.
+    """
+    schema = "applied_unit_hollow_standard"
+    with _schema(engine, schema):
+        config = _config_for_schema(engine, schema)
+        command.upgrade(config, "e84fbec436c0")
+        _code_group_for_inspection_items(engine, schema)
+        scoped = _engine_for_schema(engine, schema)
+        with scoped.begin() as conn:
+            for statement in _WITH_A_MEASUREMENT.strip().split(";"):
+                if statement.strip():
+                    conn.execute(text(statement))
+            # 앞 스키마가 허용하던 줄 — 눈에는 비어 보이는데 비어 있지 않다.
+            conn.execute(text("UPDATE process_inspection_standards SET unit = '\u3000'"))
+
+        with pytest.raises(Exception, match="단위가 비어 보이는데 비어 있지 않다"):
+            command.upgrade(config, "head")

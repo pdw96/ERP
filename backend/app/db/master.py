@@ -118,6 +118,14 @@ class Item(Base):
             f"(item_type = '{codes.RAW_MATERIAL}') = (material_group IS NOT NULL)",
             name="ck_item_material_group_matches_type",
         ),
+        # `uq_item_id_type` 과 **같은 이유로** 둔다 — `id` 가 이미 기본키라 행을
+        # 좁히지 않지만, 복합 외래키의 상대가 되려면 그 쌍이 유일키여야 한다.
+        #
+        # 가리키는 쪽은 검사 기록이다. 검사가 자기 품목의 자재군을 들고 있어야
+        # **측정 줄이 그 무리의 기준만 가리키게** 묶을 수 있고, 그 묶음이 없으면
+        # 분말을 받은 검사에 점도 기준이 붙는다 — 자재군 축이 닫은 자리가 한 겹
+        # 아래에서 다시 열린다.
+        UniqueConstraint("id", "material_group", name="uq_item_id_material_group"),
     )
 
     id: Mapped[int] = mapped_column(primary_key=True)

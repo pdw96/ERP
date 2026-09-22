@@ -1,5 +1,10 @@
 -r requirements.txt
 
+# **httpx2** — starlette 의 `TestClient` 가 이것 위에 서 있다. 엔드포인트를
+# 실제로 불러 보는 테스트가 서버를 띄우지 않고 앱에 직접 붙을 수 있게 한다.
+# 이름에 2 가 붙은 것은 httpx 의 다음 세대라서이며, starlette 1.6 이 옛 httpx 를
+# 폐기하고 **이것을 지목한다** — 러너가 아니라 테스트가 부르므로 개발 의존성이다.
+httpx2==2.13.0
 pytest==8.3.4
 ruff==0.8.4
 mypy==1.14.0

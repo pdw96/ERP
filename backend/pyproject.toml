@@ -55,5 +55,13 @@ disallow_untyped_defs = false
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 # 실패를 조용히 넘기지 않는다 — 경고도 실패로 올린다.
-filterwarnings = ["error"]
+filterwarnings = [
+    "error",
+    # **서드파티 하나만 좁게 뺀다.** starlette 의 `testclient` 가 import 시점에
+    # `anyio.abc.BlockingPortal` 을 부르는데 anyio 가 그 별칭을 폐기했다. 고칠
+    # 자리가 우리 코드가 아니고, 통째로 끄면 우리 코드의 폐기 경고까지 함께
+    # 사라진다. **메시지를 그대로 적어** 무엇을 빼고 있는지 읽히게 둔다 —
+    # starlette 가 고치는 날 이 줄은 아무것도 막지 않게 된다.
+    "ignore:The anyio.abc.BlockingPortal alias is deprecated:DeprecationWarning",
+]
 addopts = "-ra --strict-markers --strict-config"
