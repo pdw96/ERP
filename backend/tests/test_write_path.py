@@ -1060,3 +1060,48 @@ def test_a_standard_no_measurement_cites_may_still_fix_its_unit(prepared: Sessio
     prepared.flush()
 
     assert standard.unit == "mm"
+
+
+def test_a_measurement_cannot_be_written_without_its_unit(prepared: Session) -> None:
+    """**쓰는 쪽이 비우는 것만으로 잠금을 빠져나가지 못한다** (Codex 리뷰 NC-124).
+
+    복합 외래키는 한 칸이라도 `NULL` 이면 검사하지 않는다. 기준에 단위가 있어도
+    이 줄이 비우면 그만이라, NC-122 의 잠금이 **쓰는 쪽의 선의**에 달려 있었다.
+    """
+    receive(prepared, _request())
+    row = prepared.query(InspectionMeasurement).filter_by(item_code=_GRAIN).one()
+
+    row.applied_unit = None
+    with pytest.raises(IntegrityError, match="applied_unit"):
+        prepared.flush()
+
+
+def test_a_counted_reason_whose_standard_measures_is_refused(prepared: Session) -> None:
+    """**사유가 계수라고 말해도 그 항목의 기준이 재면 재는 것이다** (Codex 리뷰 NC-125).
+
+    NC-121 이 「이 자재군이 보는 항목인가」까지 좁혔는데, **보는 항목이 재는
+    항목일 수 있다.** 그 줄로 **규격 안인데 불합격**을 만들 수 있고, 그것이
+    원칙 ③ 이 없애려는 자리다 — 「어느 표가 맞는가」는 **기준을 따른다.**
+    """
+    add_code(prepared, codes.NC_REASON, "IQ-ODD", "어긋난 사유")
+    prepared.flush()
+    # 계수라고 말하면서 **재는 항목**(`_GRAIN`, 규격 50/10)을 가리킨다.
+    prepared.add(
+        NonconformityAttribute(
+            code="IQ-ODD", measure_kind=codes.COUNTED_KIND, inspection_item_code=_GRAIN
+        )
+    )
+    prepared.add(
+        NonconformityStageRule(
+            reason_code="IQ-ODD",
+            stage_code=codes.STAGE_INCOMING,
+            disposition="반품",
+            special_acceptance_allowed=False,
+        )
+    )
+    prepared.flush()
+
+    with pytest.raises(RefusedInspection, match="재는 항목이다"):
+        receive(prepared, _request(nonconformity_code="IQ-ODD"))
+
+    assert prepared.query(Inspection).count() == 0

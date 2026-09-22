@@ -339,9 +339,11 @@ class InspectionMeasurement(Base):
         # 「이미 특채를 낸 사유의 플래그를 끌 수 없다」와 같은 자리다 — 거래
         # 데이터가 자기 근거를 잠근다.
         #
-        # **이 외래키가 못 보는 부류**: `applied_unit` 이 비면 복합 외래키가
-        # 통째로 건너뛰어진다. 세는 항목이 거기 들어가는데, 세는 항목은 잰 줄이
-        # 서지 않으므로(위 CHECK) 오늘은 닿지 않는다.
+        # **이 외래키가 빠져나갈 수 있는 자리를 둘 다 닫았다.** `NULL` 이 한 칸이라도
+        # 있으면 검사하지 않으므로, 기준 쪽은 CHECK 로(재는 기준에는 단위가 있다)
+        # 이 줄 쪽은 `NOT NULL` 로 막는다. 처음에는 「세는 항목만 거기 들어간다」고
+        # 적었는데 **둘 다 좁았다** — 기준이 비울 수도 있었고 쓰는 쪽이 비울 수도
+        # 있었다(NC-123 · NC-124).
         ForeignKeyConstraint(
             ["process_code", "item_code", "material_group", "applied_unit"],
             [
@@ -412,6 +414,12 @@ class InspectionMeasurement(Base):
     # 천 배 달라진다.** 규격을 박아 두는 이유가 「기준이 바뀌어도 그때 그 판정은
     # 그대로」인데 그 적용이 절반이었다(Codex 리뷰 NC-122).
     #
-    # **세는 항목에는 비어 있다** — 재지 않으므로 단위가 없다. 그래서 널 허용이고,
-    # 아래 쌍 외래키가 그 줄에서는 건너뛰어진다.
-    applied_unit: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    # **비울 수 없다.** 널 허용으로 두면 **쓰는 쪽이 비우는 것만으로** 아래 쌍
+    # 외래키를 빠져나간다 — 복합 외래키는 한 칸이라도 `NULL` 이면 검사하지 않기
+    # 때문이다(Codex 리뷰 NC-124). 기준에 단위가 있어도 이 줄이 비우면 그만이라,
+    # 잠금이 **쓰는 쪽의 선의에 달려 있었다.**
+    #
+    # 세는 항목은 잰 줄이 서지 않으므로(위 CHECK) 여기에 들어올 일이 없고,
+    # 재는 기준에는 단위가 반드시 있다(`ck_inspection_standard_measured_has_a_unit`).
+    # 그 둘이 서 있어야 이 `NOT NULL` 이 사실을 막지 않는다.
+    applied_unit: Mapped[str] = mapped_column(String(20))

@@ -113,6 +113,8 @@ def _measurement(session: Session, **overrides: object) -> InspectionMeasurement
         "measured_value": 30.0,
         "applied_upper_spec": 50.0,
         "applied_lower_spec": 10.0,
+        # **비울 수 없다** — 비우면 단위 잠금을 그냥 빠져나간다(NC-124).
+        "applied_unit": "µm",
     }
     fields.update(overrides)
     return InspectionMeasurement(**fields)

@@ -510,3 +510,26 @@ def test_every_measured_standard_says_in_what_unit(blank: Engine) -> None:
         )
         == 0
     )
+
+
+def test_no_counted_reason_points_at_a_measured_standard(blank: Engine) -> None:
+    """**사유가 계수라고 말하는 항목은 기준도 계수여야 한다** (Codex 리뷰 NC-125).
+
+    갈리면 그 사유로 **규격 안인데 불합격**을 만들 수 있다 — 사람이 계산을
+    덮는 자리이고 원칙 ③ 이 없애려는 것이다. 쓰기 경로가 요청을 거절하지만
+    **거절이 나는 것 자체가 기준정보가 어긋났다는 뜻**이라, 시드 쪽에서도
+    잰다.
+    """
+    seed_module.seed(blank)
+
+    assert (
+        _count(
+            blank,
+            "nonconformity_attributes AS a"
+            " JOIN process_inspection_standards AS s"
+            " ON s.item_code = a.inspection_item_code AND s.process_code = '수입'",
+            "a.measure_kind = '계수' AND a.inspection_item_code IS NOT NULL"
+            " AND (s.upper_spec_limit IS NOT NULL OR s.lower_spec_limit IS NOT NULL)",
+        )
+        == 0
+    )

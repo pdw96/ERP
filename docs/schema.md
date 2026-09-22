@@ -462,7 +462,7 @@ PostgreSQL 의 외래키가 기본키나 유일키에만 붙기 때문이다.
 | `process_code` · `material_group` | 복합 FK → 기준 표 (`item_code` 와 함께) | 기준이 실재함을 DB 가 보증한다 |
 | `measured_value` | float | `is_finite()` — **하한이 없으므로 단독으로** |
 | `applied_upper_spec` · `applied_lower_spec` | float NULL | **판정 시점의 규격.** 각각은 빌 수 있어도 둘 다 비지는 못한다 |
-| `applied_unit` | str(20) NULL | **그 숫자의 뜻.** 규격만 박고 단위를 두고 오면, 기준에서 `µm` → `mm` 로 고치는 순간 숫자는 그대로인데 **읽히는 뜻이 천 배 달라진다.** 세는 항목에는 비어 있다 |
+| `applied_unit` | str(20) | **그 숫자의 뜻.** 비울 수 없다 — 비우면 아래 쌍 외래키를 그냥 빠져나간다. 규격만 박고 단위를 두고 오면, 기준에서 `µm` → `mm` 로 고치는 순간 숫자는 그대로인데 **읽히는 뜻이 천 배 달라진다.** 세는 항목은 잰 줄이 서지 않으므로 여기 들어오지 않는다 |
 
 **제약**
 - `FK (inspection_id, material_group) → inspections` — **검사와 같은 자재군이어야 한다**

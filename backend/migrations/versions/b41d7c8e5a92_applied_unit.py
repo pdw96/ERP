@@ -82,6 +82,28 @@ def upgrade() -> None:
         "process_inspection_standards",
         "(upper_spec_limit IS NULL AND lower_spec_limit IS NULL) OR unit IS NOT NULL",
     )
+    # **이 줄 쪽에서도 비울 수 없게 한다.** 기준에 단위가 있어도 쓰는 쪽이 이 칸을
+    # 비우면 아래 외래키를 그냥 빠져나간다 — 잠금이 **쓰는 쪽의 선의**에 달려
+    # 있었다. 조이기 전에 조일 수 없는 줄을 이름으로 말한다: 재지 않는 기준을
+    # 가리키는 측정 줄은 단위를 가져올 데가 없다.
+    op.execute(
+        """
+        DO $$
+        DECLARE unmeasured text;
+        BEGIN
+          SELECT string_agg(m.inspection_id::text || '/' || m.item_code, ', '
+                            ORDER BY m.inspection_id, m.item_code) INTO unmeasured
+          FROM inspection_measurements AS m
+          WHERE m.applied_unit IS NULL;
+          IF unmeasured IS NOT NULL THEN
+            RAISE EXCEPTION
+              '이 측정 줄이 가리키는 기준에 단위가 없다: %. 재지 않는 기준에 잰 줄이 선 것이므로 사람이 먼저 가른다',
+              unmeasured;
+          END IF;
+        END $$;
+        """
+    )
+    op.alter_column("inspection_measurements", "applied_unit", nullable=False)
     op.create_unique_constraint(
         "uq_inspection_standard_unit",
         "process_inspection_standards",

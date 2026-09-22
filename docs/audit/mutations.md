@@ -135,3 +135,11 @@
 |---|---|---|
 | 123 | `ck_inspection_standard_measured_has_a_unit` 의 식을 `TRUE` 로 | `test_a_standard_that_measures_must_say_in_what_unit` · 대조 테스트 |
 | 123 | 시드의 `입도` 에서 단위를 지웠다 | **CHECK 가 심는 단계에서 거부해** 시드를 쓰는 검사가 전부 빨갛다 — 시드 쪽 검사는 그 위의 덧대기이고, 무는 것은 제약이다 |
+
+## Codex 리뷰의 고침 — `94cbd51` 뒤
+
+| NC | 무엇을 어긋냈나 | 빨개진 검사 |
+|---|---|---|
+| 124 | `applied_unit` 을 널 허용으로 되돌렸다(모델과 리비전을 함께) | `test_a_measurement_cannot_be_written_without_its_unit` — **대조 테스트는 초록이다**(둘을 함께 어긋냈으므로). 구조가 갈렸는지가 아니라 **무엇을 막는지**를 재는 검사라야 무는 자리다 |
+| 125 | `if _measures(standards[...]):` 를 `if False:` 로 | `test_a_counted_reason_whose_standard_measures_is_refused` |
+| 125 | 시드에서 `IQ-FM` 이 `이물` 대신 `입도`(재는 항목)를 가리키게 했다 | `test_no_counted_reason_points_at_a_measured_standard` · `test_every_standard_has_a_reason_that_can_use_it` |

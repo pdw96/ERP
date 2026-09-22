@@ -80,6 +80,7 @@ SUPPLIER_IS_NOT_ACTIVE = "supplier_is_not_active"
 REASON_IS_NOT_A_COUNTED_ONE = "reason_is_not_a_counted_one"
 REASON_IS_DERIVED_BY_THE_SYSTEM = "reason_is_derived_by_the_system"
 REASON_IS_NOT_INSPECTED_FOR_THIS_MATERIAL = "reason_is_not_inspected_for_this_material"
+REASON_POINTS_AT_A_MEASURED_ITEM = "reason_points_at_a_measured_item"
 ITEM_IS_NOT_MEASURED = "item_is_not_measured"
 LOT_NUMBER_WOULD_NOT_FIT = "lot_number_would_not_fit"
 MATERIAL_IS_ALREADY_EXPIRED = "material_is_already_expired"
@@ -250,6 +251,20 @@ def _must_be_a_reason_a_person_inspects(
             REASON_IS_NOT_INSPECTED_FOR_THIS_MATERIAL,
             f"{reason_code} 가 가리키는 항목({attribute.inspection_item_code})은"
             " 이 자재군의 수입 기준에 없다 — 보지 않는 것으로 떨어뜨릴 수 없다",
+        )
+    if _measures(standards[attribute.inspection_item_code]):
+        # **④ 사유가 계수라고 말해도 그 항목의 기준이 재고 있으면 재는 것이다.**
+        # 「어느 표가 맞는가」를 여기서 가르지 않고 **기준을 따른다** — 판정의
+        # 근거는 기준이고, 사유의 성질 칸은 그것을 가리키는 표시일 뿐이다.
+        # 어긋났다면 기준정보가 어긋난 것이며, 그 줄로 **규격 안인데 불합격**을
+        # 만들 수 있다(Codex 리뷰 NC-125).
+        #
+        # 오늘의 시드에서는 갈릴 자리가 없다 — 사람이 적을 수 있는 셋이 모두
+        # 규격 없는 기준을 가리킨다. `tests/test_seed.py` 가 그것을 잰다.
+        raise RefusedInspection(
+            REASON_POINTS_AT_A_MEASURED_ITEM,
+            f"{reason_code} 가 가리키는 항목({attribute.inspection_item_code})은"
+            " 이 자재군에서 재는 항목이다 — 재는 항목의 판정은 측정값에서만 나온다",
         )
 
 

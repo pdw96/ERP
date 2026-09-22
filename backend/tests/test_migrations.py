@@ -1263,8 +1263,9 @@ INSERT INTO process_inspection_standards (process_code, process_group, item_code
 VALUES ('수입', 'PROCESS', '입도', 'INSP_ITEM', '분체', 'MATERIAL_GROUP', 50.0, 10.0, 'µm');
 
 INSERT INTO inspection_measurements (inspection_id, item_code, process_code, material_group,
-                                     measured_value, applied_upper_spec, applied_lower_spec)
-SELECT i.id, '입도', '수입', '분체', 30.0, 50.0, 10.0 FROM inspections AS i;
+                                     measured_value, applied_upper_spec, applied_lower_spec,
+                                     applied_unit)
+SELECT i.id, '입도', '수입', '분체', 30.0, 50.0, 10.0, 'µm' FROM inspections AS i;
 """
 )
 
