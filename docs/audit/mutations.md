@@ -123,6 +123,19 @@
 붙지 않았다 — 하필 **축이 가장 필요한 응답**이다. 검사를 먼저 쓰지 않았으면
 「달았다」로 끝났을 자리다.
 
+## 감사 ⑮ 의 고침 (`b2bb637`)
+
+| NC | 무엇을 어긋냈나 | 빨개진 검사 |
+|---|---|---|
+| 153 | `## 감사 ⑬ 의 고침 (\`0d9a96d\`)` 을 `## 감사 ⑬ 가 돌린 어긋냄` 으로(해시도 함께 뗐다) | **고치기 전에는 없다 — 통과했다.** 고친 뒤 `test_a_mutation_bundle_says_which_commit_it_was_measured_on` |
+| 155 | `backend/.dockerignore` 에 `migrations/` 를 한 줄 더했다 | **고치기 전에는 없다 — 364 개가 전부 통과했다.** 고친 뒤 `test_the_build_context_still_carries_what_the_image_needs_to_boot` |
+| 155 | `chmod -x backend/docker-entrypoint.sh` | **고치기 전에는 없다 — `pytest` 도 `shellcheck` 도 통과했다.** 고친 뒤 `test_the_entrypoint_is_executable` |
+| 154 | 저장소 루트에 `.sh` 파일을 하나 심고 `git ls-files '*.sh'` 와 `:(top)*.sh` 를 견줬다 | 검사가 아니라 **명령의 범위**를 쟀다 — 기본 경로명세가 그 파일을 놓쳤다 |
+
+**셋 다 「고치기 전에는 통과, 고친 뒤에는 빨강」이다** — 어긋냄이 결함을 먼저
+보이고 고침이 그것을 물게 한 순서다. 이 회차의 어긋냄은 감사자가 「돌려 봐야
+확정된다」고 지목한 것을 그대로 돌린 것이고, 셋 다 감사자의 예측대로였다.
+
 ## Codex 리뷰의 고침 (`d6b350c`)
 
 | NC | 무엇을 어긋냈나 | 빨개진 검사 |
