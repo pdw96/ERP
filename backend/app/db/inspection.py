@@ -332,6 +332,13 @@ class InspectionMeasurement(Base):
             ],
             name="fk_inspection_measurement_standard",
         ),
+        # **「단위에 뜻이 있다」를 이 줄에 또 적지 않는다** (Codex 리뷰 NC-127).
+        # 빈 문자열과 탭·전각 공백은 `NOT NULL` 을 지나가지만, 그 명제는 기준 표의
+        # `ck_inspection_standard_unit_means_something` 이 이미 들고 있고 **아래
+        # 외래키가 그것을 이 줄까지 나른다** — 이 쪽 네 칸이 전부 `NOT NULL` 이라
+        # 건너뛰지 않으므로, 빈 단위가 앉을 기준이 없으면 이 줄도 설 수 없다.
+        # 같은 명제를 여기 한 벌 더 두면 고칠 때 한 자리가 남고, 실제로 **그것을
+        # 물게 하는 검사를 쓸 수 없었다**(`docs/audit/mutations.md` NC-127).
         # **단위도 쌍으로 가리킨다.** 박아 두는 것만으로는 이 줄의 단위와 기준의
         # 단위가 **갈릴 수 있다** — 그리고 갈린 쪽이 옳은지 말해 줄 것이 없다.
         # 쌍으로 가리키면 둘은 갈릴 수 없고, **가리키는 줄이 있는 동안 기준의

@@ -342,6 +342,61 @@ def test_a_standard_that_measures_must_say_in_what_unit(prepared: Session) -> No
         prepared.flush()
 
 
+@pytest.mark.parametrize("blank", ["", " ", "\t", "\u3000"])
+def test_a_unit_that_only_looks_like_one_is_refused(prepared: Session, blank: str) -> None:
+    """**「있다」로는 모자라 「뜻이 있다」를 묻는다** (Codex 리뷰 NC-127).
+
+    `IS NOT NULL` 만 보면 빈 문자열과 탭 · 전각 공백이 지나간다 — 그러면 단위를
+    지키는 가드가 **전부 통과하는데** 그 단위에 아무 뜻이 없다. 이 저장소에 이미
+    `is_present()` 가 있었고, 그것을 쓰지 않은 것이 빠뜨린 자리다.
+    """
+    prepared.add(_standard("이물", material_group=OTHER_GROUP, unit=blank))
+    with pytest.raises(IntegrityError, match="ck_inspection_standard_unit_means_something"):
+        prepared.flush()
+
+
+@pytest.mark.parametrize("blank", ["", " ", "\t", "\u3000"])
+def test_even_a_standard_that_only_counts_cannot_hold_a_hollow_unit(
+    prepared: Session, blank: str
+) -> None:
+    """**재는 기준만 묻지 않는다** (Codex 리뷰 NC-127).
+
+    세는 기준의 단위가 비어 있는 것은 「잴 것이 없다」는 뜻이고 그 자리는
+    `NULL` 이다. 거기에 빈 문자열이 앉으면 「빈 기준정보」가 되고, **그 줄이
+    측정 줄의 빈 단위에 짝을 만들어 준다** — 아래 검사가 그 문이 닫혔음을 잰다.
+    """
+    prepared.add(
+        _standard(
+            "이물",
+            material_group=OTHER_GROUP,
+            upper_spec_limit=None,
+            lower_spec_limit=None,
+            center_line=None,
+            unit=blank,
+        )
+    )
+    with pytest.raises(IntegrityError, match="ck_inspection_standard_unit_means_something"):
+        prepared.flush()
+
+
+@pytest.mark.parametrize("blank", ["", " ", "\t", "\u3000"])
+def test_a_measurement_unit_that_only_looks_like_one_has_nowhere_to_land(
+    prepared: Session, blank: str
+) -> None:
+    """**이 줄에 같은 CHECK 를 또 걸지 않는다 — 외래키가 그것을 나른다.**
+
+    빈 단위가 이 줄에 앉으려면 **같은 빈 단위를 든 기준**이 있어야 하는데, 위의
+    두 검사가 그런 기준이 설 수 없음을 잰다. 이 쪽 네 칸은 전부 `NOT NULL` 이라
+    쌍 외래키가 건너뛰지 않으므로, 짝이 없는 단위는 여기서 걸린다.
+
+    **무는 것은 `fk_inspection_measurement_unit` 이고 그것이 맞다** — 같은 명제를
+    이 표에도 한 벌 두면 고칠 때 한 자리가 남는다(Codex 리뷰 NC-127).
+    """
+    prepared.add(_measurement(prepared, applied_unit=blank))
+    with pytest.raises(IntegrityError, match="fk_inspection_measurement_unit"):
+        prepared.flush()
+
+
 def test_a_standard_that_only_counts_needs_no_unit(prepared: Session) -> None:
     """**가드가 정상 경로를 막지 않는다.**
 

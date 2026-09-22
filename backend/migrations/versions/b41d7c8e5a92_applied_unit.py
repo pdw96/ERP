@@ -27,12 +27,15 @@
 채우는 것은 **「지금 읽히고 있는 값」을 고정하는 것**이지 복원이 아니다 — 이 리비전
 뒤로는 갈리지 않는다는 것이 이 단계가 주는 전부다.
 
-**올릴 때 멈출 수 있다 — 두 자리에서, 이름을 말하고.** 처음에는 「멈추지 않는다」고
-적었는데 그것은 이 리비전이 널 허용 칸 하나만 더하던 때의 말이었다. 조이는 것이
-둘 늘면서 옛 스키마가 **허용하던 줄**이 걸릴 수 있게 됐다 —
+**올릴 때 멈출 수 있다 — 아래의 자리마다, 이름을 말하고.** 처음에는 「멈추지
+않는다」고 적었는데 그것은 이 리비전이 널 허용 칸 하나만 더하던 때의 말이었다.
+조이는 것이 늘면서 옛 스키마가 **허용하던 줄**이 걸릴 수 있게 됐다 —
 
 - **재는 기준인데 단위가 없는 줄.** 앞 스키마는 이것을 막지 않았다. 그 줄이 있으면
   아래 CHECK 가 걸리는데, 거기서 나오는 말은 제약 이름이라 **어느 기준인지** 모른다
+- **단위가 비어 보이는데 비어 있지 않은 줄.** 빈 문자열과 탭·전각 공백은 「있다」를
+  통과하면서 뜻이 없고, 그런 기준이 서 있으면 측정 줄이 **빈 단위를 들고** 아래
+  외래키를 지난다. 재는 기준만 묻지 않는 이유가 그것이다
 - **단위를 가져올 데가 없는 측정 줄.** 재지 않는 기준을 가리키는 잰 줄이며, 조이기
   전에 이름으로 말한다
 
@@ -115,6 +118,35 @@ def upgrade() -> None:
         "process_inspection_standards",
         "(upper_spec_limit IS NULL AND lower_spec_limit IS NULL) OR unit IS NOT NULL",
     )
+    # **「있다」로는 모자라 「뜻이 있다」를 묻는다.** 빈 문자열과 탭·전각 공백은
+    # 위의 CHECK 도 아래의 유일키도 지나가는데 그 단위에는 아무 뜻이 없고, 그런
+    # 기준이 서 있으면 측정 줄이 **빈 단위를 들고** 아래 외래키를 통과한다.
+    # 재는 기준만 묻지 않는 이유가 그것이다 — 세는 기준의 빈 문자열도 같은 문을
+    # 연다(Codex 리뷰 NC-127).
+    op.execute(
+        """
+        DO $$
+        DECLARE hollow text;
+        BEGIN
+          SELECT string_agg(s.process_code || '/' || s.item_code
+                            || coalesce('/' || s.material_group, ''), ', '
+                            ORDER BY s.process_code, s.item_code) INTO hollow
+          FROM process_inspection_standards AS s
+          WHERE s.unit IS NOT NULL
+            AND btrim(s.unit, E' \t\n\r\u3000\u00a0') = '';
+          IF hollow IS NOT NULL THEN
+            RAISE EXCEPTION
+              '단위가 비어 보이는데 비어 있지 않다: %. 정한 사람이 없으면 NULL 로 두고 재는 기준이면 사람이 먼저 적는다',
+              hollow;
+          END IF;
+        END $$;
+        """
+    )
+    op.create_check_constraint(
+        "ck_inspection_standard_unit_means_something",
+        "process_inspection_standards",
+        "unit IS NULL OR btrim(unit, E' \\t\\n\\r\\u3000\\u00a0') <> ''",
+    )
     # **이 줄 쪽에서도 비울 수 없게 한다.** 기준에 단위가 있어도 쓰는 쪽이 이 칸을
     # 비우면 아래 외래키를 그냥 빠져나간다 — 잠금이 **쓰는 쪽의 선의**에 달려
     # 있었다. 조이기 전에 조일 수 없는 줄을 이름으로 말한다: 재지 않는 기준을
@@ -184,6 +216,11 @@ def downgrade() -> None:
     )
     op.drop_constraint(
         "uq_inspection_standard_unit", "process_inspection_standards", type_="unique"
+    )
+    op.drop_constraint(
+        "ck_inspection_standard_unit_means_something",
+        "process_inspection_standards",
+        type_="check",
     )
     op.drop_constraint(
         "ck_inspection_standard_measured_has_a_unit",

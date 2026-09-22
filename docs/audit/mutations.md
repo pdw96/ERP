@@ -149,3 +149,18 @@
 | NC | 무엇을 어긋냈나 | 빨개진 검사 |
 |---|---|---|
 | 126 | 단위 없는 기준을 세는 가드의 조건을 `AND FALSE` 로(CHECK 가 먼저 걸리게) | `test_upgrading_says_which_standard_measures_without_a_unit` |
+
+## NC-127 의 고침 — `3e2e703` 뒤
+
+| NC | 무엇을 어긋냈나 | 빨개진 검사 |
+|---|---|---|
+| 127 | `ck_inspection_standard_measured_has_a_unit` 의 식을 `TRUE` 로 | `test_a_standard_that_measures_must_say_in_what_unit` · 대조 테스트 |
+| 127 | `ck_inspection_standard_unit_means_something` 의 식을 `TRUE` 로 | `test_a_unit_that_only_looks_like_one_is_refused` · `test_even_a_standard_that_only_counts_cannot_hold_a_hollow_unit` · 대조 테스트 |
+| 127 | `fk_inspection_measurement_unit` 을 통째로 지웠다 | `test_a_measurement_unit_that_only_looks_like_one_has_nowhere_to_land` · 대조 테스트 |
+| 127 | 빈 단위 기준을 세는 **올릴 때 가드**를 `SELECT 1` 로 | `test_upgrading_says_which_standard_holds_a_unit_that_only_looks_like_one` |
+
+**여기서 하나가 거뒀다.** 측정 줄에도 `is_present("applied_unit")` 를 걸었다가 **지워도
+대조 테스트만 빨개졌다** — 그 CHECK 를 물게 하려면 「빈 단위를 든 기준」이 있어야 하는데,
+같은 고침이 그런 기준을 설 수 없게 만들었기 때문이다. **물게 할 수 없는 제약**은 같은
+명제의 둘째 자리라 거두고, 외래키가 그것을 이 줄까지 나른다는 것을 검사로 적었다.
+

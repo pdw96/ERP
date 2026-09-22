@@ -1701,3 +1701,29 @@ def test_upgrading_says_which_standard_measures_without_a_unit(engine: Engine) -
 
         with pytest.raises(Exception, match="재는 기준인데 단위가 없다"):
             command.upgrade(config, "head")
+
+
+def test_upgrading_says_which_standard_holds_a_unit_that_only_looks_like_one(
+    engine: Engine,
+) -> None:
+    """**「있다」를 통과하는 빈 단위도 이름으로 말한다** (Codex 리뷰 NC-127).
+
+    빈 문자열과 탭 · 전각 공백은 위의 가드도 `IS NOT NULL` 도 지나간다. 그런
+    기준이 서 있으면 측정 줄이 **빈 단위를 들고** 쌍 외래키를 지나므로, 조이는
+    CHECK 가 그것을 막는다 — 그리고 막히는 줄을 **조이기 전에** 묻는다.
+    """
+    schema = "applied_unit_hollow_standard"
+    with _schema(engine, schema):
+        config = _config_for_schema(engine, schema)
+        command.upgrade(config, "e84fbec436c0")
+        _code_group_for_inspection_items(engine, schema)
+        scoped = _engine_for_schema(engine, schema)
+        with scoped.begin() as conn:
+            for statement in _WITH_A_MEASUREMENT.strip().split(";"):
+                if statement.strip():
+                    conn.execute(text(statement))
+            # 앞 스키마가 허용하던 줄 — 눈에는 비어 보이는데 비어 있지 않다.
+            conn.execute(text("UPDATE process_inspection_standards SET unit = '\u3000'"))
+
+        with pytest.raises(Exception, match="단위가 비어 보이는데 비어 있지 않다"):
+            command.upgrade(config, "head")
