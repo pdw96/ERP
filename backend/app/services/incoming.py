@@ -483,6 +483,9 @@ def receive(session: Session, request: IncomingInspection) -> Judged:
                 measured_value=value,
                 applied_upper_spec=standard.upper_spec_limit,
                 applied_lower_spec=standard.lower_spec_limit,
+                # **숫자와 그 뜻을 함께 박는다.** 단위를 두고 오면 기준에서
+                # 그것을 고치는 순간 옛 측정값이 조용히 다른 뜻이 된다.
+                applied_unit=standard.unit,
             )
         )
 

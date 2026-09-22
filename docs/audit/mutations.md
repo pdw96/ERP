@@ -119,3 +119,12 @@
 | 119 | 역방향 가드의 `HAVING count(DISTINCT lot_id) > 1` 을 `HAVING FALSE` 로 | `test_upgrading_stops_when_two_lots_share_one_inspection` |
 | 120 | `startswith(..., autoescape=True)` 를 `like(prefix + '%')` 로 되돌렸다 | `test_a_wildcard_in_the_item_code_does_not_reach_the_like` |
 | 121 | `if attribute.inspection_item_code not in standards:` 를 `if False:` 로 | `test_a_reason_this_material_is_not_inspected_for_is_refused` |
+
+## NC-122 의 고침 — `186207e` 뒤
+
+| NC | 무엇을 어긋냈나 | 빨개진 검사 |
+|---|---|---|
+| 122 | `applied_unit=standard.unit` 를 `None` 으로 | `test_the_measurement_pins_the_unit_the_number_meant` · 잠금 검사 |
+| 122 | `fk_inspection_measurement_unit` 을 통째로 뺐다 | `test_a_standard_cannot_change_its_unit_while_a_measurement_cites_it` · 대조 테스트 |
+| 122 | 리비전의 데이터 단계를 `SELECT 1` 로 | `test_the_data_step_moves_the_unit_from_the_standard` 외 하나 |
+| 122 | 되돌림 가드의 값 대조를 `AND FALSE` 로(외래키에 기대게) | `test_downgrade_says_which_measurements_would_lose_their_unit` |

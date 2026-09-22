@@ -332,6 +332,26 @@ class InspectionMeasurement(Base):
             ],
             name="fk_inspection_measurement_standard",
         ),
+        # **단위도 쌍으로 가리킨다.** 박아 두는 것만으로는 이 줄의 단위와 기준의
+        # 단위가 **갈릴 수 있다** — 그리고 갈린 쪽이 옳은지 말해 줄 것이 없다.
+        # 쌍으로 가리키면 둘은 갈릴 수 없고, **가리키는 줄이 있는 동안 기준의
+        # 단위를 바꾸는 것 자체가 막힌다**(바꾸면 가리키던 짝이 사라진다).
+        # 「이미 특채를 낸 사유의 플래그를 끌 수 없다」와 같은 자리다 — 거래
+        # 데이터가 자기 근거를 잠근다.
+        #
+        # **이 외래키가 못 보는 부류**: `applied_unit` 이 비면 복합 외래키가
+        # 통째로 건너뛰어진다. 세는 항목이 거기 들어가는데, 세는 항목은 잰 줄이
+        # 서지 않으므로(위 CHECK) 오늘은 닿지 않는다.
+        ForeignKeyConstraint(
+            ["process_code", "item_code", "material_group", "applied_unit"],
+            [
+                "process_inspection_standards.process_code",
+                "process_inspection_standards.item_code",
+                "process_inspection_standards.material_group",
+                "process_inspection_standards.unit",
+            ],
+            name="fk_inspection_measurement_unit",
+        ),
         # **공정을 못박는 CHECK 를 두지 않는다 — 외래키가 이미 그것을 건다.**
         # 기준 표에 「자재군이 있다 ⇔ 수입」이 양방향으로 걸려 있고, 이 줄은
         # 자재군을 **반드시 들고** 기준을 가리킨다. 그래서 가리킬 수 있는 기준은
@@ -387,3 +407,11 @@ class InspectionMeasurement(Base):
     # **판정 시점의 규격.** 기준이 나중에 바뀌어도 그때 그 판정은 재현된다.
     applied_upper_spec: Mapped[float | None] = mapped_column(Float, nullable=True)
     applied_lower_spec: Mapped[float | None] = mapped_column(Float, nullable=True)
+    # **그 숫자의 뜻도 함께 박는다.** 위의 셋은 숫자일 뿐이고 `µm` 인지 `mm` 인지는
+    # 기준 표에만 있었다 — 거기서 단위를 고치면 숫자는 그대로인데 **읽히는 뜻이
+    # 천 배 달라진다.** 규격을 박아 두는 이유가 「기준이 바뀌어도 그때 그 판정은
+    # 그대로」인데 그 적용이 절반이었다(Codex 리뷰 NC-122).
+    #
+    # **세는 항목에는 비어 있다** — 재지 않으므로 단위가 없다. 그래서 널 허용이고,
+    # 아래 쌍 외래키가 그 줄에서는 건너뛰어진다.
+    applied_unit: Mapped[str | None] = mapped_column(String(20), nullable=True)

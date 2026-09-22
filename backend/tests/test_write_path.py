@@ -1007,3 +1007,56 @@ def test_a_reason_this_material_is_not_inspected_for_is_refused(prepared: Sessio
         receive(prepared, _request(nonconformity_code="IQ-PKG"))
 
     assert prepared.query(Inspection).count() == 0
+
+
+def test_the_measurement_pins_the_unit_the_number_meant(prepared: Session) -> None:
+    """**숫자만 박고 그 뜻을 두고 오지 않는다** (Codex 리뷰 NC-122).
+
+    상·하한을 박는 이유가 「기준이 나중에 바뀌어도 그때 그 판정은 그대로」인데,
+    `µm` 인지 `mm` 인지가 기준 표에만 있으면 그 적용이 **절반**이다 — 거기서
+    단위를 고치면 숫자는 하나도 안 바뀌는데 **읽히는 뜻이 천 배 달라진다.**
+    """
+    receive(prepared, _request())
+
+    rows = {row.item_code: row for row in prepared.query(InspectionMeasurement)}
+    assert rows[_GRAIN].applied_unit == "µm"
+    assert rows[_MOISTURE].applied_unit == "µm"
+
+
+def test_a_standard_cannot_change_its_unit_while_a_measurement_cites_it(
+    prepared: Session,
+) -> None:
+    """**박아 두는 것만으로는 갈릴 수 있다** — 그래서 쌍으로 가리킨다.
+
+    가리키는 줄이 있는 동안 기준의 단위를 바꾸는 것 자체가 막힌다 — 바꾸면
+    가리키던 짝이 사라지기 때문이다. 「이미 특채를 낸 사유의 플래그를 끌 수
+    없다」와 같은 자리이며, **거래 데이터가 자기 근거를 잠근다.**
+    """
+    receive(prepared, _request())
+    standard = (
+        prepared.query(ProcessInspectionStandard)
+        .filter_by(item_code=_GRAIN, material_group=GROUP)
+        .one()
+    )
+
+    standard.unit = "mm"
+    with pytest.raises(IntegrityError, match="fk_inspection_measurement_unit"):
+        prepared.flush()
+
+
+def test_a_standard_no_measurement_cites_may_still_fix_its_unit(prepared: Session) -> None:
+    """**가드가 정상 경로를 막지 않는다.**
+
+    잠그는 것은 **이미 판정에 쓰인** 기준뿐이다 — 아무도 가리키지 않는 줄의
+    단위는 그대로 고칠 수 있다. 여기까지 막으면 오타 하나를 영영 못 고친다.
+    """
+    standard = (
+        prepared.query(ProcessInspectionStandard)
+        .filter_by(item_code=_GRAIN, material_group=GROUP)
+        .one()
+    )
+
+    standard.unit = "mm"
+    prepared.flush()
+
+    assert standard.unit == "mm"

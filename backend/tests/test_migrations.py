@@ -1550,3 +1550,129 @@ def test_upgrading_stops_when_two_lots_share_one_inspection(engine: Engine) -> N
 
         with pytest.raises(Exception, match="여러 로트의 입고 줄이 가리킨다"):
             command.upgrade(config, "head")
+
+
+# ── 조각 7 — 판정 시점의 단위 (`b41d7c8e5a92`) ──────────────────────────────
+
+_WITH_A_MEASUREMENT = (
+    _BEFORE_WRITE_PATH
+    + """
+INSERT INTO common_codes (group_code, code, name) VALUES ('INSP_ITEM', '입도', '입도');
+
+INSERT INTO process_inspection_standards
+  (process_group, process_code, item_group, item_code, material_group, material_group_group,
+   upper_spec_limit, lower_spec_limit, center_line, warning_ratio, sigma_source, time_variant,
+   unit)
+VALUES ('PROCESS','수입','INSP_ITEM','입도','분체','MATERIAL_GROUP',
+        50.0, 10.0, 30.0, 0.70, '미정', FALSE, 'µm');
+
+INSERT INTO inspection_measurements
+  (inspection_id, item_code, process_code, material_group, measured_value,
+   applied_upper_spec, applied_lower_spec)
+SELECT i.id, '입도', '수입', '분체', 30.0, 50.0, 10.0 FROM inspections AS i;
+"""
+)
+
+
+def _code_group_for_inspection_items(engine: Engine, schema: str) -> None:
+    """`INSP_ITEM` 그룹은 기본 픽스처에 없다 — 기준 줄이 그것을 가리킨다."""
+    scoped = _engine_for_schema(engine, schema)
+    with scoped.begin() as conn:
+        conn.execute(
+            text(
+                "INSERT INTO code_groups (group_code, name, value_fixed, description)"
+                " VALUES ('INSP_ITEM', '검사항목', FALSE, '시험')"
+            )
+        )
+
+
+def test_the_data_step_moves_the_unit_from_the_standard(engine: Engine) -> None:
+    """**복원이 아니라 고정이다** (Codex 리뷰 NC-122).
+
+    옛 줄에는 그때의 단위가 없고 되찾을 방법도 없다 — 여기서 하는 일은 **지금
+    읽히는 값**을 그 줄에 박아 **이 뒤로는 갈리지 않게** 하는 것뿐이다.
+    """
+    schema = "applied_unit_data_step"
+    with _schema(engine, schema):
+        config = _config_for_schema(engine, schema)
+        command.upgrade(config, "e84fbec436c0")
+        _code_group_for_inspection_items(engine, schema)
+        scoped = _engine_for_schema(engine, schema)
+        with scoped.begin() as conn:
+            for statement in _WITH_A_MEASUREMENT.strip().split(";"):
+                if statement.strip():
+                    conn.execute(text(statement))
+
+        command.upgrade(config, "head")
+
+        with scoped.connect() as conn:
+            pinned = (
+                conn.execute(text("SELECT applied_unit FROM inspection_measurements"))
+                .scalars()
+                .all()
+            )
+
+    assert pinned == ["µm"], pinned
+
+
+def test_downgrade_goes_quietly_when_the_standard_still_says_the_same(engine: Engine) -> None:
+    """**멈추지 않아야 할 때 멈추지 않는 것도 설계다.**
+
+    외래키가 사는 동안 이 칸은 기준의 단위와 같음이 보증되므로, 지워도 기준에서
+    다시 만들 수 있다 — 그 가능성의 근거가 바로 그 외래키다(W-6).
+    """
+    schema = "applied_unit_downgrade_clean"
+    with _schema(engine, schema):
+        config = _config_for_schema(engine, schema)
+        command.upgrade(config, "e84fbec436c0")
+        _code_group_for_inspection_items(engine, schema)
+        scoped = _engine_for_schema(engine, schema)
+        with scoped.begin() as conn:
+            for statement in _WITH_A_MEASUREMENT.strip().split(";"):
+                if statement.strip():
+                    conn.execute(text(statement))
+        command.upgrade(config, "head")
+
+        command.downgrade(config, "a7c14b3e9052")
+
+        with scoped.connect() as conn:
+            columns = conn.execute(
+                text(
+                    "SELECT column_name FROM information_schema.columns"
+                    " WHERE table_schema = :schema AND table_name = 'inspection_measurements'"
+                ),
+                {"schema": schema},
+            ).scalars()
+            assert "applied_unit" not in set(columns)
+
+
+def test_downgrade_says_which_measurements_would_lose_their_unit(engine: Engine) -> None:
+    """**가드가 외래키에 기대지 않는다.**
+
+    되돌림의 근거는 「기준에서 다시 만들 수 있다」이고 그것을 보증하는 것이
+    외래키인데, **가드가 그 외래키가 서 있다고 전제하면** 누군가 그것을 떼어 낸
+    데이터베이스에서 값이 조용히 사라진다. 그래서 가드는 외래키가 아니라
+    **실제 값**을 견준다 — 여기서는 떼어 내고 갈라 놓아 그것을 잰다.
+    """
+    schema = "applied_unit_downgrade_guard"
+    with _schema(engine, schema):
+        config = _config_for_schema(engine, schema)
+        command.upgrade(config, "e84fbec436c0")
+        _code_group_for_inspection_items(engine, schema)
+        scoped = _engine_for_schema(engine, schema)
+        with scoped.begin() as conn:
+            for statement in _WITH_A_MEASUREMENT.strip().split(";"):
+                if statement.strip():
+                    conn.execute(text(statement))
+        command.upgrade(config, "head")
+        with scoped.begin() as conn:
+            conn.execute(
+                text(
+                    "ALTER TABLE inspection_measurements"
+                    " DROP CONSTRAINT fk_inspection_measurement_unit"
+                )
+            )
+            conn.execute(text("UPDATE process_inspection_standards SET unit = 'mm'"))
+
+        with pytest.raises(Exception, match="단위를 되찾을 수 없다"):
+            command.downgrade(config, "a7c14b3e9052")
