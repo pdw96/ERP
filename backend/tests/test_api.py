@@ -539,3 +539,76 @@ def test_a_break_leaves_the_cause_not_just_the_axis(
 
     assert "NoneType: None" not in caplog.text, caplog.text
     assert "RuntimeError" in caplog.text and "여기서 터졌다" in caplog.text, caplog.text
+
+
+def test_a_refusal_leaves_a_line_that_names_the_request(
+    client: TestClient, caplog: pytest.LogCaptureFixture
+) -> None:
+    """**거절도 서버에 흔적을 남긴다** (감사 ⑰ NC-162).
+
+    축은 다섯 갈래 모두에 나가고 스펙이 그것을 「이 요청을 가리키는 값」이라고
+    공표하는데, 그 값으로 서버에서 찾을 수 있는 것이 **500 하나뿐**이었다 —
+    422 · 404 · 405 는 `grep` 0 건이었고(띄워서 확인했다) uvicorn 접근 줄에는
+    **축도 시각도 없다.** 거절된 요청은 DB 에도 한 줄을 남기지 않으므로,
+    「로그가 유일한 흔적」이라는 NC-145 의 전제가 거절에도 그대로 성립한다.
+
+    **세 갈래를 다 밟는다** — 경계 거절(422) · 없는 경로(404) · 못 받는
+    메서드(405). 한 갈래만 보면 나머지가 조용히 빠진다.
+    """
+    with caplog.at_level(logging.WARNING, logger="app.api"):
+        refused = client.post("/inspections", json={}, headers={"X-Request-Id": "probe422"})
+        missing = client.post(
+            "/inspection", json=_PAYLOAD, headers={"X-Request-Id": "probe404"}
+        )
+        wrong = client.get("/inspections", headers={"X-Request-Id": "probe405"})
+
+    assert (refused.status_code, missing.status_code, wrong.status_code) == (422, 404, 405)
+    for axis, code in (("probe422", "422"), ("probe404", "404"), ("probe405", "405")):
+        assert axis in caplog.text, (axis, caplog.text)
+        assert f"{axis} " in caplog.text and code in caplog.text, (axis, caplog.text)
+
+
+def test_a_break_does_not_carry_the_values_the_caller_sent(
+    prepared: Session,  # noqa: F811
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """**미뤄 둔 결정이 코드에서 실행되고 있지 않다** (감사 ⑰ NC-164).
+
+    대장은 「로그에 `judged_by`·품목 코드를 실을지」를 `audit-secrets` 가 먼저
+    판정할 자리로 **등록**해 두었다. 그런데 SQLAlchemy 는 `StatementError` 에
+    `[parameters: {…}]` 를 붙이고 500 처리기가 예외를 통째로 찍으므로, **요청
+    본문의 값 전부**가 이미 로그에 실리고 있었다 — 찍어서 확인했다.
+
+    이 엔드포인트에서 가장 있을 법한 500 이 제약 위반이라 그것은 예외 경로가
+    아니라 **주 경로**다. 그래서 여기서도 **진짜 DB 오류**로 밟는다 — 앞의
+    검사처럼 `RuntimeError` 를 던지면 이 자리가 한 번도 보이지 않는다.
+
+    **두 겹이다.** `hide_parameters=True` 가 SQLAlchemy 의 `[parameters: …]` 를
+    끄는데 그것만으로는 닫히지 않는다 — PostgreSQL 이 무결성 위반에 `DETAIL:
+    Failing row contains (…)` 를 붙여 **줄의 값 전부**를 되비춘다. 이 검사가 그
+    둘째 겹을 잡았다(첫 고침으로는 빨갰다).
+    """
+    secret = "검사원 아무개"
+
+    def break_inside_the_database() -> Iterator[Session]:
+        prepared.execute(
+            text("INSERT INTO inspections (judged_by) VALUES (:who)"), {"who": secret}
+        )
+        yield prepared  # pragma: no cover — 위에서 터진다
+
+    app.dependency_overrides[session_scope] = break_inside_the_database
+    try:
+        broken = TestClient(app, raise_server_exceptions=False)
+        with caplog.at_level(logging.ERROR, logger="app.api"):
+            answer = broken.post("/inspections", json=_PAYLOAD)
+    finally:
+        app.dependency_overrides.clear()
+
+    assert answer.status_code == 500, answer.text
+    # **까닭은 남는다** — NC-149 가 세운 것을 이 고침이 되돌리지 않는다.
+    assert "db_error=" in caplog.text and "sqlstate=" in caplog.text, caplog.text
+    assert "constraint=" in caplog.text, caplog.text
+    # **사람이 보낸 값은 남지 않는다 — 두 겹 다.**
+    assert secret not in caplog.text, caplog.text
+    assert "[parameters:" not in caplog.text, caplog.text
+    assert "Failing row contains" not in caplog.text, caplog.text

@@ -19,6 +19,7 @@ from fastapi import Depends, FastAPI, Request, status
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse, Response
 from fastapi.utils import is_body_allowed_for_status_code
+from sqlalchemy.exc import DBAPIError
 from sqlalchemy.orm import Session, sessionmaker
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
@@ -147,6 +148,29 @@ async def carry_an_id_that_names_this_request(
     request.state.request_id = request_id
     response = await call_next(request)
     response.headers[_REQUEST_ID_HEADER] = request_id
+    # **거절도 서버에 흔적을 남긴다** (감사 ⑰ NC-162). 축은 다섯 갈래 모두에
+    # 나가고 스펙이 그것을 「이 요청을 가리키는 값」이라고 공표하는데, 그 값으로
+    # 서버에서 찾을 수 있는 것이 500 하나뿐이었다 — 나머지 넷은 `grep` 0 건이고,
+    # **uvicorn 접근 줄에는 축도 시각도 없어** 같은 초의 둘을 가르지 못한다.
+    # 거절된 요청은 DB 에도 한 줄을 남기지 않으므로 **로그가 유일한 흔적**이라는
+    # NC-145 의 전제가 거절에도 그대로 성립한다.
+    #
+    # **`WARNING` 으로 찍는다.** 루트 로거에 레벨을 세우지 않았으므로(`basicConfig`
+    # 에 `level=` 이 없다) `INFO` 로 찍으면 한 줄도 나오지 않는다 — 레벨을 낮추면
+    # 남의 라이브러리 줄까지 함께 열린다.
+    #
+    # **이 줄이 못 보는 부류**(W-6 ③): 성공한 요청(DB 에 줄이 남으므로 되짚을
+    # 자리가 따로 있다)과, 미들웨어에 닿기 전에 끝나는 응답(끝 슬래시 307 ·
+    # 전송 층이 내는 400). 그리고 부르는 쪽이 **같은 축을 계속 보내면** 여러
+    # 요청이 한 줄에 겹친다 — 축의 유일성은 우리 것이 아니다.
+    if response.status_code >= 400:
+        _log.warning(
+            "거절했다 request_id=%s %s %s -> %s",
+            request_id,
+            request.method,
+            request.url.path,
+            response.status_code,
+        )
     return response
 
 
@@ -209,13 +233,40 @@ def do_not_answer_a_break_with_plain_text(request: Request, exc: Exception) -> J
     # `sys.exc_info()` 가 비어 `NoneType: None` 만 찍힌다(Codex 리뷰 P2, 실제로
     # 찍히는 것을 확인했다). 그러면 **축은 있는데 까닭이 없는** 줄이 남고, 이
     # 줄이 세우려던 것이 바로 그 둘을 한 자리에 두는 것이다. 예외를 손으로 넘긴다.
-    _log.error(
-        "요청을 처리하지 못했다 request_id=%s %s %s",
-        request_id,
-        request.method,
-        request.url.path,
-        exc_info=exc,
-    )
+    #
+    # **데이터베이스 오류는 까닭만 적고 그 말을 옮기지 않는다** (감사 ⑰ NC-164).
+    # `hide_parameters=True` 가 SQLAlchemy 쪽 `[parameters: …]` 를 껐는데 **그것이
+    # 한 겹이었다** — PostgreSQL 자신이 무결성 위반에 `DETAIL: Failing row
+    # contains (…)` 를 붙여 **줄의 값 전부**를 되비춘다(검사가 그것을 잡았다).
+    # 그 말을 옮기지 않고, 응답하는 사람이 실제로 쓰는 둘(SQLSTATE · 제약 이름)을
+    # 골라 적는다 — 제약 이름은 **어느 규칙이 걸렸는가**라 SQLAlchemy 프레임
+    # 스택보다 정확하다.
+    #
+    # **다른 예외는 그대로 스택을 싣는다.** 그쪽 메시지는 우리가 쓴 말이고,
+    # NC-149 가 세운 것을 이 고침이 되돌리지 않는다.
+    #
+    # **이 줄이 못 보는 부류**(W-6 ③): 우리가 지은 예외 메시지에 사람이 보낸
+    # 값을 직접 끼워 넣는 것. 그것은 이 자리가 아니라 **그 메시지를 짓는 자리**가
+    # 막는다.
+    if isinstance(exc, DBAPIError):
+        diagnosis = getattr(exc.orig, "diag", None)
+        _log.error(
+            "요청을 처리하지 못했다 request_id=%s %s %s db_error=%s sqlstate=%s constraint=%s",
+            request_id,
+            request.method,
+            request.url.path,
+            type(exc.orig).__name__,
+            getattr(exc.orig, "sqlstate", "-"),
+            getattr(diagnosis, "constraint_name", None) or "-",
+        )
+    else:
+        _log.error(
+            "요청을 처리하지 못했다 request_id=%s %s %s",
+            request_id,
+            request.method,
+            request.url.path,
+            exc_info=exc,
+        )
     # **여기서 헤더를 다시 단다.** 500 은 위의 미들웨어를 지나오지 않는다 —
     # `ServerErrorMiddleware` 가 사용자 미들웨어 **바깥**에 서므로 그 미들웨어의
     # `call_next` 가 예외로 끊기고 응답에 헤더를 달 자리가 오지 않는다. 하필

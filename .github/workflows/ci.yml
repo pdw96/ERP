@@ -95,4 +95,51 @@ jobs:
       # 가 저장소 안에서 물고(NC-155), **띄우는 것**은 DB 와 환경변수를 요구해
       # 여기 없다 — 그 층은 `audit-ops` 의 자리다.
       - name: 이미지
-        run: docker build .
+        run: docker build -t erp-api:ci .
+
+      # ── 기동 (감사 ⑰ NC-165) ──────────────────────────────────────────────
+      # **빌드가 초록인 것과 이미지가 뜨는 것은 다르다.** 기동 경로의 전제 셋은
+      # 게이트를 얻었는데(문법 · 컨텍스트 · 실행 비트) **그 스크립트를 실제로
+      # 돌리는 자리가 없었다** — NC-146 이 낸 사고(「코드만 되돌리면 API 가 뜨지
+      # 못한다」)가 오직 기동에서만 드러나는 부류인데 그렇다.
+      #
+      # 여기서 처음 도는 것들: `ENTRYPOINT` 가 실제로 실행되는가 · `exec "$@"` 가
+      # 인자를 넘기는가 · `USER erp` 로 `alembic` 이 도는가 · 시드 스위치가
+      # 갈리는가 · uvicorn 이 `app.api.app:app` 을 import 해 실제로 답하는가.
+      # 마지막 것이 특히 얇았다 — 루트 로거 설정은 `pragma: no cover` 라
+      # **검사가 한 번도 지나가지 않는다.**
+      #
+      # **compose 를 쓰지 않는다.** `compose.yaml` 의 postgres 가 5432 를 여는데
+      # 이 잡의 서비스가 이미 그 포트를 들고 있어 부딪친다. 이미지를 직접 띄워
+      # 그 서비스에 붙인다 — 이 스텝이 보는 것은 **이미지의 기동**이지 compose 의
+      # 배선이 아니다.
+      #
+      # **이 스텝이 못 보는 것**(W-6 ③): compose 의 `depends_on` 순서와 볼륨,
+      # 되돌린 이미지로 뜨는 것(NC-146 의 그 사고 자체), 그리고 오래 떠 있을 때
+      # 생기는 것 전부.
+      - name: 기동
+        run: |
+          set -euo pipefail
+          psql "postgresql://erp:erp@localhost:5432/erp_test" -c 'CREATE DATABASE erp_boot'
+          docker run -d --name erp-boot --network host \
+            -e ERP_DATABASE_URL=postgresql+psycopg://erp:erp@localhost:5432/erp_boot \
+            -e ERP_SEED_ENABLED=true \
+            erp-api:ci uvicorn app.api.app:app --host 127.0.0.1 --port 8000
+          for _ in $(seq 60); do
+            if curl -fsS http://127.0.0.1:8000/openapi.json >/dev/null 2>&1; then break; fi
+            sleep 1
+          done
+          docker logs erp-boot
+          # 마이그레이션과 시드가 이 이미지 안에서 실제로 돌았는지 로그가 말한다.
+          docker logs erp-boot 2>&1 | grep -q '\[1/2\] 마이그레이션'
+          docker logs erp-boot 2>&1 | grep -q '\[2/2\] 시드'
+          # 그리고 실제로 답한다 — 읽는 엔드포인트가 없으므로 쓰기로 민다.
+          curl -fsS -o /dev/null -X POST http://127.0.0.1:8000/inspections \
+            -H 'content-type: application/json' \
+            -d '{"item_code":"RM-01","supplier_code":"SUP-01",
+                 "supplier_lot_number":"SL-CI-0001","quantity":500.0,
+                 "judged_by":"검사원 1","received_date":"2026-09-21",
+                 "measurements":[{"item_code":"점도","value":3000.0},
+                                 {"item_code":"수분","value":0.3},
+                                 {"item_code":"색차","value":0.5}]}'
+          docker rm -f erp-boot
