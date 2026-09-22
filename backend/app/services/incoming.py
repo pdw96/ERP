@@ -79,6 +79,7 @@ SPECIAL_ACCEPTANCE_IS_NOT_OPEN = "special_acceptance_is_not_open"
 SUPPLIER_IS_NOT_ACTIVE = "supplier_is_not_active"
 REASON_IS_NOT_A_COUNTED_ONE = "reason_is_not_a_counted_one"
 REASON_IS_DERIVED_BY_THE_SYSTEM = "reason_is_derived_by_the_system"
+REASON_IS_NOT_INSPECTED_FOR_THIS_MATERIAL = "reason_is_not_inspected_for_this_material"
 ITEM_IS_NOT_MEASURED = "item_is_not_measured"
 LOT_NUMBER_WOULD_NOT_FIT = "lot_number_would_not_fit"
 MATERIAL_IS_ALREADY_EXPIRED = "material_is_already_expired"
@@ -200,7 +201,11 @@ def _reason_for(session: Session, item_code: str) -> str:
     return reason
 
 
-def _must_be_a_reason_a_person_inspects(session: Session, reason_code: str) -> None:
+def _must_be_a_reason_a_person_inspects(
+    session: Session,
+    reason_code: str,
+    standards: dict[str, ProcessInspectionStandard],
+) -> None:
     """사람이 적을 수 있는 사유는 **사람이 보는 항목의 것뿐이다** (원칙 ③).
 
     두 겹이다 —
@@ -231,6 +236,20 @@ def _must_be_a_reason_a_person_inspects(session: Session, reason_code: str) -> N
             REASON_IS_DERIVED_BY_THE_SYSTEM,
             f"{reason_code} 는 사람이 보는 검사 항목이 없다 —"
             " 시스템이 계산해 다는 사유라 요청에서 받지 않는다",
+        )
+    if attribute.inspection_item_code not in standards:
+        # **③ 이 자재군이 재지 않는 항목의 사유는 적을 수 없다.** 사유가 항목을
+        # 가리킨다는 것과 **그 항목을 이 자재에 대해 본다**는 것은 다르다 —
+        # 기준이 무리마다 갈린 뒤로 벌어진 틈이고, 여기서 막지 않으면 **보지도
+        # 않는 결함으로 불합격·특채가 선다**(Codex 리뷰 NC-121).
+        #
+        # 오늘의 시드에서는 사람이 적을 수 있는 셋이 모든 수입 무리에 다 있어
+        # 이 갈래가 비어 있지만, **사유가 느는 날 갈린다** — 오늘 비어 있다는
+        # 것은 제약이 아니라 우연이다.
+        raise RefusedInspection(
+            REASON_IS_NOT_INSPECTED_FOR_THIS_MATERIAL,
+            f"{reason_code} 가 가리키는 항목({attribute.inspection_item_code})은"
+            " 이 자재군의 수입 기준에 없다 — 보지 않는 것으로 떨어뜨릴 수 없다",
         )
 
 
@@ -274,8 +293,15 @@ def _next_lot_number(session: Session, item: Item, received_date: date) -> str:
         {"key": locks.LOT_NUMBER, "item": item.id},
     )
     prefix = f"{item.code}-{received_date:%y%m%d}-"
+    # **`LIKE` 에 접두를 그대로 넣지 않는다.** 품목 코드에는 접두 규칙과
+    # `is_present()` 밖에 없어 `%` 와 `_` 가 들어올 수 있고, 그러면 그 글자가
+    # **와일드카드로 읽힌다** — 같은 품목의 이월 로트가 든 남의 번호가 우연히
+    # 걸리면 그 꼬리가 일련으로 세어져 번호가 건너뛰거나 거짓 거절이 난다
+    # (Codex 리뷰 NC-120). `autoescape` 가 그 글자들을 글자로 되돌린다.
     used = session.scalars(
-        select(Lot.lot_number).where(Lot.item_id == item.id, Lot.lot_number.like(f"{prefix}%"))
+        select(Lot.lot_number).where(
+            Lot.item_id == item.id, Lot.lot_number.startswith(prefix, autoescape=True)
+        )
     ).all()
     serials = [int(number[len(prefix) :]) for number in used if number[len(prefix) :].isdigit()]
     number = f"{prefix}{max(serials, default=0) + 1:02d}"
@@ -405,7 +431,7 @@ def receive(session: Session, request: IncomingInspection) -> Judged:
     elif request.nonconformity_code is not None:
         # **계산이 보지 못하는 것은 사람이 적는다** — 세는 항목의 결함이다.
         _allows_special_acceptance(session, request.nonconformity_code)
-        _must_be_a_reason_a_person_inspects(session, request.nonconformity_code)
+        _must_be_a_reason_a_person_inspects(session, request.nonconformity_code, standards)
         reason = request.nonconformity_code
 
     if reason is None:

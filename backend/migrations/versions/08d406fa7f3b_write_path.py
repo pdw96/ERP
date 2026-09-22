@@ -119,6 +119,33 @@ def upgrade() -> None:
         END $$;
         """
     )
+    # **방향이 반대인 자리도 함께 묻는다.** 부분 유일 인덱스는 `lot_id` 에만
+    # 걸려 있고 `stock_ledger_entries.inspection_id` 에는 유일 제약이 없다 —
+    # **한 검사를 두 로트의 입고 줄이 가리킬 수 있다.** 그대로 옮기면 아래
+    # `uq_lot_inspection` 이 물어 올리는 것이 멈추는데, 거기서 나오는 말은
+    # 제약 이름이라 배포하는 사람이 어느 줄 때문인지 모른다(Codex 리뷰 NC-119).
+    op.execute(
+        """
+        DO $$
+        DECLARE shared text;
+        BEGIN
+          SELECT string_agg(DISTINCT e.inspection_id::text, ', ' ORDER BY e.inspection_id::text)
+            INTO shared
+          FROM stock_ledger_entries AS e
+          WHERE e.txn_type = '구매입고'
+            AND e.inspection_id IN (
+              SELECT inspection_id FROM stock_ledger_entries
+              WHERE txn_type = '구매입고'
+              GROUP BY inspection_id HAVING count(DISTINCT lot_id) > 1
+            );
+          IF shared IS NOT NULL THEN
+            RAISE EXCEPTION
+              '한 검사를 여러 로트의 입고 줄이 가리킨다: 검사 %. 한 판정은 로트를 한 번만 만들므로 사람이 먼저 가른다',
+              shared;
+          END IF;
+        END $$;
+        """
+    )
     op.execute(
         """
         UPDATE lots AS l
@@ -167,6 +194,18 @@ def upgrade() -> None:
         ["lot_id", "inspection_id"],
         ["id", "inspection_id"],
     )
+    # **데이터 단계의 가드만으로는 앞으로가 지켜지지 않는다.** 그 가드는 올리는
+    # 그 순간만 보고, 그 뒤에 들어오는 줄은 보지 못한다 — 쓰기 경로가 하나뿐인
+    # 것은 제약이 아니라 우연이다. 품목을 쌍으로 가리켜 **구조로** 닫는다
+    # (Codex 리뷰 NC-118 의 「resulting schema」).
+    op.create_unique_constraint("uq_inspection_id_item", "inspections", ["id", "item_id"])
+    op.create_foreign_key(
+        "fk_lot_inspection_item",
+        "lots",
+        "inspections",
+        ["inspection_id", "item_id"],
+        ["id", "item_id"],
+    )
     op.create_check_constraint(
         "ck_lot_inspection_result_matches_inspection",
         "lots",
@@ -211,6 +250,8 @@ def downgrade() -> None:
         ["inspection_id"],
         ["id"],
     )
+    op.drop_constraint("fk_lot_inspection_item", "lots", type_="foreignkey")
+    op.drop_constraint("uq_inspection_id_item", "inspections", type_="unique")
     op.drop_constraint("fk_lot_inspection", "lots", type_="foreignkey")
     op.drop_constraint("uq_lot_id_inspection", "lots", type_="unique")
     op.drop_constraint("uq_lot_inspection", "lots", type_="unique")

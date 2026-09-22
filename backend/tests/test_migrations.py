@@ -1511,3 +1511,42 @@ def test_upgrading_stops_when_a_ledger_line_points_at_another_items_inspection(
 
         with pytest.raises(Exception, match="다른 품목의 검사를 가리킨다"):
             command.upgrade(config, "head")
+
+
+def test_upgrading_stops_when_two_lots_share_one_inspection(engine: Engine) -> None:
+    """**방향이 반대인 자리** (Codex 리뷰 NC-119).
+
+    부분 유일 인덱스는 `lot_id` 에만 걸려 있고 원장의 `inspection_id` 에는 유일
+    제약이 없다 — **한 검사를 두 로트의 입고 줄이 가리킬 수 있다.** 그대로
+    옮기면 `uq_lot_inspection` 이 물어 멈추는데, 거기서 나오는 말은 제약 이름이라
+    배포하는 사람이 **어느 줄 때문인지** 모른다.
+    """
+    schema = "write_path_two_lots_one_inspection"
+    with _schema(engine, schema):
+        config = _upgrade_with(engine, schema, "e84fbec436c0", _WITH_A_LEDGER_LINE)
+        scoped = _engine_for_schema(engine, schema)
+        with scoped.begin() as conn:
+            # 같은 품목의 둘째 로트를 세우고 **같은 검사**를 가리키는 입고 줄을
+            # 붙인다 — 부분 유일 인덱스는 로트가 다르므로 이것을 막지 않는다.
+            conn.execute(
+                text(
+                    "INSERT INTO lots (item_id, item_type, lot_number, lot_origin,"
+                    " warehouse, stock_type, quantity, received_date)"
+                    " SELECT i.id, i.item_type, 'SL-2026-0002', '공급사', '원재료',"
+                    " '양품', 100.0, DATE '2026-09-21'"
+                    " FROM items AS i WHERE i.code = 'RM-01'"
+                )
+            )
+            conn.execute(
+                text(
+                    "INSERT INTO stock_ledger_entries (lot_id, txn_type, txn_type_group,"
+                    " quantity, occurred_at, inspection_id)"
+                    " SELECT l.id, '구매입고', 'TXN_TYPE', 100.0,"
+                    " TIMESTAMP '2026-09-21 10:00', e.inspection_id"
+                    " FROM lots AS l, stock_ledger_entries AS e"
+                    " WHERE l.lot_number = 'SL-2026-0002'"
+                )
+            )
+
+        with pytest.raises(Exception, match="여러 로트의 입고 줄이 가리킨다"):
+            command.upgrade(config, "head")

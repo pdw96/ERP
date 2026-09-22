@@ -148,6 +148,14 @@ class Lot(Base):
             ["inspections.id", "inspections.received_date"],
             name="fk_lot_inspection_received_date",
         ),
+        # **품목도 쌍으로 묶는다.** 로트와 그 로트를 만든 검사가 같은 품목을
+        # 말한다는 것을 쓰기 경로가 지키고 있었는데, **쓰는 코드가 하나뿐인 것은
+        # 제약이 아니라 우연이다.** 옛 원장에는 어긋난 짝이 실제로 설 수 있었다.
+        ForeignKeyConstraint(
+            ["inspection_id", "item_id"],
+            ["inspections.id", "inspections.item_id"],
+            name="fk_lot_inspection_item",
+        ),
         # **주석은 규칙이 아니다.** 처음에는 「자사 로트가 검사를 가리키게 되는 날
         # 이 자리를 다시 봐야 한다」고 적어 두었는데, 적어 두기만 하고 강제하지
         # 않는 규칙을 만들지 않는 것이 이 저장소의 규칙이다 — 자사 로트는

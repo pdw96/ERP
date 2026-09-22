@@ -207,6 +207,10 @@ class Inspection(Base):
         # **로트가 도착일을 가리킬 상대.** 같은 사실이 두 표에 살면 갈리므로
         # (원칙 ⑥) 로트 쪽이 값을 다시 적는 대신 이 쌍을 가리킨다.
         UniqueConstraint("id", "received_date", name="uq_inspection_id_received_date"),
+        # **로트가 품목을 가리킬 상대.** 로트와 검사가 같은 품목을 말하는 것을
+        # 쓰기 경로가 지키고 있었는데, 쓰는 코드가 하나뿐인 것은 제약이 아니라
+        # 우연이다 — 옛 원장에는 실제로 어긋난 짝이 설 수 있었다.
+        UniqueConstraint("id", "item_id", name="uq_inspection_id_item"),
     )
 
     id: Mapped[int] = mapped_column(primary_key=True)

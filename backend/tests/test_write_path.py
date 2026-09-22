@@ -872,6 +872,24 @@ def test_a_receipt_line_cannot_name_someone_elses_judgement(prepared: Session) -
         prepared.flush()
 
 
+def test_a_lot_cannot_point_at_another_items_inspection(prepared: Session) -> None:
+    """**로트와 그 로트를 만든 검사는 같은 품목을 말한다** (Codex 리뷰 NC-118).
+
+    쓰기 경로가 이것을 지키고 있었지만 **쓰는 코드가 하나뿐인 것은 제약이 아니라
+    우연이다.** 마이그레이션의 가드는 올리는 그 순간만 보고 그 뒤에 들어오는
+    줄은 보지 못하므로, 품목을 쌍으로 가리켜 구조로 닫는다.
+    """
+    receive(prepared, _request())
+    lot = prepared.query(Lot).one()
+    other = make_item(codes.RAW_MATERIAL, code="RM-02", material_group=GROUP)
+    prepared.add(other)
+    prepared.flush()
+
+    lot.item_id = other.id
+    with pytest.raises(IntegrityError, match="fk_lot_inspection_item"):
+        prepared.flush()
+
+
 def test_an_own_lot_cannot_borrow_an_incoming_inspection(prepared: Session) -> None:
     """**주석은 규칙이 아니다** — 쌍 외래키가 못 보는 자리를 CHECK 가 막는다.
 
@@ -923,3 +941,69 @@ def test_an_own_lot_cannot_borrow_an_incoming_inspection(prepared: Session) -> N
     )
     with pytest.raises(IntegrityError, match="ck_lot_from_an_inspection_has_an_arrival_date"):
         prepared.flush()
+
+
+def test_a_wildcard_in_the_item_code_does_not_reach_the_like(prepared: Session) -> None:
+    """**`LIKE` 에 접두를 그대로 넣지 않는다** (Codex 리뷰 NC-120).
+
+    품목 코드에는 접두 규칙과 `is_present()` 밖에 없어 `_` 와 `%` 가 들어올 수
+    있고, 그러면 그 글자가 **와일드카드로 읽힌다** — 같은 품목의 이월 로트가 든
+    남의 번호가 우연히 걸리면 그 꼬리가 일련으로 세어져 **번호가 건너뛰거나
+    거짓 거절**이 난다.
+    """
+    item = make_item(codes.RAW_MATERIAL, code="RM-0_1", material_group=GROUP)
+    prepared.add(item)
+    prepared.flush()
+    # `_` 가 와일드카드면 이 이월 로트가 걸리고 꼬리(`77`)가 일련으로 세어진다.
+    prepared.add(
+        Lot(
+            item_id=item.id,
+            item_type=item.item_type,
+            lot_number=f"RM-0X1-{RECEIVED:%y%m%d}-77",
+            lot_origin=codes.LOT_FROM_SUPPLIER,
+            warehouse=codes.WAREHOUSE_RAW,
+            stock_type=codes.STOCK_GOOD,
+            quantity=1.0,
+            received_date=RECEIVED,
+        )
+    )
+    prepared.flush()
+
+    judged = receive(prepared, _request(item_code="RM-0_1"))
+
+    # 걸리지 않았으므로 이 품목의 **첫** 번호다 — 78 이면 와일드카드로 읽힌 것이다.
+    assert judged.lot_number == f"RM-0_1-{RECEIVED:%y%m%d}-01", judged.lot_number
+
+
+def test_a_reason_this_material_is_not_inspected_for_is_refused(prepared: Session) -> None:
+    """**사유가 항목을 가리킨다는 것과 그 항목을 이 자재에 대해 본다는 것은 다르다**
+    (Codex 리뷰 NC-121).
+
+    기준이 자재군마다 갈린 뒤로 벌어진 틈이다 — 여기서 막지 않으면 **보지도 않는
+    결함으로 불합격·특채가 선다.** 오늘의 시드에서는 사람이 적을 수 있는 셋이 모든
+    수입 무리에 다 있어 이 갈래가 비어 있지만, **오늘 비어 있다는 것은 제약이
+    아니라 우연이다.**
+    """
+    add_code(prepared, codes.INSP_ITEM, "포장")
+    add_code(prepared, codes.NC_REASON, "IQ-PKG", "포장 불량")
+    prepared.flush()
+    # 항목을 가리키는 계수 사유인데, **그 항목의 기준을 이 자재군에 두지 않는다.**
+    prepared.add(
+        NonconformityAttribute(
+            code="IQ-PKG", measure_kind=codes.COUNTED_KIND, inspection_item_code="포장"
+        )
+    )
+    prepared.add(
+        NonconformityStageRule(
+            reason_code="IQ-PKG",
+            stage_code=codes.STAGE_INCOMING,
+            disposition="등급 하향",
+            special_acceptance_allowed=True,
+        )
+    )
+    prepared.flush()
+
+    with pytest.raises(RefusedInspection, match="이 자재군의 수입 기준에 없다"):
+        receive(prepared, _request(nonconformity_code="IQ-PKG"))
+
+    assert prepared.query(Inspection).count() == 0

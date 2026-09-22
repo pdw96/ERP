@@ -110,3 +110,12 @@
 | NC | 무엇을 어긋냈나 | 빨개진 검사 |
 |---|---|---|
 | 118 | 품목 대조 가드의 조건을 `WHERE FALSE` 로(아무것도 세지 않게) | `test_upgrading_stops_when_a_ledger_line_points_at_another_items_inspection` |
+
+## Codex 리뷰의 고침 — `2fc40f3` 뒤
+
+| NC | 무엇을 어긋냈나 | 빨개진 검사 |
+|---|---|---|
+| 118(구조) | `fk_lot_inspection_item` 을 통째로 뺐다 | `test_a_lot_cannot_point_at_another_items_inspection` · 대조 테스트 |
+| 119 | 역방향 가드의 `HAVING count(DISTINCT lot_id) > 1` 을 `HAVING FALSE` 로 | `test_upgrading_stops_when_two_lots_share_one_inspection` |
+| 120 | `startswith(..., autoescape=True)` 를 `like(prefix + '%')` 로 되돌렸다 | `test_a_wildcard_in_the_item_code_does_not_reach_the_like` |
+| 121 | `if attribute.inspection_item_code not in standards:` 를 `if False:` 로 | `test_a_reason_this_material_is_not_inspected_for_is_refused` |

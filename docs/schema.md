@@ -328,6 +328,7 @@ PostgreSQL 의 기본키는 `NULL` 을 받지 않으므로 자재군을 PK 에 �
   생산창고는 셋 다 (투입 대기 자재 · 반제품 · 완제품)
 - `FK (inspection_id, inspection_result) → inspections (id, result)` — **쌍으로** 가리킨다
 - `FK (inspection_id, received_date) → inspections (id, received_date)` — 도착일도 쌍으로. **같은 사실이 두 표에 살면 갈린다**(원칙 ⑥)
+- `FK (inspection_id, item_id) → inspections (id, item_id)` — **품목도 쌍으로.** 쓰기 경로가 지키던 것이라 제약이 없었는데, **쓰는 코드가 하나뿐인 것은 제약이 아니라 우연이다** — 옛 원장에는 어긋난 짝이 실제로 설 수 있었다
 - `CHECK inspection_id IS NULL OR received_date IS NOT NULL` — **위 외래키가 못 보는 자리를 막는다.** 복합 외래키는 한 칸이라도 `NULL` 이면 통째로 건너뛰므로, 도착일이 비는 자사 로트가 수입검사를 가리키면서 대조만 빠져나갈 수 있었다. **손봐야 하는 제약이다** — 관문 2 가 오면 자사 로트도 판정을 가리키고 그쪽에는 도착일이 없다
 - `CHECK inspection_result IS DISTINCT FROM '불합격'` — **원칙 ① 이 제약이 되는 자리다**
 - **양방향** — `(inspection_id IS NULL) = (inspection_result IS NULL)`
@@ -413,6 +414,7 @@ PostgreSQL 의 기본키는 `NULL` 을 받지 않으므로 자재군을 PK 에 �
 - `FK (item_id, material_group) → items` — **자재군은 지어내는 값이 아니라 품목이 이미 아는 사실이다.** 이 칸이 여기 있는 이유는 측정 줄이고, 그 쓰임은 16번에 있다
 - `CHECK received_date IS NULL OR judged_at::date >= received_date` — **도착이 판정보다 먼저다.** `NULL` 은 통과한다 — 이 칸이 서기 전의 줄에는 도착일이 없고, 「모른다」를 「위반이다」로 세면 제약이 이미 선 사실을 막는다
 - `UNIQUE (id, received_date)` — 행을 좁히지 않는다. **로트가 도착일을 가리킬 상대**다 (14번의 `fk_lot_inspection_received_date`)
+- `UNIQUE (id, item_id)` — 같은 이유로 **로트가 품목을 가리킬 상대**다 (14번의 `fk_lot_inspection_item`)
 
 ### 도착일이 로트에만 살던 자리 — 불합격에서만 사라졌다
 
