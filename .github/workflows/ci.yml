@@ -73,13 +73,26 @@ jobs:
       # 않으므로 지워도 통과한다 — 실제로 돌려 확인했다(감사 ⑬ NC-147). 그 줄이
       # 없으면 `alembic upgrade head` 가 실패해도 `exec "$@"` 가 돌아 **반쯤
       # 마이그레이션된 DB 위에 API 가 뜨는데**, 그것을 무는 것은 여전히 사람이다.
-      # 그리고 이 스텝은 **엔트리포인트를 실행하지 않는다.**
+      # 그리고 이 스텝은 **엔트리포인트를 실행하지 않는다.** 실행 비트는
+      # `tests/test_boundary.py` 가 문다(감사 ⑮ NC-155).
+      #
+      # **파일을 이름으로 들지 않는다** (감사 ⑮ NC-154). 이름으로 들면 오늘
+      # `.sh` 가 하나뿐이라 맞지만 **둘째가 생기는 날 아무 소리 없이 검사 밖에
+      # 선다.** 목록은 git 이 든다 — 「목록을 두 벌 두지 않는다」가 그 자리다.
+      # 이 잡이 `backend` 에서 돌므로 **`:(top)` 로 저장소 전체**를 가리킨다 —
+      # 그것이 없으면 `backend` 밖의 셸이 다시 검사 밖에 선다(심어서 확인했다).
       - name: 셸
-        run: shellcheck ./docker-entrypoint.sh
+        run: git ls-files -z ':(top)*.sh' | xargs -0 --no-run-if-empty shellcheck
 
       # 이미지를 **빌드해 본다.** 이것이 없으면 `Dockerfile` 이나
       # `requirements.txt` 가 깨져도 CI 는 전부 초록이다 — CI 는 이미지를 쓰지
-      # 않고 `requirements-dev.txt` 로 따로 깔기 때문이다. 띄우지는 않는다:
-      # 기동은 DB 와 환경변수를 요구하고, 그 층은 `audit-ops` 의 자리다.
+      # 않고 `requirements-dev.txt` 로 따로 깔기 때문이다.
+      #
+      # **이 스텝이 못 보는 것**(W-6 ③, 감사 ⑮ NC-154): 빌드가 초록인 것과
+      # 이미지가 **뜨는** 것은 다르다. `COPY . .` 는 `.dockerignore` 가 필요한
+      # 경로를 가려도 **실패하지 않고**, `ENTRYPOINT` 도 실행 비트도 검증하지
+      # 않으며, 런타임은 한 줄도 돌지 않는다. 앞의 둘은 `tests/test_boundary.py`
+      # 가 저장소 안에서 물고(NC-155), **띄우는 것**은 DB 와 환경변수를 요구해
+      # 여기 없다 — 그 층은 `audit-ops` 의 자리다.
       - name: 이미지
         run: docker build .

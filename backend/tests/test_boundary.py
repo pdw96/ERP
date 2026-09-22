@@ -52,3 +52,49 @@ def test_the_build_context_does_not_carry_the_secret_file() -> None:
     }
 
     assert {".env", ".env.*", ".venv/"} <= ignored, ignored
+
+
+# 이미지가 살아 있으려면 컨텍스트에 **있어야** 하는 것들 — `docker-entrypoint.sh`
+# 가 `alembic upgrade head` 와 시드를 돌리고 uvicorn 이 `app` 을 import 한다.
+_MUST_REACH_THE_IMAGE = ("app", "migrations", "alembic.ini", "docker-entrypoint.sh")
+
+
+def test_the_build_context_still_carries_what_the_image_needs_to_boot() -> None:
+    """**빌드는 초록인데 기동만 깨지는 한 줄을 무는다** (감사 ⑮ NC-155).
+
+    앞의 검사는 `.dockerignore` 에 세 줄이 **있는지**만 본다 — 한쪽 방향이다.
+    `migrations/` 를 한 줄 더하면 `COPY . .` 는 하위 경로가 없어도 실패하지
+    않으므로 **빌드도 초록이고 테스트도 전부 초록인데** 컨테이너는
+    `alembic upgrade head` 에서 깨진다. 어긋내 확인했다.
+
+    **이 검사가 못 보는 부류**(W-6 ③): 이름이 아니라 **패턴**으로 가리는 것
+    (`*.ini` · `**/app`)과, 컨텍스트에는 있는데 `Dockerfile` 이 `COPY` 하지 않는
+    것. 그리고 기동 자체는 여전히 아무도 띄우지 않는다 — 그 층은 `audit-ops` 다.
+    """
+    ignored = {
+        line.strip().strip("/")
+        for line in (BACKEND_ROOT / ".dockerignore").read_text().splitlines()
+        if line.strip() and not line.startswith("#")
+    }
+
+    hidden = [name for name in _MUST_REACH_THE_IMAGE if name in ignored]
+    assert hidden == [], f".dockerignore 가 이미지에 필요한 것을 가린다: {hidden}"
+
+
+def test_the_entrypoint_is_executable() -> None:
+    """**`ENTRYPOINT ["./docker-entrypoint.sh"]` 는 실행 비트를 요구한다** (NC-155).
+
+    `shellcheck` 는 비트를 보지 않고 `docker build` 는 `ENTRYPOINT` 를 검증하지
+    않는다 — 비트를 떼고 둘 다 돌려 보았고 **전부 초록이었다.** 무는 것이 여기
+    말고는 없다.
+
+    **이 검사가 못 보는 부류**(W-6 ③): 보는 것은 **체크아웃된 파일의 모드**이지
+    git 이 들고 있는 값이 아니다. 둘은 보통 같지만(체크아웃이 git 의 비트를
+    그대로 놓는다) 실행 비트를 갖지 못하는 파일시스템에서는 갈린다 — 거기서는
+    이 검사가 거짓으로 빨개지지 참을 놓치지는 않는다.
+    """
+    entrypoint = BACKEND_ROOT / "docker-entrypoint.sh"
+
+    assert (
+        entrypoint.stat().st_mode & 0o111
+    ), f"{entrypoint} 에 실행 비트가 없다 — `ENTRYPOINT` 가 그것을 요구한다"

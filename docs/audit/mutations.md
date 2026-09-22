@@ -106,6 +106,13 @@
 | 145 | 받은 값의 모양 검사를 빼고 **그대로 되돌려 싣게** 했다 | `test_an_id_we_cannot_use_is_replaced_not_echoed` |
 | 145 | 500 처리기의 `_log.exception` 을 `_log.debug` 로 낮췄다 | `test_a_break_leaves_a_log_line_that_names_the_request` |
 | 145 | 500 처리기에서 헤더를 **다시 다는 줄**을 지웠다 | 같은 검사 |
+| 147 | `docker-entrypoint.sh` 의 `set -euo pipefail` 을 지우고 `shellcheck` 를 돌렸다 | **없다 — 통과했다.** 그것이 NC-147 의 근거다 |
+
+**통과한 줄이 이 묶음에서 가장 값지다.** 그 어긋냄이 없었으면 「`shellcheck` 가
+`set -euo pipefail` 을 지킨다」가 근거로 남아 있었다 — 도구가 요구하지 않는
+줄이다. **이 줄은 ⑬ 이 실제로 돌렸는데 여기 적히지 않아**(감사 ⑮ NC-156) 결과가
+`ci.yml` 주석과 대장에만 남았고, `mutations.md` 만 읽는 사람에게 셸 검사는
+**어긋내 본 적이 없는 검사**로 보였다. 규칙 ③ 이 요구하는 바로 그 줄이다.
 
 **첫 어긋냄에서 500 검사만 통과했고 그것이 옳다.** `ServerErrorMiddleware` 가
 사용자 미들웨어 **바깥**에 서므로 그 응답은 미들웨어를 지나오지 않고, 처리기가

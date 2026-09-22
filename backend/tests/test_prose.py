@@ -111,6 +111,22 @@ _MUTATIONS = REPO_ROOT / "docs/audit/mutations.md"
 _COMMIT = re.compile(r"`[0-9a-f]{7,40}`")
 
 
+def _bundles_with_a_table(text: str) -> list[tuple[int, str]]:
+    """`## ` 절 가운데 **표를 든 것**만 돌려준다 — 그것이 어긋냄의 기록이다.
+
+    제목의 문구에 기대지 않는 이유는 위 게이트의 독스트링에 있다(NC-153).
+    """
+    found: list[tuple[int, str]] = []
+    heading: tuple[int, str] | None = None
+    for number, line in enumerate(text.splitlines(), start=1):
+        if line.startswith("## "):
+            heading = (number, line)
+        elif line.startswith("|") and heading is not None:
+            found.append(heading)
+            heading = None
+    return found
+
+
 def test_a_mutation_bundle_says_which_commit_it_was_measured_on() -> None:
     """**「그때 빨개졌다」는 언제의 「그때」인지가 없으면 되짚을 수 없다** (감사 ⑪ NC-132).
 
@@ -122,18 +138,20 @@ def test_a_mutation_bundle_says_which_commit_it_was_measured_on() -> None:
     지키지 않는** 파일이었다 — 통째로 지워도 초록이었다(감사 ⑪ OB-3). 그래서 전수
     단언에 앵커를 함께 건다: 훑을 것이 **있었다**는 것까지 센다(OB-1).
 
+    **훑을 것을 낱말로 고르지 않는다** (감사 ⑮ NC-153). 처음에는 제목에 「고침」이
+    든 절만 셌는데, 그러면 제목을 달리 지은 묶음이 **훑는 집합에 아예 들어오지
+    않아** 커밋이 없어도 초록이다 — NC-132 가 낸 그 모양 그대로다. 어긋내 확인했다.
+    묶음을 가르는 것은 제목의 문구가 아니라 **그 절이 표를 들고 있는가**이며, 이
+    파일에서 표를 드는 절은 기록이고 들지 않는 절은 산문이다.
+
     **이 게이트가 못 보는 부류**(W-6 ③): 커밋이 적혀 있으나 **그 트리가 아닌**
     것 — 모양만 보고 값을 보지 않는다. 그리고 「`X` 뒤」처럼 **바탕**을 가리키는
     옛 형태도 통과한다. 둘 다 기계가 가를 수 없어 규칙이 산문으로 남는다.
     """
     assert _MUTATIONS.exists(), f"{_MUTATIONS} 가 없다 — 어긋냄의 기록이 사는 자리다"
 
-    bundles = [
-        (number, line)
-        for number, line in enumerate(_MUTATIONS.read_text().splitlines(), start=1)
-        if line.startswith("## ") and "고침" in line
-    ]
-    assert bundles, "고침 묶음이 하나도 없다 — 이 게이트가 아무것도 세지 않는다"
+    bundles = _bundles_with_a_table(_MUTATIONS.read_text())
+    assert bundles, "표를 든 묶음이 하나도 없다 — 이 게이트가 아무것도 세지 않는다"
 
     anchorless = [
         f"docs/audit/mutations.md:{number} — {line.strip()}"
@@ -162,8 +180,13 @@ def _table_rows(text: str) -> list[tuple[int, str]]:
 
 
 def _cells(row: str) -> int:
-    """칸 수. 앞뒤의 구분자는 GFM 에서 선택이라 벗기고 센다."""
-    return len(row.strip("|").split("|"))
+    """칸 수. 앞뒤의 구분자는 GFM 에서 선택이라 벗기고 센다.
+
+    **이스케이프한 `\\|` 는 구분자가 아니다** (NC-157). GFM 은 그것을 칸 안의
+    글자로 읽는데 여기서 함께 세면 **거짓 양성**이 난다 — 셀 안에 `||` 를 적은
+    줄이 그 자리다. 게이트가 자기 사각으로 적어 둔 것이 실은 거짓 양성이었다.
+    """
+    return len(row.replace("\\|", "").strip("|").split("|"))
 
 
 def test_a_table_row_does_not_carry_a_cell_the_header_did_not_declare() -> None:
@@ -174,8 +197,9 @@ def test_a_table_row_does_not_carry_a_cell_the_header_did_not_declare() -> None:
     사람이 원문만 읽으면 끝까지 보이지 않는 부류라 기계가 센다.
 
     **이 게이트가 못 보는 부류**(W-6 ③): 셀이 **모자란** 줄(GFM 이 빈 칸으로
-    채워 주므로 뜻이 사라지지는 않는다), 셀 안에 `|` 가 이스케이프된 자리,
-    그리고 **헤더 자체가 틀린** 표 — 셀 수만 맞으면 통과한다.
+    채워 주므로 뜻이 사라지지는 않는다)과 **헤더 자체가 틀린** 표 — 셀 수만
+    맞으면 통과한다. 이스케이프한 구분자는 **`_cells` 가 세지 않는다**(NC-157) —
+    여기 「못 보는 것」으로 적혀 있었으나 실제로는 **거짓 양성**이었다.
     """
     overflowing = []
     for path in REPO_ROOT.rglob("*.md"):
