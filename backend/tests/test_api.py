@@ -8,18 +8,20 @@
 확인하면 규칙이 바뀔 때 고칠 자리가 둘이 된다.
 """
 
+import asyncio
 import json
 import logging
 from collections.abc import Iterator
 from datetime import date, timedelta
 
 import pytest
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Request, Response
 from fastapi.testclient import TestClient
 from sqlalchemy import text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
+from app.api import app as api
 from app.api import schemas
 from app.api.app import API_VERSION, app, session_scope
 from app.core import codes
@@ -612,3 +614,45 @@ def test_a_break_does_not_carry_the_values_the_caller_sent(
     assert secret not in caplog.text, caplog.text
     assert "[parameters:" not in caplog.text, caplog.text
     assert "Failing row contains" not in caplog.text, caplog.text
+
+
+def test_a_path_the_caller_chose_does_not_shape_the_log_line(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """**밖에서 온 글자가 우리 로그 줄의 모양을 정하지 않는다** (감사 ⑲ NC-174).
+
+    축(`X-Request-Id`)은 모양을 좁혀 두었는데 **나란히 서는 경로에는 좁히는 것이
+    없었다.** 라우트가 하나뿐이라 그 밖의 모든 경로가 404 로 그 줄을 타므로,
+    부르는 쪽이 찍힐 글자를 고른다 — 그리고 그 줄은 NC-162 가 「거절된 요청은
+    DB 에 한 줄도 남기지 않으므로 **로그가 유일한 흔적**」이라며 세운 자리다.
+
+    **오늘 이 글자들은 두 층이 막는다** — `httpx` 는 URL 에서 거절하고 uvicorn 은
+    `%0A` · `%0D` 를 경로에서 뗀다(둘 다 확인했다). 그러나 **막는 것이 전부 우리
+    밖**이고, 실제로 띄워 `%00` 을 보냈을 때는 **로그에 그대로 들어왔다.** 그래서
+    부르는 쪽을 흉내 내지 않고 **미들웨어를 직접 불러** 우리 포맷만 본다 — 검사가
+    보는 것이 전송 층이 아니라 **우리 코드**여야 이 줄이 뜻을 갖는다.
+    """
+
+    async def drive() -> None:
+        scope = {
+            "type": "http",
+            "method": "GET",
+            "path": "/a\x00b\ncd",
+            "raw_path": b"/a",
+            "headers": [],
+            "query_string": b"",
+        }
+
+        async def call_next(_: Request) -> Response:
+            return Response(status_code=404)
+
+        await api.carry_an_id_that_names_this_request(Request(scope), call_next)
+
+    with caplog.at_level(logging.WARNING, logger="app.api"):
+        asyncio.run(drive())
+
+    assert "\\x00" in caplog.text, caplog.text
+    # 줄바꿈이 로그 줄을 가르지 않는다 — 우리 줄은 한 줄이다.
+    axis = [line for line in caplog.text.splitlines() if "거절했다" in line]
+    assert len(axis) == 1, caplog.text
+    assert "cd" in axis[0], axis[0]

@@ -146,22 +146,25 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    # **사라지는 것을 먼저 이름으로 말하고 멈춘다.** 측정값은 판정의 근거이고,
-    # 그때 쓴 규격이 함께 박혀 있어 기준 표에서 다시 만들 수 없다.
+    # **사라지는 것을 먼저 말하고 멈춘다.** 측정값은 판정의 근거이고, 그때 쓴
+    # 규격이 함께 박혀 있어 기준 표에서 다시 만들 수 없다.
+    #
+    # **판정자의 이름은 싣지 않는다** — 형제 리비전 `992bb442d985` 가 그 이유를
+    # 적는다(감사 ⑲ NC-173). 수와 찾아갈 자리로 대신한다.
     #
     # **앞선 리비전의 가드가 이 자리를 대신하지 못한다.** `08d406fa7f3b` 는
     # 로트를 세므로 로트를 만들지 않는 판정(불합격)의 측정값을 보지 못한다.
     op.execute(
         """
         DO $$
-        DECLARE judged text;
+        DECLARE measured bigint; judges bigint;
         BEGIN
-          SELECT string_agg(DISTINCT judged_by, ', ' ORDER BY judged_by) INTO judged
+          SELECT count(*), count(DISTINCT i.judged_by) INTO measured, judges
           FROM inspections AS i JOIN inspection_measurements AS m ON m.inspection_id = i.id;
-          IF judged IS NOT NULL THEN
+          IF measured > 0 THEN
             RAISE EXCEPTION
-              '되돌리면 측정값과 그때 쓴 규격이 사라진다 — 판정자: %. 판정의 근거라 기준 표에서 다시 만들 수 없다',
-              judged;
+              '되돌리면 측정값과 그때 쓴 규격이 사라진다 — 잰 줄 %개 · 판정자 %명. 누구인지는 SELECT DISTINCT judged_by FROM inspections 가 말한다. 판정의 근거라 기준 표에서 다시 만들 수 없다',
+              measured, judges;
           END IF;
         END $$;
         """

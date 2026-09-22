@@ -159,13 +159,25 @@ async def carry_an_id_that_names_this_request(
     # 에 `level=` 이 없다) `INFO` 로 찍으면 한 줄도 나오지 않는다 — 레벨을 낮추면
     # 남의 라이브러리 줄까지 함께 열린다.
     #
+    # **경로와 메서드는 `%r` 로 찍는다** (감사 ⑲ NC-174). 축(`X-Request-Id`)은
+    # 모양을 좁혀 두었는데 **나란히 서는 경로에는 좁히는 것이 하나도 없었다** —
+    # 라우트가 하나뿐이라 그 밖의 모든 경로가 404 로 이 줄을 타므로, 부르는 쪽이
+    # 로그에 찍힐 글자를 고른다. `repr` 은 제어문자를 이스케이프하고 따옴표로 칸
+    # 경계를 드러내며 **잃는 정보가 없다.**
+    #
+    # **감사가 든 시나리오는 재현되지 않았다** — `%0A` · `%0D` 는 uvicorn 이 떼어
+    # 경로에 닿지 않으므로(찍어서 확인했다) 위조된 **독립된 줄**은 서지 않는다.
+    # 그런데도 고친 이유는 둘이다: 막고 있는 것이 **우리 코드가 아니라 서버 층**
+    # 이고 그것을 무는 검사가 없으며, **`%00` 은 실제로 통과해 로그에 들어간다**
+    # (찍어서 확인했다). 좁히기를 축에만 세우고 옆칸에 세우지 않은 자리다.
+    #
     # **이 줄이 못 보는 부류**(W-6 ③): 성공한 요청(DB 에 줄이 남으므로 되짚을
     # 자리가 따로 있다)과, 미들웨어에 닿기 전에 끝나는 응답(끝 슬래시 307 ·
     # 전송 층이 내는 400). 그리고 부르는 쪽이 **같은 축을 계속 보내면** 여러
     # 요청이 한 줄에 겹친다 — 축의 유일성은 우리 것이 아니다.
     if response.status_code >= 400:
         _log.warning(
-            "거절했다 request_id=%s %s %s -> %s",
+            "거절했다 request_id=%s %r %r -> %s",
             request_id,
             request.method,
             request.url.path,
@@ -254,7 +266,7 @@ def do_not_answer_a_break_with_plain_text(request: Request, exc: Exception) -> J
     if isinstance(exc, DBAPIError):
         diagnosis = getattr(exc.orig, "diag", None)
         _log.error(
-            "요청을 처리하지 못했다 request_id=%s %s %s db_error=%s sqlstate=%s constraint=%s",
+            "요청을 처리하지 못했다 request_id=%s %r %r db_error=%s sqlstate=%s constraint=%s",
             request_id,
             request.method,
             request.url.path,
@@ -264,7 +276,7 @@ def do_not_answer_a_break_with_plain_text(request: Request, exc: Exception) -> J
         )
     else:
         _log.error(
-            "요청을 처리하지 못했다 request_id=%s %s %s",
+            "요청을 처리하지 못했다 request_id=%s %r %r",
             request_id,
             request.method,
             request.url.path,

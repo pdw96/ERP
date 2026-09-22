@@ -1270,7 +1270,7 @@ SELECT i.id, '입도', '수입', '분체', 30.0, 50.0, 10.0, 'µm' FROM inspecti
 )
 
 
-def test_downgrade_says_whose_judgements_would_vanish(engine: Engine) -> None:
+def test_downgrade_counts_the_judgements_that_would_vanish(engine: Engine) -> None:
     """**표가 내 것이라고 그 안의 줄까지 내 것은 아니다.**
 
     세 리비전이 「이 리비전이 세운 표라 사람이 먼저 넣어 둔 값이 있을 수 없다」고
@@ -1281,12 +1281,17 @@ def test_downgrade_says_whose_judgements_would_vanish(engine: Engine) -> None:
     그리고 `08d406fa7f3b` 의 가드가 이 자리를 대신하지 못한다 — 그쪽은 검사를
     가리키는 **로트**를 세므로 **로트를 만들지 않는 판정을 구조적으로 보지
     못한다.** 여기 심은 로트는 이월이라 검사를 가리키지 않는다.
+
+    **판정자의 이름이 아니라 수를 센다** (감사 ⑲ NC-173). 한때 이 검사가
+    `match="검사원 1"` 로 **명단을 요구했는데**, 그 메시지는 PostgreSQL 서버
+    로그 파일에도 남으므로 이름을 싣지 않기로 했다. 무는 힘은 그대로다 — 실제
+    줄을 세므로 `count(*)` 가 0 이면 멈추지 않고, 가드를 지우면 빨개진다.
     """
     schema = "judgement_downgrade_guard"
     with _schema(engine, schema):
         config = _upgrade_with(engine, schema, "head", _BEFORE_WRITE_PATH)
 
-        with pytest.raises(Exception, match="검사원 1"):
+        with pytest.raises(Exception, match="판정 1건"):
             command.downgrade(config, "65d31f8b7918")
 
 

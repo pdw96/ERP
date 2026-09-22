@@ -54,6 +54,35 @@ def test_the_build_context_does_not_carry_the_secret_file() -> None:
     assert {".env", ".env.*", ".venv/"} <= ignored, ignored
 
 
+def test_the_two_secret_filters_say_the_same_thing() -> None:
+    """**시크릿을 빼는 목록이 두 벌인데 갈리지 않는다** (감사 ⑲ NC-172).
+
+    `.gitignore` 와 `.dockerignore` 는 **합칠 수 없다** — 도커와 git 이 서로의
+    파일을 읽지 않는다. 그래서 「목록을 두 벌 두지 않는다」를 지킬 수 없고,
+    **견주는 검사가 그 자리를 대신한다.**
+
+    한때 갈려 있었다: 이미지 필터는 `.env.*` 를 뺐는데 버전관리는 `.env.local`
+    하나만 빼서, `backend/.env.prod` 가 **레이어에서는 막히고 커밋에는 들어갔다**
+    (심어서 확인했다). 커밋된 자격증명은 히스토리에서 지워지지 않는다.
+
+    **이 검사가 못 보는 부류**(W-6 ③): 두 파일이 같은 글자를 들어도 **무시 규칙의
+    뜻이 다른 것**(`.dockerignore` 는 git 의 `!` 부정이나 디렉터리 의미를 똑같이
+    해석하지 않는다), 그리고 `.env` 가 아닌 이름으로 시크릿을 두는 것.
+    """
+
+    def secrets(path: Path) -> set[str]:
+        return {
+            line.strip()
+            for line in path.read_text().splitlines()
+            if line.strip().startswith(".env")
+        }
+
+    in_git = secrets(REPO_ROOT / ".gitignore")
+    in_image = secrets(BACKEND_ROOT / ".dockerignore")
+
+    assert in_git == in_image, f".gitignore={sorted(in_git)} .dockerignore={sorted(in_image)}"
+
+
 # 이미지가 살아 있으려면 컨텍스트에 **있어야** 하는 것들 — `docker-entrypoint.sh`
 # 가 `alembic upgrade head` 와 시드를 돌리고 uvicorn 이 `app` 을 import 한다.
 _MUST_REACH_THE_IMAGE = ("app", "migrations", "alembic.ini", "docker-entrypoint.sh")
