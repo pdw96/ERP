@@ -31,8 +31,25 @@ def create_db_engine(url: str | None = None) -> Engine:
     줄로 뒤집힌다(`ALTER DATABASE … SET default_transaction_isolation`). **적어
     두기만 하고 강제하지 않는 규칙을 만들지 않는다** — 전제를 코드에 박는다.
     """
+    #
+    # **파라미터를 예외 문자열에 싣지 않는다** (감사 ⑰ NC-164). SQLAlchemy 는
+    # `StatementError` 에 `[SQL: …] [parameters: {…}]` 를 붙이는데, 이 엔드포인트에서
+    # 가장 있을 법한 500 이 제약 위반이라 그것은 예외 경로가 아니라 **주 경로**다.
+    # 500 처리기가 `exc_info` 로 예외를 통째로 찍으므로 요청 본문의 값 전부가
+    # (판정자 이름 · 품목 코드 · 공급사 로트번호 · 수량) 로그에 실린다.
+    #
+    # **그것은 아직 결정된 적이 없다.** 대장이 「로그에 `judged_by`·품목 코드를
+    # 실을지」를 `audit-secrets` 가 먼저 판정할 자리로 **등록해 두었는데**, 미뤄 둔
+    # 결정이 코드에서 이미 한쪽으로 실행되고 있었다. 판정이 올 때까지 끈다 —
+    # 보존 기간도 접근 제어도 마스킹도 아직 하나도 서 있지 않다.
+    #
+    # 끄면 잃는 것은 **어느 값이 걸렸는가**이고, 남는 것은 SQL 문과 제약 이름이다.
+    # 그 판정이 오는 날 「고른 값만 로그 줄에 싣는다」가 열리는 길이다.
     return create_engine(
-        url or get_settings().database_url, future=True, isolation_level="READ COMMITTED"
+        url or get_settings().database_url,
+        future=True,
+        isolation_level="READ COMMITTED",
+        hide_parameters=True,
     )
 
 

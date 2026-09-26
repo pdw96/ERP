@@ -171,20 +171,29 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    # **사라지는 것을 먼저 이름으로 말하고 멈춘다.** 표는 이 리비전의 것이지만
-    # 줄은 사람의 판정이다. 가드가 **보지 못하는 부류**도 함께 적는다 — 이것은
-    # 판정자만 말하고 **무엇을 몇 건 판정했는지는 말하지 않는다.** 정말 버릴
-    # 때는 사람이 손으로 비우고 다시 내린다.
+    # **사라지는 것을 먼저 말하고 멈춘다.** 표는 이 리비전의 것이지만 줄은
+    # 사람의 판정이다.
+    #
+    # **판정자의 이름을 싣지 않는다** (감사 ⑲ NC-173). 한때 명단을
+    # `string_agg(DISTINCT judged_by)` 로 실었는데, `RAISE EXCEPTION` 의
+    # 메시지는 되돌리는 사람의 터미널뿐 아니라 **PostgreSQL 서버 로그 파일**에도
+    # 간다(찍어서 확인했다) — 표와 보존 기간도 읽는 사람도 다른 자리다. 같은 값을
+    # 앱 층에서는 이미 껐으므로(NC-164) 여기만 열려 있었다. 수와 **찾아갈 자리**를
+    # 적으면 멈추는 힘도 사람이 물어볼 대상을 아는 것도 그대로 남고 **명단의
+    # 사본만 사라진다.**
+    #
+    # 가드가 **보지 못하는 부류**: 이것은 세기만 하고 **무엇을 판정했는지는 말하지
+    # 않는다.** 정말 버릴 때는 사람이 손으로 비우고 다시 내린다.
     op.execute(
         """
         DO $$
-        DECLARE judged text;
+        DECLARE judgements bigint; judges bigint;
         BEGIN
-          SELECT string_agg(DISTINCT judged_by, ', ' ORDER BY judged_by) INTO judged FROM inspections;
-          IF judged IS NOT NULL THEN
+          SELECT count(*), count(DISTINCT judged_by) INTO judgements, judges FROM inspections;
+          IF judgements > 0 THEN
             RAISE EXCEPTION
-              '되돌리면 검사 기록이 통째로 사라진다 — 판정자: %. 불합격 판정은 이 표에만 살아 로트에도 원장에도 사본이 없다',
-              judged;
+              '되돌리면 검사 기록이 통째로 사라진다 — 판정 %건 · 판정자 %명. 누구인지는 SELECT DISTINCT judged_by FROM inspections 가 말한다. 불합격 판정은 이 표에만 살아 로트에도 원장에도 사본이 없다',
+              judgements, judges;
           END IF;
         END $$;
         """

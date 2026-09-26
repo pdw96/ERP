@@ -52,3 +52,122 @@ def test_the_build_context_does_not_carry_the_secret_file() -> None:
     }
 
     assert {".env", ".env.*", ".venv/"} <= ignored, ignored
+
+
+def test_the_two_secret_filters_say_the_same_thing() -> None:
+    """**시크릿을 빼는 목록이 두 벌인데 갈리지 않는다** (감사 ⑲ NC-172).
+
+    `.gitignore` 와 `.dockerignore` 는 **합칠 수 없다** — 도커와 git 이 서로의
+    파일을 읽지 않는다. 그래서 「목록을 두 벌 두지 않는다」를 지킬 수 없고,
+    **견주는 검사가 그 자리를 대신한다.**
+
+    한때 갈려 있었다: 이미지 필터는 `.env.*` 를 뺐는데 버전관리는 `.env.local`
+    하나만 빼서, `backend/.env.prod` 가 **레이어에서는 막히고 커밋에는 들어갔다**
+    (심어서 확인했다). 커밋된 자격증명은 히스토리에서 지워지지 않는다.
+
+    **이 검사가 못 보는 부류**(W-6 ③): 두 파일이 같은 글자를 들어도 **무시 규칙의
+    뜻이 다른 것**(`.dockerignore` 는 git 의 `!` 부정이나 디렉터리 의미를 똑같이
+    해석하지 않는다), 그리고 `.env` 가 아닌 이름으로 시크릿을 두는 것.
+    """
+
+    def secrets(path: Path) -> set[str]:
+        return {
+            line.strip()
+            for line in path.read_text().splitlines()
+            if line.strip().startswith(".env")
+        }
+
+    in_git = secrets(REPO_ROOT / ".gitignore")
+    in_image = secrets(BACKEND_ROOT / ".dockerignore")
+
+    assert in_git == in_image, f".gitignore={sorted(in_git)} .dockerignore={sorted(in_image)}"
+
+
+# 이미지가 살아 있으려면 컨텍스트에 **있어야** 하는 것들 — `docker-entrypoint.sh`
+# 가 `alembic upgrade head` 와 시드를 돌리고 uvicorn 이 `app` 을 import 한다.
+_MUST_REACH_THE_IMAGE = ("app", "migrations", "alembic.ini", "docker-entrypoint.sh")
+
+
+def test_the_build_context_still_carries_what_the_image_needs_to_boot() -> None:
+    """**빌드는 초록인데 기동만 깨지는 한 줄을 무는다** (감사 ⑮ NC-155).
+
+    앞의 검사는 `.dockerignore` 에 세 줄이 **있는지**만 본다 — 한쪽 방향이다.
+    `migrations/` 를 한 줄 더하면 `COPY . .` 는 하위 경로가 없어도 실패하지
+    않으므로 **빌드도 초록이고 테스트도 전부 초록인데** 컨테이너는
+    `alembic upgrade head` 에서 깨진다. 어긋내 확인했다.
+
+    **이 검사가 못 보는 부류**(W-6 ③): 이름이 아니라 **패턴**으로 가리는 것
+    (`*.ini` · `**/app`)과, 컨텍스트에는 있는데 `Dockerfile` 이 `COPY` 하지 않는
+    것. 그리고 기동 자체는 여전히 아무도 띄우지 않는다 — 그 층은 `audit-ops` 다.
+    """
+    ignored = {
+        line.strip().strip("/")
+        for line in (BACKEND_ROOT / ".dockerignore").read_text().splitlines()
+        if line.strip() and not line.startswith("#")
+    }
+
+    hidden = [name for name in _MUST_REACH_THE_IMAGE if name in ignored]
+    assert hidden == [], f".dockerignore 가 이미지에 필요한 것을 가린다: {hidden}"
+
+
+def test_the_entrypoint_is_executable() -> None:
+    """**`ENTRYPOINT ["./docker-entrypoint.sh"]` 는 실행 비트를 요구한다** (NC-155).
+
+    `shellcheck` 는 비트를 보지 않고 `docker build` 는 `ENTRYPOINT` 를 검증하지
+    않는다 — 비트를 떼고 둘 다 돌려 보았고 **전부 초록이었다.** 무는 것이 여기
+    말고는 없다.
+
+    **이 검사가 못 보는 부류**(W-6 ③): 보는 것은 **체크아웃된 파일의 모드**이지
+    git 이 들고 있는 값이 아니다. 둘은 보통 같지만(체크아웃이 git 의 비트를
+    그대로 놓는다) 실행 비트를 갖지 못하는 파일시스템에서는 갈린다 — 거기서는
+    이 검사가 거짓으로 빨개지지 참을 놓치지는 않는다.
+    """
+    entrypoint = BACKEND_ROOT / "docker-entrypoint.sh"
+
+    assert (
+        entrypoint.stat().st_mode & 0o111
+    ), f"{entrypoint} 에 실행 비트가 없다 — `ENTRYPOINT` 가 그것을 요구한다"
+
+
+def _test_database_url() -> str:
+    """검사용 DB 주소. `conftest.py` 가 세우는 환경변수를 그대로 읽는다."""
+    import os
+
+    return os.environ["ERP_TEST_DATABASE_URL"]
+
+
+def test_a_database_error_does_not_render_the_values_it_was_given() -> None:
+    """**엔진 층에서도 사람이 보낸 값이 문자열에 실리지 않는다** (감사 ⑰ NC-164).
+
+    SQLAlchemy 는 `StatementError` 에 `[parameters: {…}]` 를 붙인다. 500 처리기는
+    DB 오류의 메시지를 아예 옮기지 않으므로 **오늘 그 문자열이 로그로 나가는
+    길은 없지만**, 그것은 처리기 한 자리가 막고 있는 것이고 이 칸은 **엔진이
+    만드는 모든 문자열**에 걸린다 — 다른 자리가 그 예외를 찍는 날 다시 열린다.
+
+    어긋내 확인했다: `hide_parameters` 만 떼면 처리기가 막아 주어 API 쪽 검사는
+    **초록으로 남는다.** 두 겹을 각각 무는 자리가 필요하다.
+    """
+    from sqlalchemy import text
+
+    from app.db.base import create_db_engine
+
+    # **엔진을 반드시 버린다.** 풀에 남은 연결은 나중에 수거되면서
+    # `ResourceWarning` 을 내고, pytest 는 그것을 **그때 돌던 다른 검사**의
+    # 실패로 올린다 — 실제로 그렇게 한 번 빨개졌다.
+    engine = create_db_engine(_test_database_url())
+    try:
+        with engine.connect() as connection:
+            try:
+                connection.execute(
+                    text("INSERT INTO a_table_that_does_not_exist (who) VALUES (:who)"),
+                    {"who": "검사원 아무개"},
+                )
+            except Exception as exc:  # 문자열만 본다
+                rendered = str(exc)
+            else:  # pragma: no cover — 없는 표라 반드시 터진다
+                raise AssertionError("터지지 않았다")
+    finally:
+        engine.dispose()
+
+    assert "검사원 아무개" not in rendered, rendered
+    assert "[parameters:" not in rendered, rendered

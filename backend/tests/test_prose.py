@@ -111,6 +111,22 @@ _MUTATIONS = REPO_ROOT / "docs/audit/mutations.md"
 _COMMIT = re.compile(r"`[0-9a-f]{7,40}`")
 
 
+def _bundles_with_a_table(text: str) -> list[tuple[int, str]]:
+    """`## ` 절 가운데 **표를 든 것**만 돌려준다 — 그것이 어긋냄의 기록이다.
+
+    제목의 문구에 기대지 않는 이유는 위 게이트의 독스트링에 있다(NC-153).
+    """
+    found: list[tuple[int, str]] = []
+    heading: tuple[int, str] | None = None
+    for number, line in enumerate(text.splitlines(), start=1):
+        if line.startswith("## "):
+            heading = (number, line)
+        elif line.startswith("|") and heading is not None:
+            found.append(heading)
+            heading = None
+    return found
+
+
 def test_a_mutation_bundle_says_which_commit_it_was_measured_on() -> None:
     """**「그때 빨개졌다」는 언제의 「그때」인지가 없으면 되짚을 수 없다** (감사 ⑪ NC-132).
 
@@ -122,18 +138,20 @@ def test_a_mutation_bundle_says_which_commit_it_was_measured_on() -> None:
     지키지 않는** 파일이었다 — 통째로 지워도 초록이었다(감사 ⑪ OB-3). 그래서 전수
     단언에 앵커를 함께 건다: 훑을 것이 **있었다**는 것까지 센다(OB-1).
 
+    **훑을 것을 낱말로 고르지 않는다** (감사 ⑮ NC-153). 처음에는 제목에 「고침」이
+    든 절만 셌는데, 그러면 제목을 달리 지은 묶음이 **훑는 집합에 아예 들어오지
+    않아** 커밋이 없어도 초록이다 — NC-132 가 낸 그 모양 그대로다. 어긋내 확인했다.
+    묶음을 가르는 것은 제목의 문구가 아니라 **그 절이 표를 들고 있는가**이며, 이
+    파일에서 표를 드는 절은 기록이고 들지 않는 절은 산문이다.
+
     **이 게이트가 못 보는 부류**(W-6 ③): 커밋이 적혀 있으나 **그 트리가 아닌**
     것 — 모양만 보고 값을 보지 않는다. 그리고 「`X` 뒤」처럼 **바탕**을 가리키는
     옛 형태도 통과한다. 둘 다 기계가 가를 수 없어 규칙이 산문으로 남는다.
     """
     assert _MUTATIONS.exists(), f"{_MUTATIONS} 가 없다 — 어긋냄의 기록이 사는 자리다"
 
-    bundles = [
-        (number, line)
-        for number, line in enumerate(_MUTATIONS.read_text().splitlines(), start=1)
-        if line.startswith("## ") and "고침" in line
-    ]
-    assert bundles, "고침 묶음이 하나도 없다 — 이 게이트가 아무것도 세지 않는다"
+    bundles = _bundles_with_a_table(_MUTATIONS.read_text())
+    assert bundles, "표를 든 묶음이 하나도 없다 — 이 게이트가 아무것도 세지 않는다"
 
     anchorless = [
         f"docs/audit/mutations.md:{number} — {line.strip()}"
@@ -162,8 +180,13 @@ def _table_rows(text: str) -> list[tuple[int, str]]:
 
 
 def _cells(row: str) -> int:
-    """칸 수. 앞뒤의 구분자는 GFM 에서 선택이라 벗기고 센다."""
-    return len(row.strip("|").split("|"))
+    """칸 수. 앞뒤의 구분자는 GFM 에서 선택이라 벗기고 센다.
+
+    **이스케이프한 `\\|` 는 구분자가 아니다** (NC-157). GFM 은 그것을 칸 안의
+    글자로 읽는데 여기서 함께 세면 **거짓 양성**이 난다 — 셀 안에 `||` 를 적은
+    줄이 그 자리다. 게이트가 자기 사각으로 적어 둔 것이 실은 거짓 양성이었다.
+    """
+    return len(row.replace("\\|", "").strip("|").split("|"))
 
 
 def test_a_table_row_does_not_carry_a_cell_the_header_did_not_declare() -> None:
@@ -174,8 +197,9 @@ def test_a_table_row_does_not_carry_a_cell_the_header_did_not_declare() -> None:
     사람이 원문만 읽으면 끝까지 보이지 않는 부류라 기계가 센다.
 
     **이 게이트가 못 보는 부류**(W-6 ③): 셀이 **모자란** 줄(GFM 이 빈 칸으로
-    채워 주므로 뜻이 사라지지는 않는다), 셀 안에 `|` 가 이스케이프된 자리,
-    그리고 **헤더 자체가 틀린** 표 — 셀 수만 맞으면 통과한다.
+    채워 주므로 뜻이 사라지지는 않는다)과 **헤더 자체가 틀린** 표 — 셀 수만
+    맞으면 통과한다. 이스케이프한 구분자는 **`_cells` 가 세지 않는다**(NC-157) —
+    여기 「못 보는 것」으로 적혀 있었으나 실제로는 **거짓 양성**이었다.
     """
     overflowing = []
     for path in REPO_ROOT.rglob("*.md"):
@@ -198,4 +222,75 @@ def test_a_table_row_does_not_carry_a_cell_the_header_did_not_declare() -> None:
 
     assert overflowing == [], (
         "선언한 열보다 셀이 많다 — 넘치는 셀은 렌더에서 사라진다:\n" + "\n".join(overflowing)
+    )
+
+
+_LEDGER = REPO_ROOT / "docs" / "audit" / "README.md"
+
+# 회차 기호. 대장이 ① ~ ⑳ 을 쓰고, 「⑦-b」처럼 꼬리가 붙는 회차가 있다.
+_ROUND = re.compile(r"[①-⑳]")
+
+
+def _rounds_with_a_section(text: str) -> set[str]:
+    """회차 절이 선 회차들 — `## 감사 ⑬(...)` 의 기호만 센다."""
+    return {
+        found
+        for line in text.splitlines()
+        if line.startswith("## 감사 ")
+        for found in _ROUND.findall(line)
+    }
+
+
+# 회차별 W 표의 첫 칸은 **회차 이름뿐**이다 — `⑪` · `⑦-b` · `⑧ 셋` 꼴.
+# **「로 시작한다」로 고르면 안 된다**: 「아직 아무도 보지 않은 것」 표에도
+# `⑰ 이 고친 자리(…)` 처럼 회차 기호로 시작하는 행이 있어, 그것까지 세면
+# **회차별 W 표에서 줄을 지워도 게이트가 통과한다**(어긋내 확인했다).
+_ROUND_LABEL = re.compile(r"[①-⑳](?:-b)?(?:\s+[가-힣]{1,3})?\Z")
+
+
+def _rounds_in_the_round_table(text: str) -> set[str]:
+    """회차별 W 표에 줄이 있는 회차들 — 첫 칸이 **회차 이름뿐인** 행만 센다."""
+    found: set[str] = set()
+    for _, row in _table_rows(text):
+        first = row.strip("|").split("|")[0].strip()
+        if _ROUND_LABEL.fullmatch(first):
+            found.update(_ROUND.findall(first))
+    return found
+
+
+def test_a_round_that_closed_leaves_a_line_in_the_round_table() -> None:
+    """**회차를 닫는 사람이 회차별 W 표에 줄을 적는다** (감사 ⑱ — NC-142 의 다섯째).
+
+    같은 자리가 NC-49 → 57 → 93 → 142 → 이번으로 **다섯 번** 깨졌다. 네 번째
+    뒤에 세는 방법을 바꿨는데(눈으로 세지 않고 기한 칸에서 뽑는다) 또 멈췄다 —
+    **적는 시점이 여전히 사람**이었고 ⑬ 부터 다섯 회차가 줄 없이 지나갔다.
+    이 저장소의 규칙은 「같은 규칙이 세 번 이상 깨졌으면 자동 게이트로 설 수
+    있는지 묻는다」이고, 이것은 **기계가 셀 수 있는 모양**이다.
+
+    **수를 세지 않는다.** 회차 절이 선 기호와 표에 줄이 있는 기호를 **집합으로**
+    견준다 — 회차가 하나 늘어도 이 검사는 낡지 않는다(NC-86).
+
+    **이 게이트가 못 보는 부류**(W-6 ③): 줄은 있는데 **내용이 틀린** 것
+    (「⑨ 둘」 행이 여덟을 아홉으로 적었던 자리가 그 부류다), 꼬리로만 갈리는
+    회차(`⑦` 과 `⑦-b` 는 같은 기호라 한 줄로 센다), 그리고 **절도 줄도 없이
+    지나간** 회차 — 그것은 이 파일이 아니라 대장 자신이 모르는 회차다.
+    """
+    ledger = _LEDGER.read_text()
+    tabled = _rounds_in_the_round_table(ledger)
+    assert tabled, "회차별 W 표를 찾지 못했다 — 이 게이트가 아무것도 세지 않는다"
+
+    # **표가 시작한 자리부터 센다.** 그 표는 ⑤ 무렵에 섰고 앞 회차들에는 줄이
+    # 없다 — 회차 기록은 소급해 고치지 않으므로(대장이 그렇게 정했다) 그 앞은
+    # 이 게이트의 대상이 아니다. 바닥을 **표 자신**에서 읽으므로 손으로 적은
+    # 예외 목록이 생기지 않는다.
+    floor = min(tabled)
+    missing = sorted(
+        round_
+        for round_ in _rounds_with_a_section(ledger)
+        if round_ >= floor and round_ not in tabled
+    )
+
+    assert missing == [], (
+        "회차 절은 있는데 회차별 W 표에 줄이 없다 — 회차를 닫는 사람이 적는다:\n"
+        + "\n".join(f"  감사 {round_} 절은 있고 표에 줄이 없다" for round_ in missing)
     )

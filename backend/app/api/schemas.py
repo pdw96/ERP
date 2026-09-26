@@ -7,6 +7,7 @@
 """
 
 from datetime import date
+from enum import StrEnum
 from typing import Annotated
 
 from pydantic import AfterValidator, BaseModel, ConfigDict, Field
@@ -86,14 +87,25 @@ class InspectionOut(BaseModel):
     #
     # - `inspection_id` — 검사에는 다른 손잡이가 없다. 클레임과 반품이 **뒤에 그
     #   건을 가리킬 유일한 값**이고, 불합격에도 남는다(로트는 서지 않는다)
-    # - `lot_id` — 라벨에 찍히는 것은 `lot_number` 이지만, 그 번호는 **같은 품목의
-    #   이월 로트와 겹칠 수 있다**(유일 제약이 없다). 원장 줄이 가리키는 것도
-    #   `lot_id` 이므로, 방금 만든 로트를 **모호하지 않게** 가리키는 값은 이것뿐이다
-    # - `ledger_entry_id` — 원장 줄에는 업무 키가 아예 없다. 「로트는 생겼는데
-    #   원장 줄이 없는」 상태가 없다는 것을 부르는 쪽이 확인할 자리다
+    # - `lot_id` — 라벨에 찍히는 것은 `lot_number` 이고, 그 번호는 **품목 안에서는
+    #   유일하다**(`uq_lot_item_number`). 그러므로 부르는 쪽은 자기가 보낸
+    #   `item_code` 와 돌려받은 `lot_number` 로도 로트를 가리킬 수 있고, `lot_id`
+    #   는 **그 짝을 다시 맞추지 않고 응답 하나로 닫게 하는** 값이다. 원장 줄이
+    #   가리키는 것도 이것이다
+    # - `ledger_entry_id` — 「로트는 생겼는데 원장 줄이 없는」 상태가 없다는 것을
+    #   부르는 쪽이 확인할 자리다. **주소로서 더해 주는 것은 오늘 없다** —
+    #   `uq_lot_inspection` 과 구매입고의 부분 유일 인덱스 때문에 `inspection_id`
+    #   하나로 로트도 그 입고 줄도 이미 결정되기 때문이다. 읽는 경로가 없어 부르는
+    #   쪽이 그것을 **계산할 수는 없다**는 것이 이 칸이 서 있는 이유다
+    #
+    # **처음 적은 근거 둘이 거짓이었다**(감사 ⑯ NC-159) — 「`lot_number` 에 유일
+    # 제약이 없다」와 「원장 줄에 업무 키가 아예 없다」. 적힌 대로 읽은 소비자는
+    # **안정된 업무 키를 버리고 대리키에 붙는다.**
     #
     # **읽는 엔드포인트가 서는 날 이 셋이 그 경로의 열쇠가 된다.** 그때까지는
-    # 위가 그 쓰임이며, 빼는 것은 필드 삭제라 파괴적 변경이다.
+    # 위가 그 쓰임이다. 빼는 것은 필드 삭제이지만 **지금은 파괴적 변경이 아니다**
+    # — 읽는 엔드포인트가 서기 전까지 계약을 좁히는 것이 자유롭다고 `app.py` 의
+    # 판 정책이 적고, 그 둘이 한 말이어야 한다(NC-159 가 갈린 자리로 냈다).
     inspection_id: int
     # **값 집합을 스펙에 적는다.** 자유 문자열로 두면 소비자가 「합격」을
     # **문서화되지 않은 채** 하드코딩해야 하고, 관문 2 가 값을 늘려도 그것이
@@ -143,3 +155,34 @@ class Refused(BaseModel):
     """
 
     detail: list[RefusalDetail | ValidationDetail]
+
+
+class Transport(StrEnum):
+    """라우트 **밖에서** 나는 거절의 이름 — `detail[].type` 의 셋째 이름 공간.
+
+    `Refusal` 은 업무 규칙이 거절할 때의 이름이고 이쪽은 **요청이 라우트에
+    닿기 전이나 처리가 터진 뒤**의 이름이다. 둘을 한 열거로 합치지 않는 것은
+    **층이 다르기 때문**이다 — 업무 이름은 관문 2 가 늘리고 이쪽은 늘지 않는다.
+
+    **이 이름들이 여기 있는 이유는 NC-134 의 논거 그대로다.** 코드에만 있으면
+    소비자가 문서화되지 않은 채 하드코딩하고, `http_error` 를 `path_error` 로
+    고치는 커밋이 **어떤 검사도 물지 않고 어떤 스펙도 바꾸지 않은 채** 소비자의
+    분기를 깬다 — NC-76 이 없앤 바로 그 모양이다(감사 ⑯ NC-160).
+    """
+
+    HTTP_ERROR = "http_error"
+    INTERNAL_ERROR = "internal_error"
+
+
+class TransportDetail(BaseModel):
+    """라우트 밖 거절의 `detail[]` 한 줄. `loc` 은 본문이 아니라 요청선·서버다."""
+
+    loc: list[str]
+    msg: str
+    type: Transport
+
+
+class TransportRefused(BaseModel):
+    """404 · 405 · 500 의 본문 — 422 와 **같은 모양이고 이름 공간만 다르다**."""
+
+    detail: list[TransportDetail]

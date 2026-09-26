@@ -8,18 +8,21 @@
 확인하면 규칙이 바뀔 때 고칠 자리가 둘이 된다.
 """
 
+import asyncio
 import json
 import logging
 from collections.abc import Iterator
 from datetime import date, timedelta
 
 import pytest
-from fastapi import FastAPI
+from fastapi import FastAPI, Request, Response
 from fastapi.testclient import TestClient
 from sqlalchemy import text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
+from app.api import app as api
+from app.api import schemas
 from app.api.app import API_VERSION, app, session_scope
 from app.core import codes
 from app.db.constraints import blank_characters, is_present
@@ -329,6 +332,102 @@ def test_the_spec_lists_every_refusal_name(client: TestClient) -> None:
     ]
 
 
+def test_the_spec_declares_every_answer_that_actually_goes_out(client: TestClient) -> None:
+    """**기계가 읽는 계약만 보는 소비자가 이 API 의 전부를 본다** (감사 ⑯ NC-160).
+
+    처음에는 `201` 과 `422` 만 선언했는데, 그때도 404 · 405 · 500 이 같은
+    `detail[]` 모양으로 나가고 있었다 — **스펙만 읽으면 둘만 내는 API** 였다.
+    NC-134 가 스물셋에 대해 낸 논거가 그대로 남던 자리이고, `http_error` 를
+    `path_error` 로 고치는 커밋이 **아무것도 물리지 않고** 소비자의 분기를 깼다.
+
+    **실제로 찍어 견준다.** 선언 목록을 손으로 적으면 그 목록이 사본이 되어
+    갈리므로, 라우트 밖 거절을 **실제로 일으켜** 그 상태 코드가 선언에 있는지를
+    본다.
+
+    **이 검사가 못 보는 부류**(W-6 ③): 이 검사가 일으키지 못하는 응답(500 은
+    다른 검사가 일으킨다)과, 선언은 있는데 **모양이 다른** 경우 — 모양은 위의
+    검사들이 본다.
+    """
+    spec = client.get("/openapi.json").json()
+    declared = spec["paths"]["/inspections"]["post"]["responses"]
+
+    # 라우트 밖 거절을 실제로 일으킨다 — 404 와 405.
+    for response in (client.post("/inspection", json=_PAYLOAD), client.get("/inspections")):
+        assert str(response.status_code) in declared, (response.status_code, sorted(declared))
+
+    # 500 은 다른 검사가 일으키므로 선언만 본다. 세 상태가 같은 모양을 든다.
+    for code in ("404", "405", "500"):
+        schema = declared[code]["content"]["application/json"]["schema"]
+        assert schema["$ref"].endswith("/TransportRefused"), (code, schema)
+
+
+def test_the_spec_lists_every_transport_name(client: TestClient) -> None:
+    """**라우트 밖 거절의 이름도 스펙이 든다** (감사 ⑯ NC-160).
+
+    `Refusal` 과 같은 논거의 셋째 이름 공간이다 — `detail[].type` 은 NC-76 이
+    **「고치면 깨지는 약속」**으로 선언한 칸이고, 그 칸에 약속 밖의 값이 실리면
+    이름을 고치는 커밋이 파괴적 변경이 된다.
+
+    **이 검사가 못 보는 부류**(W-6 ③): **이름의 변동 자체.** 양변이 같은 원천에서
+    나오므로(스펙 쪽 값은 pydantic 이 이 열거에서 만든다) 이름을 더하거나 고치면
+    **두 변이 함께 움직여 초록으로 남는다** — 어긋내 확인했다(`ghost` 를 더해도,
+    `http_error` 를 `path_error` 로 고쳐도 통과한다). 이 검사가 무는 것은
+    **배선이 끊길 때**다: `type` 이 `str` 로 돌아가거나, 열거가 인라인되어
+    `$ref` 가 사라지거나, `responses=` 에서 모델이 빠지면 빨개진다.
+
+    **그것으로 충분한 이유**는 NC-160 이 요구한 것이 「이름이 기계가 읽는 계약에
+    있을 것」이기 때문이다 — 이제 이름을 고치면 `/openapi.json` 이 **함께 바뀌어
+    diff 에 보인다.** 「이름이 바뀌면 검사가 문다」를 원하면 필요한 것은 **찍어 둔
+    스펙과의 대조**이고, 그것은 이 저장소에 없다(감사 ⑯ OB-1).
+    """
+    spec = client.get("/openapi.json").json()
+
+    assert spec["components"]["schemas"]["Transport"]["enum"] == [
+        name.value for name in schemas.Transport
+    ]
+
+
+def test_the_spec_says_which_header_names_the_request(client: TestClient) -> None:
+    """**`X-Request-Id` 의 규약이 밖이 읽는 자리에 있다** (감사 ⑯ NC-160).
+
+    NC-145 가 그것을 「부르는 쪽이 『이 요청』이라고 말할 수 있게」 세웠는데,
+    말할 자리가 스펙에 없으면 그 규약은 **우리끼리의 것**이다. 받은 값을
+    존중하는 것까지가 그 규약이라 그것도 설명에 적힌다.
+    """
+    spec = client.get("/openapi.json").json()
+    declared = spec["paths"]["/inspections"]["post"]["responses"]
+
+    for code in ("201", "404", "405", "422", "500"):
+        assert "X-Request-Id" in declared[code]["headers"], (code, declared[code])
+
+    assert "Allow" in declared["405"]["headers"], declared["405"]
+
+
+def test_a_status_that_may_not_carry_a_body_does_not_get_one(client: TestClient) -> None:
+    """**덮개가 기본 처리기의 갈래를 떠안는다** (감사 ⑯ NC-161).
+
+    `StarletteHTTPException` 의 기본 처리기는 둘을 한다 — 헤더를 넘기는 것과,
+    **본문을 실으면 안 되는 상태 코드**를 본문 없이 돌려보내는 것. 덮으면서 앞의
+    것을 잃은 자리가 NC-148 이고, 뒤의 것이 이것이다. `304` 에 본문과
+    `Content-Length` 를 실으면 응답이 아니라 **프로토콜 오류**가 된다.
+
+    앱에 그 상태로 던지는 라우트가 없으므로 **처리기를 직접 부른다** — 없는
+    라우트를 세우면 그것이 계약면이 되어 버린다.
+    """
+    from starlette.exceptions import HTTPException as StarletteHTTPException
+
+    from app.api import app as api
+
+    answer = api.answer_a_path_error_in_the_same_shape(
+        Request({"type": "http", "method": "GET", "path": "/", "headers": []}),
+        StarletteHTTPException(status_code=304, headers={"ETag": '"x"'}),
+    )
+
+    assert answer.body == b"", answer.body
+    assert answer.headers["ETag"] == '"x"'
+    assert "content-length" not in {name.lower() for name in answer.headers}
+
+
 def test_every_answer_carries_an_id_that_names_the_request(client: TestClient) -> None:
     """**부르는 쪽이 「이 요청」이라고 말할 수 있다** (감사 ⑬ NC-145).
 
@@ -442,3 +541,118 @@ def test_a_break_leaves_the_cause_not_just_the_axis(
 
     assert "NoneType: None" not in caplog.text, caplog.text
     assert "RuntimeError" in caplog.text and "여기서 터졌다" in caplog.text, caplog.text
+
+
+def test_a_refusal_leaves_a_line_that_names_the_request(
+    client: TestClient, caplog: pytest.LogCaptureFixture
+) -> None:
+    """**거절도 서버에 흔적을 남긴다** (감사 ⑰ NC-162).
+
+    축은 다섯 갈래 모두에 나가고 스펙이 그것을 「이 요청을 가리키는 값」이라고
+    공표하는데, 그 값으로 서버에서 찾을 수 있는 것이 **500 하나뿐**이었다 —
+    422 · 404 · 405 는 `grep` 0 건이었고(띄워서 확인했다) uvicorn 접근 줄에는
+    **축도 시각도 없다.** 거절된 요청은 DB 에도 한 줄을 남기지 않으므로,
+    「로그가 유일한 흔적」이라는 NC-145 의 전제가 거절에도 그대로 성립한다.
+
+    **세 갈래를 다 밟는다** — 경계 거절(422) · 없는 경로(404) · 못 받는
+    메서드(405). 한 갈래만 보면 나머지가 조용히 빠진다.
+    """
+    with caplog.at_level(logging.WARNING, logger="app.api"):
+        refused = client.post("/inspections", json={}, headers={"X-Request-Id": "probe422"})
+        missing = client.post(
+            "/inspection", json=_PAYLOAD, headers={"X-Request-Id": "probe404"}
+        )
+        wrong = client.get("/inspections", headers={"X-Request-Id": "probe405"})
+
+    assert (refused.status_code, missing.status_code, wrong.status_code) == (422, 404, 405)
+    for axis, code in (("probe422", "422"), ("probe404", "404"), ("probe405", "405")):
+        assert axis in caplog.text, (axis, caplog.text)
+        assert f"{axis} " in caplog.text and code in caplog.text, (axis, caplog.text)
+
+
+def test_a_break_does_not_carry_the_values_the_caller_sent(
+    prepared: Session,  # noqa: F811
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """**미뤄 둔 결정이 코드에서 실행되고 있지 않다** (감사 ⑰ NC-164).
+
+    대장은 「로그에 `judged_by`·품목 코드를 실을지」를 `audit-secrets` 가 먼저
+    판정할 자리로 **등록**해 두었다. 그런데 SQLAlchemy 는 `StatementError` 에
+    `[parameters: {…}]` 를 붙이고 500 처리기가 예외를 통째로 찍으므로, **요청
+    본문의 값 전부**가 이미 로그에 실리고 있었다 — 찍어서 확인했다.
+
+    이 엔드포인트에서 가장 있을 법한 500 이 제약 위반이라 그것은 예외 경로가
+    아니라 **주 경로**다. 그래서 여기서도 **진짜 DB 오류**로 밟는다 — 앞의
+    검사처럼 `RuntimeError` 를 던지면 이 자리가 한 번도 보이지 않는다.
+
+    **두 겹이다.** `hide_parameters=True` 가 SQLAlchemy 의 `[parameters: …]` 를
+    끄는데 그것만으로는 닫히지 않는다 — PostgreSQL 이 무결성 위반에 `DETAIL:
+    Failing row contains (…)` 를 붙여 **줄의 값 전부**를 되비춘다. 이 검사가 그
+    둘째 겹을 잡았다(첫 고침으로는 빨갰다).
+    """
+    secret = "검사원 아무개"
+
+    def break_inside_the_database() -> Iterator[Session]:
+        prepared.execute(
+            text("INSERT INTO inspections (judged_by) VALUES (:who)"), {"who": secret}
+        )
+        yield prepared  # pragma: no cover — 위에서 터진다
+
+    app.dependency_overrides[session_scope] = break_inside_the_database
+    try:
+        broken = TestClient(app, raise_server_exceptions=False)
+        with caplog.at_level(logging.ERROR, logger="app.api"):
+            answer = broken.post("/inspections", json=_PAYLOAD)
+    finally:
+        app.dependency_overrides.clear()
+
+    assert answer.status_code == 500, answer.text
+    # **까닭은 남는다** — NC-149 가 세운 것을 이 고침이 되돌리지 않는다.
+    assert "db_error=" in caplog.text and "sqlstate=" in caplog.text, caplog.text
+    assert "constraint=" in caplog.text, caplog.text
+    # **사람이 보낸 값은 남지 않는다 — 두 겹 다.**
+    assert secret not in caplog.text, caplog.text
+    assert "[parameters:" not in caplog.text, caplog.text
+    assert "Failing row contains" not in caplog.text, caplog.text
+
+
+def test_a_path_the_caller_chose_does_not_shape_the_log_line(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """**밖에서 온 글자가 우리 로그 줄의 모양을 정하지 않는다** (감사 ⑲ NC-174).
+
+    축(`X-Request-Id`)은 모양을 좁혀 두었는데 **나란히 서는 경로에는 좁히는 것이
+    없었다.** 라우트가 하나뿐이라 그 밖의 모든 경로가 404 로 그 줄을 타므로,
+    부르는 쪽이 찍힐 글자를 고른다 — 그리고 그 줄은 NC-162 가 「거절된 요청은
+    DB 에 한 줄도 남기지 않으므로 **로그가 유일한 흔적**」이라며 세운 자리다.
+
+    **오늘 이 글자들은 두 층이 막는다** — `httpx` 는 URL 에서 거절하고 uvicorn 은
+    `%0A` · `%0D` 를 경로에서 뗀다(둘 다 확인했다). 그러나 **막는 것이 전부 우리
+    밖**이고, 실제로 띄워 `%00` 을 보냈을 때는 **로그에 그대로 들어왔다.** 그래서
+    부르는 쪽을 흉내 내지 않고 **미들웨어를 직접 불러** 우리 포맷만 본다 — 검사가
+    보는 것이 전송 층이 아니라 **우리 코드**여야 이 줄이 뜻을 갖는다.
+    """
+
+    async def drive() -> None:
+        scope = {
+            "type": "http",
+            "method": "GET",
+            "path": "/a\x00b\ncd",
+            "raw_path": b"/a",
+            "headers": [],
+            "query_string": b"",
+        }
+
+        async def call_next(_: Request) -> Response:
+            return Response(status_code=404)
+
+        await api.carry_an_id_that_names_this_request(Request(scope), call_next)
+
+    with caplog.at_level(logging.WARNING, logger="app.api"):
+        asyncio.run(drive())
+
+    assert "\\x00" in caplog.text, caplog.text
+    # 줄바꿈이 로그 줄을 가르지 않는다 — 우리 줄은 한 줄이다.
+    axis = [line for line in caplog.text.splitlines() if "거절했다" in line]
+    assert len(axis) == 1, caplog.text
+    assert "cd" in axis[0], axis[0]
