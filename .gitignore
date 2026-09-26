@@ -25,6 +25,11 @@ htmlcov/
 # 재는 자리라 그 사본이 저장소에 들어오면 「고치지 않는다」가 깨진다.
 .claude/worktrees/
 
+# 브리핑 — 추적 안 된 파일의 본문을 그대로 담으므로 박힌 키가 들어올 수 있다.
+# 보관본(.claude/briefs/)까지 커밋 밖에 둔다. 회차의 기록은 docs/audit/ 에 남는다.
+.claude/audit-brief.md
+.claude/briefs/
+
 # 편집기
 .vscode/
 .idea/

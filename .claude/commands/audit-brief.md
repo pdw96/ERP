@@ -23,9 +23,10 @@ argument-hint: [기준 커밋/브랜치 — 필수] [감사자 이름]
 
 ## 할 일
 
-**하나. 기준이 실재하는지 확인합니다.**
+**하나. 저장소 최상위로 가서 기준이 실재하는지 확인합니다.**
 
 ```
+cd "$(git rev-parse --show-toplevel)"
 git rev-parse --verify "$0^{commit}"
 git merge-base "$0" HEAD
 ```
@@ -33,8 +34,9 @@ git merge-base "$0" HEAD
 커밋이 아니거나 머지 베이스가 없으면 멈추고 알려 주세요 — 잘못된 기준의 브리핑은 **틀린 근거**가 됩니다.
 
 **둘. 아래를 모읍니다.** 실패한 명령은 그 자리를 비워 두지 말고 **실패를
-브리핑에 적으세요.** `git diff`(`--no-index` 빼고) · `git ls-files` 끝에는 `-- . ':!.claude/audits'
-':!.claude/briefs' ':!.claude/audit-brief.md'` 를 붙입니다 — 지난 기록이 다시 담깁니다.
+브리핑에 적으세요.** `git diff`(`--no-index` 빼고) · `git ls-files` 끝에는 `-- ':/' ':(top,exclude).claude/audits'
+':(top,exclude).claude/briefs' ':(top,exclude).claude/audit-brief.md'` 를 붙입니다. 제외가 없으면 지난 기록이
+다시 담기고, `.` 로 거르면 하위 폴더에서 돌 때 루트의 변경이 통째로 빠집니다.
 
 | 무엇 | 명령 |
 |---|---|
