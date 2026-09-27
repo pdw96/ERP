@@ -40,11 +40,11 @@ git merge-base "$0" HEAD
 
 | 무엇 | 명령 |
 |---|---|
-| 기준 커밋 | `git rev-parse --short $0`, `git log -1 --format='%h %ad %s' --date=short $0` |
+| 기준 커밋 | `git rev-parse --short "$0"`, `git log -1 --format='%h %ad %s' --date=short "$0"` |
 | 지금 위치 | `git rev-parse --short HEAD`, `git branch --show-current`, `git status --short` |
-| 변경 파일 | `git diff --stat $0...HEAD` |
-| 커밋 목록 | `git log --oneline $0..HEAD` |
-| 본문 diff | `git diff $0...HEAD` — 머지 베이스부터 |
+| 변경 파일 | `git diff --stat "$0...HEAD"` |
+| 커밋 목록 | `git log --oneline "$0..HEAD"` |
+| 본문 diff | `git diff "$0...HEAD"` — 머지 베이스부터. **`$0` 은 언제나 따옴표 안에** — ref 이름에는 `;` 도 들어갈 수 있습니다 |
 | 추적 안 된 파일 | `git ls-files --others --exclude-standard` |
 
 작업트리에 커밋 안 된 변경이 있으면(`git status --short -uno` 가 비어 있지 않으면)
@@ -110,7 +110,8 @@ git merge-base "$0" HEAD
 다른 자리에 두면 대장이 둘로 갈리고 번호가 겹칩니다. **같은 감사자를 한 레포에 나란히 돌리지는
 마세요** — 둘이 같은 대장에서 같은 다음 번호를 뽑아 서로 다른 결함에 붙입니다.
 
-**그리고 브리핑을 `.claude/briefs/<감사자 이름>-<날짜>-<시각>.md` 로 옮기세요.**
+**그리고 브리핑을 `.claude/briefs/<감사자 이름>-<날짜>-<시각>.md` 로 옮기세요.** 폴더는 `.gitignore` 에 있어
+새 체크아웃에는 없으므로 `mkdir -p .claude/briefs` 부터 하세요 — 옮기지 못하면 브리핑이 자리에 남습니다.
 브리핑은 그 회차의 근거라 버리지 않되, `.claude/audit-brief.md` 자리에는 남기지
 않습니다. 남아 있으면 다음에 감사자를 직접 부를 때 그것을 읽는데, 감사자는
 브리핑의 대상 SHA 를 HEAD 와 견줄 수만 있고 `git status` 는 못 돌립니다 — 그
