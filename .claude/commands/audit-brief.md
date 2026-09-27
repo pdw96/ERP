@@ -33,7 +33,13 @@ argument-hint: [기준 커밋/브랜치 — 필수] [감사자 이름]
 ```
 cd "$(git rev-parse --show-toplevel)"
 git rev-parse --verify "$0^{commit}"
-git merge-base "$0" HEAD
+```
+
+위 출력(40자 SHA)을 `<B>` 라 합니다. **여기부터는 `$0` 대신 `<B>` 를 씁니다** — `origin/main` 같은
+움직이는 ref 는 모으는 도중 자동 fetch 로 바뀔 수 있고, 그러면 기준 줄과 diff 가 서로 다른 커밋을 가리킵니다.
+
+```
+git merge-base <B> HEAD
 ```
 
 커밋이 아니거나 머지 베이스가 없으면 멈추고 알려 주세요 — 잘못된 기준의 브리핑은 **틀린 근거**가 됩니다.
@@ -45,20 +51,28 @@ git merge-base "$0" HEAD
 
 | 무엇 | 명령 |
 |---|---|
-| 기준 커밋 | `git rev-parse --short "$0"`, `git log -1 --format='%h %ad %s' --date=short "$0"` |
+| 기준 커밋 | `git rev-parse --short <B>`, `git log -1 --format='%h %ad %s' --date=short <B>` |
 | 지금 위치 | `git rev-parse --short HEAD`, `git branch --show-current`, `git status --short` |
-| 변경 파일 | `git diff --stat "$0...HEAD"` |
-| 커밋 목록 | `git log --oneline "$0..HEAD"` |
-| 본문 diff | `git diff "$0...HEAD"` — 머지 베이스부터. **`$0` 은 언제나 따옴표 안에** — ref 이름에는 `;` 도 들어갈 수 있습니다 |
-| 추적 안 된 파일 | `git ls-files --others --exclude-standard` |
+| 변경 파일 | `git diff --stat <B>...HEAD` |
+| 커밋 목록 | `git log --oneline <B>..HEAD` |
+| 본문 diff | `git diff <B>...HEAD` — 머지 베이스부터 |
+| 추적 안 된 파일 | `git ls-files -z --others --exclude-standard` |
 
 작업트리에 커밋 안 된 변경이 있으면(`git status --short -uno` 가 비어 있지 않으면)
-`$0...HEAD` 는 그것을 담지 않습니다. 그 사실을 머리에 적고 `git diff HEAD` 를 diff
+`<B>...HEAD` 는 그것을 담지 않습니다. 그 사실을 머리에 적고 `git diff HEAD` 를 diff
 절의 `### 작업트리` 아래에 따로 넣으세요 — 커밋된 몫과 섞이면 빠졌는지 못 가립니다.
 
 **추적 안 된 파일(`??`)은 어느 diff 에도 안 나옵니다** — 새 라우트 · 키가 박힌
-파일이 통째로 빠집니다. 이름을 「변경 파일」에 적고 본문은 `git diff --no-index /dev/null
-<파일>` 로 넣으세요(종료코드 1 은 실패가 아닙니다). 못 넣으면 「담지 않은 것」에.
+파일이 통째로 빠집니다. 이름을 「변경 파일」에 적고 본문은 파일마다 `git diff --no-index -- /dev/null "$f"` 로 넣으세요(종료코드 1 은
+실패가 아닙니다). 파일 이름을 명령에 **손으로 옮겨 적지 마세요** — 빈칸은 경로를 쪼개고 `$(…)` 는 실행됩니다.
+위 `-z` 출력을 그대로 받아 돌립니다:
+
+```
+git ls-files -z --others --exclude-standard -- <위 pathspec> |
+  while IFS= read -r -d '' f; do git diff --no-index -- /dev/null "$f"; done
+```
+
+못 넣으면 「담지 않은 것」에.
 
 **셋. `.claude/audit-brief.md` 에 아래 모양으로 씁니다.**
 
