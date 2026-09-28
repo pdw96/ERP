@@ -235,22 +235,26 @@ def numstat(top, *args):
 
 
 def blocks(top, *args):
-    """`git diff --raw -z` → {경로: 블록 수}. 이름 바꿈 · 복사는 새 이름으로. 종류가 바뀐 파일(T)은
-    패치에서 지움 · 새로 만듦 두 블록이 된다. 이름만 바뀐 블록처럼 줄이 없는 몫도 여기서 세므로,
-    같은 경로의 딴 몫이 줄 수를 채워도 블록 하나를 통째로 뺀 것이 드러난다."""
+    """`git diff --raw -z` → ({경로: 블록 수}, 서브모듈 경로들). 이름 바꿈 · 복사는 새 이름으로. 종류가
+    바뀐 파일(T)은 패치에서 지움 · 새로 만듦 두 블록이 된다. 이름만 바뀐 블록처럼 줄이 없는 몫도 여기서
+    세므로, 같은 경로의 딴 몫이 줄 수를 채워도 블록 하나를 통째로 뺀 것이 드러난다. 어느 쪽이든
+    gitlink(모드 160000)인 경로는 따로 모은다 — `numstat` 과 패치가 줄 수를 달리 센다."""
     parts = git(top, "diff", *PIN, "--raw", "-z", *args).decode("utf-8", "surrogateescape").split("\0")
-    res, i = {}, 0
+    res, links, i = {}, set(), 0
     while i < len(parts):
         if not parts[i].startswith(":"):
             i += 1
             continue
-        status = parts[i].split()[-1]
+        meta = parts[i].split()
+        status = meta[-1]
         if status[0] in "RC":
             path, i = parts[i + 2], i + 3
         else:
             path, i = parts[i + 1], i + 2
         res[path] = res.get(path, 0) + (2 if status[0] == "T" else 1)
-    return res
+        if "160000" in (meta[0][1:], meta[1]):
+            links.add(path)
+    return res, links
 
 
 def pathspec(excludes):
@@ -279,7 +283,14 @@ def expected(top, mb, spec, unmerged, order):
     # 커밋된 몫 · 인덱스 몫(HEAD→인덱스) · 작업트리 몫(인덱스→작업트리). `git diff HEAD` 한 번이면
     # 스테이지한 변경을 작업트리에서 되돌렸을 때 둘이 상쇄돼 다음 커밋에 들어갈 것이 안 보인다
     for rng in ((f"{mb}..HEAD",), ("--cached",), ()):
-        ns, bl = numstat(top, *rng, *spec), blocks(top, *rng, *spec)
+        ns, (bl, links) = numstat(top, *rng, *spec), blocks(top, *rng, *spec)
+        if links:
+            # 서브모듈은 패치로 센다 — 기록된 커밋은 그대로고 작업트리만 더러우면 `numstat` 은 0/0 인데
+            # 패치에는 `-Subproject commit <sha>` · `+Subproject commit <sha>-dirty` 두 줄이 나온다
+            patch = git(top, "diff", *PIN, *rng, "--", *(f":(top,literal){p}" for p in links))
+            for path, c in parse_diff(patch.decode("utf-8", "surrogateescape"))[0].items():
+                if path in links:
+                    ns[path] = c[:3]
         for path in set(ns) | set(bl):
             if rng != (f"{mb}..HEAD",) and path in unmerged:
                 continue
