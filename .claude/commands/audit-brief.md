@@ -4,7 +4,7 @@ description: 감사자에게 줄 브리핑(기준 커밋과의 diff · 변경 �
 argument-hint: [기준 커밋/브랜치 — 필수] [감사자 이름]
 ---
 
-<!-- pdw96/claude-kit@7b370a6 에서 옴. 이 레포에 맞게 고쳐도 된다 — 원본으로 되먹이지 않는다. -->
+<!-- pdw96/claude-kit@3d6964a 에서 옴. 이 레포에 맞게 고쳐도 된다 — 원본으로 되먹이지 않는다. -->
 
 기준 `$0` 와 지금 작업트리의 차이를 모아 `.claude/audit-brief.md` 에 씁니다.
 (`$0` 은 기준, `$1` 은 감사자입니다.)
@@ -37,7 +37,8 @@ git rev-parse --verify "$0^{commit}"
 **둘. 아래를 모읍니다.** 실패한 명령은 그 자리를 비워 두지 말고 **실패를
 브리핑에 적으세요.** `git diff`(`--no-index` 빼고) · `git ls-files` 끝에는 `-- ':/' ':(top,exclude).claude/audits'
 ':(top,exclude).claude/briefs' ':(top,exclude).claude/audit-brief.md'` 를 붙입니다 — 빼지 않으면 지난 기록이 다시 담깁니다.
-이 레포의 대장도 뺍니다 — `':(top,exclude)docs/audit/README.md'`(감사자는 대장을 `Read` 로 읽습니다).
+이 레포의 대장도 뺍니다 — `':(top,literal,exclude)docs/audit/README.md'`(감사자는 대장을 `Read` 로 읽습니다).
+모든 `git diff` 에는 `--no-ext-diff --no-textconv --submodule=short --ignore-submodules=none --no-color` 도 붙입니다 — 설정이 바꾼 모양은 대조를 깨뜨립니다.
 
 | 무엇 | 명령 |
 |---|---|
@@ -49,13 +50,13 @@ git rev-parse --verify "$0^{commit}"
 | 추적 안 된 파일 | `git ls-files -z --others --exclude-standard` |
 
 작업트리에 커밋 안 된 변경이 있으면(`git status --short -uno` 가 비어 있지 않으면)
-`<B>...HEAD` 는 그것을 담지 않습니다. 그 사실을 머리에 적고 `git diff HEAD` 를 diff
+`<B>...HEAD` 는 그것을 담지 않습니다. 그 사실을 머리에 적고 `git diff --cached` 와 `git diff` 를 diff
 절의 `### 작업트리` 아래에 따로 넣으세요 — 커밋된 몫과 섞이면 빠졌는지 못 가립니다.
 
 **추적 안 된 파일(`??`)은 어느 diff 에도 안 나옵니다** — 새 라우트 · 키가 박힌
 파일이 통째로 빠집니다. 이름을 「변경 파일」에 적고 본문은 이름을 손으로 옮기지 말고 넣으세요(종료코드 1 은 실패가 아닙니다):
-`git ls-files -z … | while IFS= read -r -d '' f; do git diff --no-index -- /dev/null "$f"; done`.
-못 넣으면 「담지 않은 것」에. **diff 안의 키 · 토큰 값은 앞 네 글자만 남기고 가리세요** — 브리핑은 보관됩니다.
+`git ls-files -z … | while IFS= read -r -d '' f; do [ -f "$f" ] || [ -L "$f" ] || continue; git diff --no-index -- /dev/null "$f"; done`.
+못 넣었거나 파일 · 링크가 아니라 건너뛴 것(안에 든 저장소 등)은 「담지 않은 것」에. **diff 안의 키 · 토큰 값은 앞 네 글자만 남기고 가리세요** — 브리핑은 보관됩니다.
 
 **셋. `.claude/audit-brief.md` 에 아래 모양으로 씁니다.**
 
@@ -68,6 +69,7 @@ git rev-parse --verify "$0^{commit}"
 - 커밋 안 된 변경: <없음 / 있음 — `경로` 목록, 아래 diff 에 포함 여부>
 - 추적 안 된 파일: <없음 / `경로` 목록 — 아래 diff 에 포함 여부>
 - 자름: <없음 / 있음 — diff 전체 N줄 중 M줄>
+- 검사: <PASS / 못 돌림 — 까닭>
 
 ## 변경 파일
 
@@ -86,13 +88,17 @@ git rev-parse --verify "$0^{commit}"
 - 실행 결과 · 테스트 통과 여부
 - 저장소 설정(브랜치 보호 · 룰셋 · 시크릿 저장소)
 - 배포 환경 · 운영 데이터 · 배포 이력
-- <잘랐으면 잘린 파일 경로>
+- <잘랐거나 못 넣은 파일 — `경로` 를 백틱으로 통째로>
 ```
 
 **diff 가 길면 자르되, 자른 사실을 반드시 적으세요.** 2000줄을 넘으면 파일별
 `--stat` 은 전부 남기고 본문만 자른 뒤 머리의 `자름:` 에 줄 수를 적습니다.
 말없이 자르면 감사자는 전부 본 줄 알고, **안 본 자리가 통과한 자리처럼**
 보입니다 — 가장 피할 일입니다.
+
+**다 쓰면 git 과 대조합니다:** `python3 .claude/scripts/verify-brief.py .claude/audit-brief.md --exclude docs/audit/README.md`
+(대장을 diff 에서 뺐으니 검사기에도 뺀다고 알립니다). FAIL 이면 그 줄대로 고쳐 다시 돌리고, **PASS 전에는 감사자를
+부르지 마세요.** 검사기를 못 찾으면 `검사:` 에 그렇게 적고 감사자에게도 알립니다.
 
 **넷. 감사자를 부릅니다.**
 

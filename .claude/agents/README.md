@@ -1,6 +1,6 @@
 # 감사자
 
-`pdw96/claude-kit@7b370a6` 의 `vibe-audit` 플러그인에서 온 사본이다. 브리핑 커맨드
+`pdw96/claude-kit@3d6964a` 의 `vibe-audit` 플러그인에서 온 사본이다. 브리핑 커맨드
 `/audit-brief` 도 같은 커밋에서 와 `.claude/commands/` 에 있다.
 
 **이 사본이 이 레포의 진실이다.** 원본은 아무 레포에도 안 들어가 본 일반형으로
@@ -33,7 +33,11 @@
 규칙만 남았다 — 대장 경로, 「중복 — NC-n」 · 「부분 닫힘 — 잔여 NC-n」 줄을 잇는 법, 확인불가가
 `### UNK-n` 절에 있다는 것, 번호가 감사자를 가로질러 하나라는 것.
 
-**커맨드 사본은 원본과 대장 자리만 갈린다.** diff 에서 `docs/audit/README.md` 를 빼고, 「남기는
+**커맨드 사본은 원본과 대장 자리만 갈린다.** diff 에서 `docs/audit/README.md` 를 빼고(검사기에도 `--exclude` 로 같게), 「남기는
 것」이 기록을 `.claude/audits/` 대신 대장에 등록하며, 브리핑 보관본의 이름을 감사자 · 시각으로
 짓는다. ERP#13 에서 사본에만 막았던 결함(최상위 pathspec · `.gitignore` · 기준 글자 · SHA 고정 ·
 `ls-files -z`)은 원본이 받아(pdw96/claude-kit#3) 이제 원본 그대로다.
+
+**브리핑은 감사자를 부르기 전에 git 과 대조한다.** `.claude/scripts/verify-brief.py` 는 원본
+그대로다(pdw96/claude-kit#5). 브리핑의 파일 집합과 파일별 +/- 줄 수를 저장소의 `git diff` 와
+견줘, 빠지거나 말없이 잘린 diff 를 PASS 전에 잡는다. 커맨드가 PASS 전에는 감사자를 부르지 않는다.
