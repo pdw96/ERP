@@ -18,9 +18,11 @@
 - 「기준」 SHA 가 커밋이고, 적힌 머지 베이스가 git 이 구한 것과 같은가
 - git 이 말하는 변경 파일(커밋된 몫 · 작업트리 · 추적 안 된 파일)이 **하나도 빠짐없이**
   diff 절에 있거나 「담지 않은 것」에 경로가 백틱으로 통째로 적혀 있는가
-- 담은 파일마다 +/- 줄 수 · 바이너리 블록 수 · 블록 수가 git 의 `--numstat` · `--raw` 와 같은가 —
-  이름만 바꾼 블록처럼 줄이 없는 블록도 빠지면 드러난다. git 보다 많으면 늘 불일치다. 모자라면 잘린 것이므로
+- 담은 파일마다 +/- 줄 수 · 바이너리 블록 수 · 블록 수 · 머리 정보 줄 수가 git 의 `--numstat` · `--raw` ·
+  패치와 같은가 — 이름만 바꾼 블록처럼 줄이 없는 블록도 빠지면 드러나고, 실행 비트만 바뀐 블록에서 모드
+  줄을 지워도 드러난다. git 보다 많으면 늘 불일치다. 모자라면 잘린 것이므로
   「자름: 있음」이고 그 파일이 「담지 않은 것」에 적혀 있어야 한다
+- 풀지 않은 머지의 경로마다 `diff --cc` 블록 · 그 몸의 줄 · `* Unmerged path` 줄이 git 과 같은가
 - git 에 없는 파일의 diff 가 들어 있지 않은가 — 지난 회차나 다른 기준의 것이 섞인 것이다
 
 키 · 토큰을 앞 네 글자만 남기고 가려도 줄 수는 그대로라 대조는 견딘다. diff 는 커맨드처럼
@@ -96,14 +98,18 @@ def section(text, head):
     return m.group(1) if m else None
 
 
+META = ("old mode ", "new mode ", "new file mode ", "deleted file mode ", "similarity index ",
+        "dissimilarity index ", "rename from ", "rename to ", "copy from ", "copy to ", "index ")
 HUNK = re.compile(r"^@@ -\d+(?:,(\d+))? \+\d+(?:,(\d+))? @@")
 
 
 def parse_diff(body, order=()):
-    """diff 절에서 파일마다 (+, -, 바이너리 블록 수, 블록 수) 를 모은다. 같은 경로가 두 번(커밋 몫 · 작업트리 몫)
+    """diff 절에서 파일마다 (+, -, 바이너리 블록 수, 블록 수, 머리 정보 줄 수) 를 모은다. 같은 경로가 두 번(커밋 몫 · 작업트리 몫)
     나오면 더한다. 헝크 안의 줄은 `@@ -a,b +c,d @@` 가 적은 수만큼만 먹는다 — 줄 모양으로
     짐작하지 않으므로 헝크 뒤에 붙은 글 · 헝크 안의 `--- a/` 모양 줄에 흔들리지 않는다.
-    경로는 `+++ b/` · `rename to` · `--- a/` · 머리 줄 순서로 잡는다."""
+    경로는 `+++ b/` · `rename to` · `--- a/` · 머리 줄 순서로 잡는다. 머리 정보 줄(모드 · 새 파일 ·
+    지움 · 이름 바꿈 · `index`)도 센다 — 줄이 없는 블록(실행 비트만 바뀐 파일 · 빈 새 파일)은 그것이
+    변경의 전부라, 머리 줄만 남기고 지워도 줄 수 · 블록 수로는 드러나지 않는다."""
     counts = {}
     body = re.sub(r"\x1b\[[0-9;]*[A-Za-z]", "", body)  # color.ui=always 로 뽑은 diff
     marks = merge_marks(body, order)
@@ -116,7 +122,7 @@ def parse_diff(body, order=()):
             continue
         pair = header_pair(head)
         strip = not (pair and pair[0] == pair[1])  # 두 경로가 같으면 접두가 없는 것이다
-        add = rem = binary = old_left = new_left = 0
+        add = rem = binary = meta = old_left = new_left = 0
         for ln in lines[1:]:
             if old_left > 0 or new_left > 0:
                 if ln.startswith("\\"):
@@ -144,6 +150,8 @@ def parse_diff(body, order=()):
                 renamed = unquote(ln.split(" to ", 1)[1])
             elif ln.startswith(("Binary files ", "GIT binary patch")):
                 binary += 1
+            if ln.startswith(META):
+                meta += 1
         path = renamed or path or minus_path
         if path is None and pair:  # 모드만 바뀐 파일 · 내용 없는 새 파일: 머리 줄에서 가른다
             x, y = unprefix(pair[0], strip), unprefix(pair[1], strip)
@@ -151,8 +159,8 @@ def parse_diff(body, order=()):
                 path = y
         if path is None:
             continue
-        a, r, b, n = counts.get(path, (0, 0, 0, 0))
-        counts[path] = (a + add, r + rem, b + binary, n + 1)
+        a, r, b, n, h = counts.get(path, (0, 0, 0, 0, 0))
+        counts[path] = (a + add, r + rem, b + binary, n + 1, h + meta)
     return counts, marks
 
 
@@ -183,6 +191,13 @@ def merge_marks(text, order):
 
     for m in re.finditer(r"^diff --(?:cc|combined) (.+)$", text, re.M):
         bump((unquote(m.group(1)), "cc"))
+        # 블록의 몸(`index` · `---`/`+++` · `@@@` · 충돌 내용)도 줄 수로 센다 — 머리 줄만 남기고
+        # 지워도 블록 수는 같다. 빈 줄은 세지 않는다(블록 사이에 브리핑이 둔 줄)
+        for ln in text[m.end() + 1:].split("\n"):
+            if ln.startswith(("diff --", "### ", "## ", "```", "* Unmerged path ")):
+                break
+            if ln:
+                bump((unquote(m.group(1)), "cc 줄"))
     for m in re.finditer(r"^\* Unmerged path (.*)$", text, re.M):
         i = re.fullmatch(r"\0(\d+)", m.group(1))
         bump((order[int(i.group(1))] if i else m.group(1), "unmerged"))
@@ -238,7 +253,8 @@ def blocks(top, *args):
     """`git diff --raw -z` → ({경로: 블록 수}, 서브모듈 경로들). 이름 바꿈 · 복사는 새 이름으로. 종류가
     바뀐 파일(T)은 패치에서 지움 · 새로 만듦 두 블록이 된다. 이름만 바뀐 블록처럼 줄이 없는 몫도 여기서
     세므로, 같은 경로의 딴 몫이 줄 수를 채워도 블록 하나를 통째로 뺀 것이 드러난다. 어느 쪽이든
-    gitlink(모드 160000)인 경로는 따로 모은다 — `numstat` 과 패치가 줄 수를 달리 센다."""
+    gitlink(모드 160000)인 경로와 종류가 바뀐 경로(T)는 따로 모은다 — `numstat` 과 패치가 줄 수를
+    달리 센다(바이너리 파일이 링크가 되면 `numstat` 은 `-/-` 하나지만 패치는 바이너리 블록과 한 줄 헝크다)."""
     parts = git(top, "diff", *PIN, "--raw", "-z", *args).decode("utf-8", "surrogateescape").split("\0")
     res, links, i = {}, set(), 0
     while i < len(parts):
@@ -252,7 +268,7 @@ def blocks(top, *args):
         else:
             path, i = parts[i + 1], i + 2
         res[path] = res.get(path, 0) + (2 if status[0] == "T" else 1)
-        if "160000" in (meta[0][1:], meta[1]):
+        if "160000" in (meta[0][1:], meta[1]) or status[0] == "T":
             links.add(path)
     return res, links
 
@@ -284,18 +300,16 @@ def expected(top, mb, spec, unmerged, order):
     # 스테이지한 변경을 작업트리에서 되돌렸을 때 둘이 상쇄돼 다음 커밋에 들어갈 것이 안 보인다
     for rng in ((f"{mb}..HEAD",), ("--cached",), ()):
         ns, (bl, links) = numstat(top, *rng, *spec), blocks(top, *rng, *spec)
-        if links:
-            # 서브모듈은 패치로 센다 — 기록된 커밋은 그대로고 작업트리만 더러우면 `numstat` 은 0/0 인데
-            # 패치에는 `-Subproject commit <sha>` · `+Subproject commit <sha>-dirty` 두 줄이 나온다
-            # 경로를 좁히지 않는다 — 좁히면 이름 바꾼 gitlink 가 새 파일로 바뀌어 줄 수가 달라진다
-            patch = git(top, "diff", *PIN, *rng, *spec)
-            for path, c in parse_diff(patch.decode("utf-8", "surrogateescape"))[0].items():
-                if path in links:
-                    ns[path] = c[:3]
+        # 머리 정보 줄은 git 의 패치에서 센다. 서브모듈 · 종류가 바뀐 파일은 줄 수도 패치로 센다 —
+        # 기록된 커밋은 그대로고 작업트리만 더러운 서브모듈은 `numstat` 이 0/0 인데 패치에는
+        # `Subproject commit` 두 줄이 나온다. 경로를 좁히지 않는다 — 좁히면 이름 바꾼 gitlink 가 새 파일이 된다
+        pat = parse_diff(git(top, "diff", *PIN, *rng, *spec).decode("utf-8", "surrogateescape"))[0]
+        for path in links & set(pat):
+            ns[path] = pat[path][:3]
         for path in set(ns) | set(bl):
             if rng != (f"{mb}..HEAD",) and path in unmerged:
                 continue
-            add(path, ns.get(path, (0, 0, 0)) + (bl.get(path, 0),))
+            add(path, ns.get(path, (0, 0, 0)) + (bl.get(path, 0), pat.get(path, (0,) * 5)[4]))
     for path in git(top, "ls-files", "-z", "--others", "--exclude-standard", *spec).decode(
             "utf-8", "surrogateescape").split("\0"):
         if not path:
@@ -304,15 +318,15 @@ def expected(top, mb, spec, unmerged, order):
         if not (f.is_symlink() or f.is_file()):  # 안에 든 저장소 따위: 있는지만 본다
             add(path, None)
             continue
-        # 커맨드와 같은 `--no-index` 로 git 에게 센다 — 링크(대상 한 줄) · `-diff` 속성
-        # (바이너리) 을 git 과 다르게 셀 틈이 없다
+        # 커맨드와 같은 `--no-index` 패치를 git 에게 뽑아 브리핑과 같은 틀로 센다 — 링크(대상 한 줄) ·
+        # `-diff` 속성(바이너리) · 빈 파일(머리 정보 줄뿐)을 git 과 다르게 셀 틈이 없다
         try:
-            rec = git(top, "diff", *PIN, "--no-index", "--numstat", "-z", "--", "/dev/null", path,
-                      ok=(0, 1)).decode("utf-8", "surrogateescape").split("\0")[0].split("\t")
+            out = git(top, "diff", *PIN, "--no-index", "--", "/dev/null", path, ok=(0, 1))
         except RuntimeError:  # 못 읽는 파일 따위: 커맨드도 diff 를 못 뜬다 — 있는지만(「담지 않은 것」에)
             want[path] = None
             continue
-        add(path, (0, 0, 1, 1) if rec[0] == "-" else (int(rec[0]), int(rec[1]), 0, 1))
+        got = list(parse_diff(out.decode("utf-8", "surrogateescape"))[0].values())
+        add(path, got[0] if len(got) == 1 else None)
     # 그 경로들에서 git 이 내는 표시를 커맨드와 같은 두 diff 로 센다 — 충돌 종류마다 모양이 다르다
     want_marks = {}
     if unmerged:
@@ -421,8 +435,8 @@ def main(argv):
                 over = any(g > w for g, w in zip(got[path], want[path]))
                 if over or path not in omitted or not cut or cut.group(1) != "있음":
                     g, w = got[path], want[path]
-                    bad.append(f"줄 수가 다르다: {path} — 브리핑 +{g[0]}/-{g[1]} 바이너리 {g[2]} 블록 {g[3]}, "
-                               f"git +{w[0]}/-{w[1]} 바이너리 {w[2]} 블록 {w[3]}. 잘랐으면 「자름: 있음」과 "
+                    bad.append(f"줄 수가 다르다: {path} — 브리핑 +{g[0]}/-{g[1]} 바이너리 {g[2]} 블록 {g[3]} 머리 정보 {g[4]}, "
+                               f"git +{w[0]}/-{w[1]} 바이너리 {w[2]} 블록 {w[3]} 머리 정보 {w[4]}. 잘랐으면 「자름: 있음」과 "
                                f"「담지 않은 것」에 백틱으로 적어야 한다")
         for path in sorted(unmerged):
             w = {k: n for (p, k), n in want_marks.items() if p == path}
