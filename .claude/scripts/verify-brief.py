@@ -287,7 +287,8 @@ def expected(top, mb, spec, unmerged, order):
         if links:
             # 서브모듈은 패치로 센다 — 기록된 커밋은 그대로고 작업트리만 더러우면 `numstat` 은 0/0 인데
             # 패치에는 `-Subproject commit <sha>` · `+Subproject commit <sha>-dirty` 두 줄이 나온다
-            patch = git(top, "diff", *PIN, *rng, "--", *(f":(top,literal){p}" for p in links))
+            # 경로를 좁히지 않는다 — 좁히면 이름 바꾼 gitlink 가 새 파일로 바뀌어 줄 수가 달라진다
+            patch = git(top, "diff", *PIN, *rng, *spec)
             for path, c in parse_diff(patch.decode("utf-8", "surrogateescape"))[0].items():
                 if path in links:
                     ns[path] = c[:3]
