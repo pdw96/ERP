@@ -54,7 +54,12 @@ docker compose exec -T postgres psql -U erp -d erp -c 'CREATE DATABASE erp_test 
 
 # 개발 환경
 cd backend
-python3 -m venv .venv && .venv/bin/pip install -r requirements-dev.txt
+# 잠금에서 해시까지 맞춰 깐다 — CI 와 같은 버전이 온다(`backend/requirements.in` 머리)
+python3 -m venv .venv && .venv/bin/pip install --require-hashes -r requirements-dev.txt
+
+# 입력(.in)을 고쳤을 때만 — 잠금을 만드는 도구는 따로 깐다(`requirements-tools.in` 머리)
+python3 -m venv /tmp/lock-tools && /tmp/lock-tools/bin/pip install --require-hashes -r requirements-tools.txt
+LOCK_PIP_COMPILE=/tmp/lock-tools/bin/pip-compile scripts/lock.sh
 
 # 로컬에서 도는 검사 — 무엇이 도는지는 `.github/workflows/ci.yml` 이 든다
 .venv/bin/ruff check .
