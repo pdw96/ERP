@@ -19,6 +19,7 @@
 
 import re
 from collections.abc import Iterator
+from itertools import pairwise
 from pathlib import Path
 
 BACKEND_ROOT = Path(__file__).resolve().parents[1]
@@ -361,6 +362,8 @@ _HTML_BLOCK = re.compile(r" {0,3}<")
 _OFFSIDE_FENCE = re.compile(r"[ \t]*(?:(?:[-*+]|\d{1,9}[.)])[ \t]+)?(?:`{3,}|~{3,})")
 # 줄 머리의 `## 감사 ` 가 아닌 감사 머리 — 들여쓰기 · 탭 · 다른 수준. 렌더되는데 셈에서 빠진다
 _OFFSIDE_HEAD = re.compile(r"[ \t]*#{1,6}[ \t]+감사[ \t]+[①-⑳㉑-㉟㊱-㊿]")
+# Setext 머리의 밑줄 — 바로 윗줄(문단)을 머리로 만든다. `#` 이 없어 위 둘로는 안 보인다
+_SETEXT_UNDERLINE = re.compile(r" {0,3}(?:=+|-+)[ \t]*")
 
 
 def _round_sections(text: str) -> list[tuple[str, str]]:
@@ -419,6 +422,16 @@ def test_a_round_section_names_the_commit_it_audited() -> None:
             else "",
         )
         if why
+    ]
+    offside += [
+        f"  {number}: Setext 머리를 두지 않는다 — 머리는 `#` 으로 쓴다"
+        for (above_no, above, above_fence), (number, line, is_fence) in pairwise(
+            _unfenced(ledger)
+        )
+        if number == above_no + 1
+        and not (is_fence or above_fence)
+        and above.strip()
+        and _SETEXT_UNDERLINE.fullmatch(line)
     ]
     assert offside == [], "대장이 이 게이트가 가르는 모양을 벗어났다:\n" + "\n".join(offside)
 
