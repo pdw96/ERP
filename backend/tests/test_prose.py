@@ -201,7 +201,8 @@ def _table_rows(text: str) -> list[tuple[int, str]]:
     rows: list[tuple[int, str]] = []
     for number, line, is_fence in _unfenced(text):
         stripped = line.strip()
-        indented = line.startswith(("    ", "\t"))
+        expanded = line.expandtabs(4)
+        indented = len(expanded) - len(expanded.lstrip(" ")) >= 4
         if is_fence or indented or not stripped.startswith("|") or set(stripped) <= set("|-: "):
             continue
         rows.append((number, stripped))
@@ -257,9 +258,7 @@ def test_a_table_row_does_not_carry_a_cell_the_header_did_not_declare() -> None:
 _LEDGER = REPO_ROOT / "docs" / "audit" / "README.md"
 
 # 회차 기호. 대장이 ① ~ ⑳ 을 쓰고, 「⑦-b」처럼 꼬리가 붙는 회차가 있다.
-_ROUND = re.compile(r"[①-⑳]")
-# 머리는 세 칸까지 들여 써도 머리다(GFM). 네 칸부터는 코드다
-_HEADING = re.compile(r" {0,3}(#{1,6}(?: .*)?)")
+_ROUND = re.compile(r"[①-⑳㉑-㉟㊱-㊿]")
 
 
 def _rounds_with_a_section(text: str) -> set[str]:
@@ -267,10 +266,8 @@ def _rounds_with_a_section(text: str) -> set[str]:
     return {
         found
         for _, line, is_fence in _unfenced(text)
-        if not is_fence
-        and (heading := _HEADING.fullmatch(line))
-        and heading.group(1).startswith("## 감사 ")
-        for found in _ROUND.findall(heading.group(1))
+        if not is_fence and line.startswith("## 감사 ")
+        for found in _ROUND.findall(line)
     }
 
 
@@ -278,7 +275,7 @@ def _rounds_with_a_section(text: str) -> set[str]:
 # **「로 시작한다」로 고르면 안 된다**: 「아직 아무도 보지 않은 것」 표에도
 # `⑰ 이 고친 자리(…)` 처럼 회차 기호로 시작하는 행이 있어, 그것까지 세면
 # **회차별 W 표에서 줄을 지워도 게이트가 통과한다**(어긋내 확인했다).
-_ROUND_LABEL = re.compile(r"[①-⑳](?:-b)?(?:\s+[가-힣]{1,3})?\Z")
+_ROUND_LABEL = re.compile(r"[①-⑳㉑-㉟㊱-㊿](?:-b)?(?:\s+[가-힣]{1,3})?\Z")
 
 
 def _rounds_in_the_round_table(text: str) -> set[str]:
@@ -356,8 +353,14 @@ _COMMIT_LINE = re.compile(r"- \*\*감사한 커밋\*\*: `[0-9a-f]{4,64}`")
 # 처럼 회차를 가리키기만 하는 절은 감사를 돌린 것이 아니다. 기호는 ⑳ 에서 끝나지 않는다 —
 # ㉑ ~ ㉟ · ㊱ ~ ㊿ 은 유니코드에서 다른 자리에 있어, 빠뜨리면 그 절을 **말없이** 건너뛴다
 _RUN_HEAD = re.compile(r"## 감사 [①-⑳㉑-㉟㊱-㊿](?:-b)?(?:\(| —)")
-# 줄 머리의 HTML 블록 — 주석 · 태그. 그 안의 `## ` 는 렌더되지 않는다
+# **대장이 지키는 모양.** 마크다운의 모든 변형을 가르지 않고, 가르지 못하는 모양을 **막는다** —
+# 그 안의 머리가 절로 세이거나 빠지는 틈이 곧 이 게이트의 틈이다. 대장은 지금 셋 다 쓰지 않는다.
+# 줄 머리의 HTML 블록(주석 · 태그) — 그 안의 `## ` 는 렌더되지 않는다
 _HTML_BLOCK = re.compile(r" {0,3}<")
+# 줄 머리가 아닌 울타리 — 들여 쓰거나 목록 안에서 연 코드 블록. 그 몸이 머리로 읽힌다
+_OFFSIDE_FENCE = re.compile(r"[ \t]*(?:(?:[-*+]|\d{1,9}[.)])[ \t]+)?(?:`{3,}|~{3,})")
+# 줄 머리의 `## 감사 ` 가 아닌 감사 머리 — 들여쓰기 · 탭 · 다른 수준. 렌더되는데 셈에서 빠진다
+_OFFSIDE_HEAD = re.compile(r"[ \t]*#{1,6}[ \t]+감사[ \t]+[①-⑳㉑-㉟㊱-㊿]")
 
 
 def _round_sections(text: str) -> list[tuple[str, str]]:
@@ -375,11 +378,10 @@ def _round_sections(text: str) -> list[tuple[str, str]]:
                 sections.append((head, line))
                 head = None
             continue
-        heading = _HEADING.fullmatch(line)
-        if heading and heading.group(1).startswith("## "):
+        if line.startswith("## "):
             if head is not None:
                 sections.append((head, ""))
-            head = heading.group(1) if _RUN_HEAD.match(heading.group(1)) else None
+            head = line if _RUN_HEAD.match(line) else None
         elif head is not None and line.strip():
             sections.append((head, line))
             head = None
@@ -404,14 +406,21 @@ def test_a_round_section_names_the_commit_it_audited() -> None:
     ledger = _LEDGER.read_text()
     # **HTML 블록은 받지 않는다** — 가르지 못하는 모양은 세지 않고 막는다. 주석 속의 옛 머리가
     # 낡은 예외를 붙잡거나, 주석 속 예가 진짜 절로 세인다. 대장은 지금 HTML 을 쓰지 않는다
-    html = [
-        number
+    offside = [
+        f"  {number}: {why}"
         for number, line, is_fence in _unfenced(ledger)
-        if not is_fence and _HTML_BLOCK.match(line)
+        for why in (
+            "HTML 블록을 두지 않는다" if not is_fence and _HTML_BLOCK.match(line) else "",
+            "코드 블록은 줄 머리에서 연다"
+            if _OFFSIDE_FENCE.match(line) and not re.match(r"`{3,}|~{3,}", line)
+            else "",
+            "감사 머리는 줄 머리의 `## 감사 ` 로 쓴다"
+            if _OFFSIDE_HEAD.match(line) and not line.startswith("## 감사 ")
+            else "",
+        )
+        if why
     ]
-    assert (
-        html == []
-    ), f"대장에 HTML 블록을 두지 않는다 — 그 안의 머리를 가르지 못한다: 줄 {html}"
+    assert offside == [], "대장이 이 게이트가 가르는 모양을 벗어났다:\n" + "\n".join(offside)
 
     sections = _round_sections(ledger)
     assert sections, "회차 절을 찾지 못했다 — 이 게이트가 아무것도 세지 않는다"
@@ -426,11 +435,14 @@ def test_a_round_section_names_the_commit_it_audited() -> None:
         "브리핑의 「대상」 SHA 로 연다:\n" + "\n".join(f"  {head}" for head in missing)
     )
 
-    heads = {head: first for head, first in sections}
+    # 예외는 **그 한 절**의 것이다 — 같은 머리가 두 번이면 새 절이 옛 예외에 묻어 간다
     stale = sorted(
-        head for head in _NO_COMMIT_LINE if head not in heads or _COMMIT_LINE.match(heads[head])
+        head
+        for head in _NO_COMMIT_LINE
+        if [h for h, _ in sections].count(head) != 1
+        or any(_COMMIT_LINE.match(first) for h, first in sections if h == head)
     )
     assert stale == [], (
-        "예외 목록의 절이 사라졌거나 이제 감사한 커밋으로 연다 — 목록에서 뺀다:\n"
+        "예외 목록의 절이 사라졌거나, 둘이 되었거나, 이제 감사한 커밋으로 연다:\n"
         + "\n".join(f"  {head}" for head in stale)
     )
