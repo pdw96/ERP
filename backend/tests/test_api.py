@@ -129,10 +129,10 @@ def test_both_kinds_of_422_have_the_same_shape(client: TestClient) -> None:
 def test_a_delivery_that_has_not_arrived_is_refused(client: TestClient) -> None:
     """**아직 오지 않은 물건은 검사하지 못한다.**
 
-    막지 않으면 합격일(오늘)이 입고일보다 앞서 `ck_lot_passed_after_arrival` 이
-    물고, **잘 만들어진 요청 하나가 실마리 없는 500 으로 나간다.** 그리고 같은
-    값이 불합격이면 201 로 지나간다 — 불합격은 로트를 만들지 않아 그 CHECK 에
-    닿지 않기 때문이다. **경계가 그 갈림을 없앤다.**
+    막지 않으면 판정일(오늘)이 입고일보다 앞서 `ck_inspection_judged_after_arrival`
+    이 결과와 무관하게 물고, **잘 만들어진 요청 하나가 실마리 없는 500 으로
+    나간다.** 검사 표에 도착일이 서기 전에는 로트의 CHECK 만 물어 불합격이 201 로
+    지나갔다(NC-77 · 109) — **경계가 그 갈림을 없앴고, 지금은 이름을 말한다.**
     """
     tomorrow = (date.today() + timedelta(days=1)).isoformat()
 
