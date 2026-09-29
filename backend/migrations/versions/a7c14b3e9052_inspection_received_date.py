@@ -157,10 +157,17 @@ def upgrade() -> None:
     # `ck_lot_supplied_has_received_date` 가 도착일을 채우게 한다. 사슬이
     # 끊기는 자리가 없다 — **탐침으로 네 갈래를 실제로 막아 보았다.**
     #
-    # **뒤의 고리들도 같은 전제 위에 선다** — `inspections.item_type` ·
-    # `lots.item_type` · `lots.lot_origin` 이 `NOT NULL` 이다. 그 칸이 비면 위의
-    # 외래키는 첫 고리처럼 통째로 건너뛰어지고, 위의 CHECK 는 식이 `NULL` 이 되어
-    # 통과한다 — CHECK 는 거짓만 막는다. 그래서 이 칸들도 고리처럼 이름으로 든다.
+    # **뒤의 고리들도 같은 전제 위에 선다** — 아래 칸이 `NOT NULL` 이다. 칸마다
+    # 끊기는 고리가 다르므로 따로 적는다. 외래키는 첫 고리처럼 통째로 건너뛰어지고,
+    # CHECK 는 식이 `NULL` 이 되어 통과한다 — CHECK 는 거짓만 막는다.
+    #
+    # - `inspections.item_type` — 비면 `fk_inspection_item` 이 건너뛰어지고
+    #   `ck_inspection_item_is_raw_material` 이 통과한다
+    # - `lots.item_type` — 비면 `fk_lot_item` 이 건너뛰어지고
+    #   `ck_lot_origin_matches_type` 이 통과한다
+    # - `lots.lot_origin` — 외래키에는 들지 않는다. 비면
+    #   `ck_lot_origin_matches_type` 과 `ck_lot_supplied_has_received_date` 가
+    #   통과한다
     #
     # 고리를 이름으로 적는 것은 하나가 느슨해지는 날 이 주장이 **조용히 거짓이
     # 되는 것**을 드러내기 위해서다(`361ec789023c` 가 같은 형태다). 수는 적지
