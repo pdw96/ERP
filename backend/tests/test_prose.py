@@ -210,8 +210,8 @@ def _overflowing_rows(text: str) -> list[tuple[int, int, int]]:
     **표인지는 GitHub 의 파서(cmark-gfm)가 가른다.** 여기서 마크다운을 흉내 내면
     울타리 길이 · HTML 블록 · 목록 안 들여쓰기 · Setext 밑줄마다 틈이 났다 — ERP#18 의
     리뷰가 여섯 번 연달아 그 틈을 짚었다. 머리의 칸 수는 렌더된 `<th>` 로 세고, 본문 줄의
-    칸 수는 원문에서 그 줄이 차지한 자리(`data-sourcepos`, 바이트 열)를 잘라 센다 —
-    넘친 칸은 렌더에서 사라지므로 원문에서만 보인다.
+    칸 수는 파서가 알려 준 줄(`data-sourcepos`)의 원문에서 센다 — 넘친 칸은 렌더에서
+    사라지므로 원문에서만 보인다.
     """
     # 원시 HTML 은 살리지 않는다 — 셀 안에 적은 `<th>` · `</table>` 이 파서가 만든 태그와 섞여
     # 칸 수를 부풀린다. 파서가 만든 태그에만 `data-sourcepos` 가 붙는다
@@ -221,11 +221,13 @@ def _overflowing_rows(text: str) -> list[tuple[int, int, int]]:
     for table in re.finditer(r"<table data-sourcepos=[^>]*>(.*?)</table>", html, re.S):
         head, _, body = table.group(1).partition("</thead>")
         width = len(re.findall(r"<th [^>]*data-sourcepos=", head))  # 정렬이면 `align` 이 앞선다
-        for row in re.finditer(r'<tr data-sourcepos="(\d+):(\d+)-\d+:(\d+)"', body):
-            number, start, end = map(int, row.groups())
-            source = lines[number - 1].encode()[start - 1 : end].decode()
-            if _cells(source.strip()) > width:
-                found.append((number, width, _cells(source.strip())))
+        for row in re.finditer(r'<tr data-sourcepos="(\d+):\d+-', body):
+            number = int(row.group(1))
+            # 본문 줄 앞에는 인용(`>`)과 공백만 온다 — 목록 표지가 오면 새 항목이다. 열 번호로
+            # 자르지 않는다: 탭이 낀 컨테이너(`-\t`)에서 cmark 의 열은 바이트와 어긋난다
+            source = lines[number - 1].lstrip(" \t>").rstrip()
+            if _cells(source) > width:
+                found.append((number, width, _cells(source)))
     return found
 
 
