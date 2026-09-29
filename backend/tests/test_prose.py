@@ -213,14 +213,14 @@ def _overflowing_rows(text: str) -> list[tuple[int, int, int]]:
     칸 수는 원문에서 그 줄이 차지한 자리(`data-sourcepos`, 바이트 열)를 잘라 센다 —
     넘친 칸은 렌더에서 사라지므로 원문에서만 보인다.
     """
-    html = cmarkgfm.github_flavored_markdown_to_html(
-        text, options=Options.CMARK_OPT_SOURCEPOS | Options.CMARK_OPT_UNSAFE
-    )
+    # 원시 HTML 은 살리지 않는다 — 셀 안에 적은 `<th>` · `</table>` 이 파서가 만든 태그와 섞여
+    # 칸 수를 부풀린다. 파서가 만든 태그에만 `data-sourcepos` 가 붙는다
+    html = cmarkgfm.github_flavored_markdown_to_html(text, options=Options.CMARK_OPT_SOURCEPOS)
     lines = text.splitlines()
     found = []
-    for table in re.finditer(r"<table[^>]*>(.*?)</table>", html, re.S):
+    for table in re.finditer(r"<table data-sourcepos=[^>]*>(.*?)</table>", html, re.S):
         head, _, body = table.group(1).partition("</thead>")
-        width = len(re.findall(r"<th[ >]", head))
+        width = len(re.findall(r"<th [^>]*data-sourcepos=", head))  # 정렬이면 `align` 이 앞선다
         for row in re.finditer(r'<tr data-sourcepos="(\d+):(\d+)-\d+:(\d+)"', body):
             number, start, end = map(int, row.groups())
             source = lines[number - 1].encode()[start - 1 : end].decode()
