@@ -166,9 +166,15 @@ def test_a_mutation_bundle_says_which_commit_it_was_measured_on() -> None:
     )
 
 
-# 코드 블록의 울타리(GFM) — 들여쓰기 0 ~ 3 칸, 같은 글자(`` ` `` 나 `~`) 셋 이상. 닫는 울타리는
-# 같은 글자로 여는 것 이상 길고 뒤에 공백만 온다. 백틱 울타리의 꼬리에는 백틱이 없다.
-_FENCE_OPEN = re.compile(r" {0,3}(`{3,}|~{3,})(.*)")
+# 컨테이너 표지 하나 — 인용(`>`) · 목록 표지(`-` · `1.`, 뒤에 공백이나 줄 끝) — 와 그 뒤 공백.
+# 되풀이마다 표지를 **반드시** 먹고 공백은 한 자리에서만 먹는다. 빈 것을 되풀이하거나 공백을
+# 두 자리에서 나눠 먹으면 역추적이 지수로 는다(공백 14칸에 4초 — Codex 리뷰, 2026-09-29)
+_MARKER = r"(?:>|(?:[-*+]|\d{1,9}[.)])(?=[ \t]|$))[ \t]*"
+# 코드 블록의 울타리(GFM) — 들여쓰기 0 ~ 3 칸, 같은 글자(`` ` `` 나 `~`) 셋 이상. 인용 · 목록
+# 안에서도 연다(`- ```md`). 닫는 울타리는 같은 글자로 여는 것 이상 길고 뒤에 공백만 온다
+# (인용 안이면 `>` 뒤에). 백틱 울타리의 꼬리에는 백틱이 없다.
+_FENCE_OPEN = re.compile(rf" {{0,3}}(?:{_MARKER})*(`{{3,}}|~{{3,}})(.*)")
+_FENCE_CLOSE = r" {0,3}(?:>[ \t]*)*"
 
 
 def _unfenced(text: str) -> Iterator[tuple[int, str, bool]]:
@@ -176,13 +182,17 @@ def _unfenced(text: str) -> Iterator[tuple[int, str, bool]]:
 
     **「백틱 셋으로 시작하는가」만 보면 틀린다**: `~~~` 울타리를 못 보고, 네 칸
     들여쓴(곧 코드인) 백틱 셋 줄에서 뒤집혀 그 뒤의 진짜 절을 코드로 삼킨다.
-    닫히지 않은 블록은 문서 끝까지다.
+    닫히지 않은 블록은 문서 끝까지다. 인용 · 목록 안에서 연 블록도 블록이다 — 목록 항목의
+    코드 예 속 `|` 줄이 표로 세이면 안 된다.
+    **못 보는 부류**: 목록 항목이 끝나 블록이 저절로 닫히는 것(GFM 은 컨테이너가 끝나면
+    블록도 닫는다) — 닫는 울타리 없이 목록을 빠져나가면 문서 끝까지 코드로 본다.
     """
     fence: tuple[str, int] | None = None
     for number, line in enumerate(text.splitlines(), start=1):
         if fence is not None:
             char, length = fence
-            if re.fullmatch(rf" {{0,3}}{re.escape(char)}{{{length},}}[ \t]*", line):
+            closing = rf"{_FENCE_CLOSE}{re.escape(char)}{{{length},}}[ \t]*"
+            if re.fullmatch(closing, line):
                 fence = None
             continue
         opened = _FENCE_OPEN.fullmatch(line)
@@ -220,6 +230,10 @@ def _cells(row: str) -> int:
     return len(row.replace("\\|", "").strip("|").split("|"))
 
 
+# 표의 구분선 — `|`, `-`, `:`, 공백만. 들여쓰기는 0 ~ 3 칸(`_table_rows` 와 같다)
+_DELIMITER = re.compile(r" {0,3}\|?[ \t]*:?-+:?[ \t]*(?:\|[ \t]*:?-+:?[ \t]*)*\|?[ \t]*")
+
+
 def test_a_table_row_does_not_carry_a_cell_the_header_did_not_declare() -> None:
     """**선언한 열보다 셀이 많은 줄은 그 셀을 잃는다.**
 
@@ -237,10 +251,15 @@ def test_a_table_row_does_not_carry_a_cell_the_header_did_not_declare() -> None:
         if ".venv" in path.parts or ".git" in path.parts:
             continue
         relative = path.relative_to(REPO_ROOT).as_posix()
+        text = path.read_text()
+        lines = text.splitlines()
         width: int | None = None
         previous = 0
-        for number, row in _table_rows(path.read_text()):
-            if number != previous + 1:
+        for number, row in _table_rows(text):
+            # 머리와 첫 본문 사이의 구분선(`|---|`)은 `_table_rows` 가 뺀다 — 그 틈을 끊김으로
+            # 읽으면 **머리가 셈에서 빠지고** 첫 본문 줄이 머리 노릇을 한다(09-29 까지 그랬다)
+            delimiter = number == previous + 2 and _DELIMITER.fullmatch(lines[number - 2])
+            if number != previous + 1 and not delimiter:
                 width = None  # 표가 끊겼다 — 다음 줄이 새 표의 머리다
             previous = number
             if width is None:
@@ -359,7 +378,7 @@ _RUN_HEAD = re.compile(r"## 감사 [①-⑳㉑-㉟㊱-㊿](?:-b)?(?:\(| —)")
 # 줄 머리의 HTML 블록(주석 · 태그) — 그 안의 `## ` 는 렌더되지 않는다
 _HTML_BLOCK = re.compile(r" {0,3}<")
 # 줄 앞의 컨테이너 — 들여쓰기 · 인용(`>`) · 목록 표지. 그 안의 머리와 울타리도 렌더된다
-_CONTAINER = r"(?:[ \t]*(?:>|[-*+]|\d{1,9}[.)])?[ \t]*)*"
+_CONTAINER = rf"[ \t]*(?:{_MARKER})*"
 # 줄 머리가 아닌 울타리 — 들여 쓰거나 인용 · 목록 안에서 연 코드 블록. 그 몸이 머리로 읽힌다
 _OFFSIDE_FENCE = re.compile(_CONTAINER + r"(?:`{3,}|~{3,})")
 # 줄 머리의 `## 감사 ` 가 아닌 감사 머리 — 들여쓰기 · 인용 · 다른 수준. 렌더되는데 셈에서 빠진다
