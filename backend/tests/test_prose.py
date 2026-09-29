@@ -166,58 +166,16 @@ def test_a_mutation_bundle_says_which_commit_it_was_measured_on() -> None:
     )
 
 
-# 컨테이너 표지 하나 — 인용(`>`) · 목록 표지(`-` · `1.`, 뒤에 공백이나 줄 끝) — 와 그 뒤 공백.
-# 되풀이마다 표지를 **반드시** 먹고 공백은 한 자리에서만 먹는다. 빈 것을 되풀이하거나 공백을
-# 두 자리에서 나눠 먹으면 역추적이 지수로 는다(공백 14칸에 4초 — Codex 리뷰, 2026-09-29)
-_MARKER = r"(?:>|(?:[-*+]|\d{1,9}[.)])(?=[ \t]|$))[ \t]*"
-# 코드 블록의 울타리(GFM) — 들여쓰기 0 ~ 3 칸, 같은 글자(`` ` `` 나 `~`) 셋 이상. 인용 · 목록
-# 안에서도 연다(`- ```md`). 닫는 울타리는 같은 글자로 여는 것 이상 길고 뒤에 공백만 온다
-# (인용 안이면 `>` 뒤에). 백틱 울타리의 꼬리에는 백틱이 없다.
-_FENCE_OPEN = re.compile(rf" {{0,3}}(?:{_MARKER})*(`{{3,}}|~{{3,}})(.*)")
-_FENCE_CLOSE = r" {0,3}(?:>[ \t]*)*"
-
-
-def _unfenced(text: str) -> Iterator[tuple[int, str, bool]]:
-    """코드 블록 **밖의** 줄을 (번호, 줄, 여는 울타리인가) 로 — 블록의 안과 닫는 울타리는 뺀다.
-
-    **「백틱 셋으로 시작하는가」만 보면 틀린다**: `~~~` 울타리를 못 보고, 네 칸
-    들여쓴(곧 코드인) 백틱 셋 줄에서 뒤집혀 그 뒤의 진짜 절을 코드로 삼킨다.
-    닫히지 않은 블록은 문서 끝까지다. 인용 · 목록 안에서 연 블록도 블록이다 — 목록 항목의
-    코드 예 속 `|` 줄이 표로 세이면 안 된다.
-    **못 보는 부류**: 목록 항목이 끝나 블록이 저절로 닫히는 것(GFM 은 컨테이너가 끝나면
-    블록도 닫는다) — 닫는 울타리 없이 목록을 빠져나가면 문서 끝까지 코드로 본다.
-    """
-    fence: tuple[str, int, int] | None = None
-    for number, line in enumerate(text.splitlines(), start=1):
-        if fence is not None:
-            char, length, indent = fence
-            closing = rf"{_FENCE_CLOSE}[ \t]{{0,{indent}}}{re.escape(char)}{{{length},}}[ \t]*"
-            if re.fullmatch(closing, line):
-                fence = None
-            continue
-        opened = _FENCE_OPEN.fullmatch(line)
-        if opened and (opened.group(1)[0] == "~" or "`" not in opened.group(2)):
-            # 목록 표지 줄에서 열었으면 닫는 울타리는 그 항목의 내용 들여쓰기에 온다
-            # (`  - ```md` 는 네 칸 들여 닫는다) — 여는 울타리의 자리만큼 더 받는다
-            marked = opened.start(1) > len(line) - len(line.lstrip(" "))
-            fence = (opened.group(1)[0], len(opened.group(1)), opened.start(1) if marked else 0)
-            yield number, line, True
-            continue
-        yield number, line, False
-
-
 def _table_rows(text: str) -> list[tuple[int, str]]:
-    """표의 줄만 돌려준다 — 구분선(`|---|`)과 코드 블록 안은 뺀다.
-
-    네 칸 이상(또는 탭으로) 들여쓴 줄도 뺀다 — 들여쓴 코드 블록이라 표로 렌더되지 않는다.
-    **못 보는 부류**: 목록 안에 네 칸 들여 적은 표(이 저장소에는 없다).
-    """
+    """표의 줄만 돌려준다 — 구분선(`|---|`)과 코드 블록 안은 뺀다."""
     rows: list[tuple[int, str]] = []
-    for number, line, is_fence in _unfenced(text):
+    fenced = False
+    for number, line in enumerate(text.splitlines(), start=1):
+        if line.lstrip().startswith("```"):
+            fenced = not fenced
+            continue
         stripped = line.strip()
-        expanded = line.expandtabs(4)
-        indented = len(expanded) - len(expanded.lstrip(" ")) >= 4
-        if is_fence or indented or not stripped.startswith("|") or set(stripped) <= set("|-: "):
+        if fenced or not stripped.startswith("|") or set(stripped) <= set("|-: "):
             continue
         rows.append((number, stripped))
     return rows
@@ -231,10 +189,6 @@ def _cells(row: str) -> int:
     줄이 그 자리다. 게이트가 자기 사각으로 적어 둔 것이 실은 거짓 양성이었다.
     """
     return len(row.replace("\\|", "").strip("|").split("|"))
-
-
-# 표의 구분선 — `|`, `-`, `:`, 공백만. 들여쓰기는 0 ~ 3 칸(`_table_rows` 와 같다)
-_DELIMITER = re.compile(r" {0,3}\|?[ \t]*:?-+:?[ \t]*(?:\|[ \t]*:?-+:?[ \t]*)*\|?[ \t]*")
 
 
 def test_a_table_row_does_not_carry_a_cell_the_header_did_not_declare() -> None:
@@ -254,24 +208,12 @@ def test_a_table_row_does_not_carry_a_cell_the_header_did_not_declare() -> None:
         if ".venv" in path.parts or ".git" in path.parts:
             continue
         relative = path.relative_to(REPO_ROOT).as_posix()
-        text = path.read_text()
-        lines = text.splitlines()
         width: int | None = None
-        previous = seen = 0
-        for number, row in _table_rows(text):
-            # 머리와 첫 본문 사이의 구분선(`|---|`)은 `_table_rows` 가 뺀다 — 그 틈을 끊김으로
-            # 읽으면 **머리가 셈에서 빠지고** 첫 본문 줄이 머리 노릇을 한다(09-29 까지 그랬다).
-            # 잇는 것은 머리 **바로** 아래, 머리와 칸 수가 같은 구분선뿐이다(GFM 의 표 조건)
-            between = lines[number - 2] if number == previous + 2 else ""
-            delimiter = (
-                seen == 1
-                and _DELIMITER.fullmatch(between) is not None
-                and _cells(between.strip()) == width
-            )
-            if number != previous + 1 and not delimiter:
-                width, seen = None, 0  # 표가 끊겼다 — 다음 줄이 새 표의 머리다
+        previous = 0
+        for number, row in _table_rows(path.read_text()):
+            if number != previous + 1:
+                width = None  # 표가 끊겼다 — 다음 줄이 새 표의 머리다
             previous = number
-            seen += 1
             if width is None:
                 width = _cells(row)
                 continue
@@ -291,12 +233,43 @@ _LEDGER = REPO_ROOT / "docs" / "audit" / "README.md"
 _ROUND = re.compile(r"[①-⑳㉑-㉟㊱-㊿]")
 
 
+# **대장의 코드 블록은 줄 머리(0 칸)의 울타리로만 연다** — 대장이 지키는 모양이다(아래
+# `test_a_round_section_names_the_commit_it_audited` 가 다른 자리의 울타리를 막는다). 그래서
+# 들여쓰기 · 인용 · 목록 안의 울타리를 가르지 않는다. 닫는 울타리는 같은 글자로 여는 것
+# 이상 길고 뒤에 공백만 온다. 백틱 울타리의 꼬리에는 백틱이 없다(GFM)
+_LEDGER_FENCE = re.compile(r"(`{3,}|~{3,})(.*)")
+
+
+def _ledger_lines(text: str) -> Iterator[tuple[int, str, bool]]:
+    """대장의 줄을 (번호, 줄, 코드 블록의 줄인가) 로 — 울타리 줄도 코드 블록의 줄이다.
+
+    **닫히지 않은 블록은 실패다** — 문서 끝까지 코드로 삼켜 그 뒤의 절이 말없이 빠진다.
+    """
+    fence: tuple[str, int] | None = None
+    opened_at = 0
+    for number, line in enumerate(text.splitlines(), start=1):
+        if fence is not None:
+            char, length = fence
+            if re.fullmatch(rf"{re.escape(char)}{{{length},}}[ \t]*", line):
+                fence = None
+            yield number, line, True
+            continue
+        opened = _LEDGER_FENCE.fullmatch(line)
+        if opened and (opened.group(1)[0] == "~" or "`" not in opened.group(2)):
+            fence = (opened.group(1)[0], len(opened.group(1)))
+            opened_at = number
+            yield number, line, True
+            continue
+        yield number, line, False
+    assert fence is None, f"대장 {opened_at} 줄에서 연 코드 블록이 닫히지 않았다"
+
+
 def _rounds_with_a_section(text: str) -> set[str]:
     """회차 절이 선 회차들 — `## 감사 ⑬(...)` 의 기호만 센다. 코드 블록 안은 절이 아니다."""
     return {
         found
-        for _, line, is_fence in _unfenced(text)
-        if not is_fence and line.startswith("## 감사 ")
+        for _, line, in_code in _ledger_lines(text)
+        if not in_code and line.startswith("## 감사 ")
         for found in _ROUND.findall(line)
     }
 
@@ -383,26 +356,20 @@ _COMMIT_LINE = re.compile(r"- \*\*감사한 커밋\*\*: `[0-9a-f]{4,64}`")
 # 처럼 회차를 가리키기만 하는 절은 감사를 돌린 것이 아니다. 기호는 ⑳ 에서 끝나지 않는다 —
 # ㉑ ~ ㉟ · ㊱ ~ ㊿ 은 유니코드에서 다른 자리에 있어, 빠뜨리면 그 절을 **말없이** 건너뛴다
 _RUN_HEAD = re.compile(r"## 감사 [①-⑳㉑-㉟㊱-㊿](?:-b)?(?:\(| —)")
-# **대장이 지키는 모양.** 마크다운의 모든 변형을 가르지 않고, 가르지 못하는 모양을 **막는다** —
-# 그 안의 머리가 절로 세이거나 빠지는 틈이 곧 이 게이트의 틈이다. 대장은 지금 셋 다 쓰지 않는다.
-# 줄 머리의 HTML 블록(주석 · 태그) — 그 안의 `## ` 는 렌더되지 않는다
-_HTML_BLOCK = re.compile(r" {0,3}<")
-# 줄 앞의 컨테이너 — 들여쓰기 · 인용(`>`) · 목록 표지. 그 안의 머리와 울타리도 렌더된다
-_CONTAINER = rf"[ \t]*(?:{_MARKER})*"
-# 줄 머리가 아닌 울타리 — 들여 쓰거나 인용 · 목록 안에서 연 코드 블록. 그 몸이 머리로 읽힌다
-_OFFSIDE_FENCE = re.compile(_CONTAINER + r"(?:`{3,}|~{3,})")
-# 줄 머리의 `## 감사 ` 가 아닌 감사 머리 — 들여쓰기 · 인용 · 다른 수준. 렌더되는데 셈에서 빠진다
-_OFFSIDE_HEAD = re.compile(_CONTAINER + r"#{1,6}[ \t]+감사[ \t]+[①-⑳㉑-㉟㊱-㊿]")
-# Setext 머리의 밑줄 — 바로 윗줄(문단)을 머리로 만든다. `#` 이 없어 위 둘로는 안 보인다.
-# 인용 · 목록 안의 밑줄(`> ---`)도 그 안의 문단을 머리로 만든다. 목록 표지가 붙은 줄(`- ---`)은
-# 새 항목이라 밑줄이 아니고, 윗줄과 인용 깊이가 다르면(`문단` / `> ---`) 경계의 가로줄이다
-_SETEXT_UNDERLINE = re.compile(r"[ \t]*(?:>[ \t]*)*(?:=+|-+)[ \t]*")
-
-
-def _quote_depth(line: str) -> int:
-    """줄 앞 컨테이너 속 인용 표지(`>`)의 수."""
-    prefix = re.match(_CONTAINER, line)
-    return prefix.group().count(">") if prefix else 0
+# **대장이 지키는 모양.** 마크다운의 변형을 가르지 않고, 가르지 않은 모양이 **대장에 없게**
+# 한다 — 그 안의 머리가 절로 세이거나 빠지는 틈이 곧 이 게이트의 틈이다. 그래서 컨테이너를
+# 해석하지 않고 **글자로** 본다: 인용 · 목록 경계의 평범한 가로줄도 막힌다(가로줄 위에는
+# 빈 줄을 둔다). 대장은 지금 넷 다 쓰지 않는다(2026-09-29).
+# 코드 블록 밖의 울타리 글자 — 줄 머리가 아닌 울타리(들여쓰기 · 인용 · 목록 안)는 코드 블록을
+# 열어 그 몸이 머리로 읽히거나 빠진다
+_FENCE_CHARS = re.compile(r"`{3,}|~{3,}")
+# 감사 머리의 꼴 — 줄 머리의 `## 감사 ` 가 아니면 렌더되는데 셈에서 빠진다(들여쓰기 · 인용 ·
+# 목록 안 · 다른 수준)
+_ANY_ROUND_HEAD = re.compile(r"#[ \t]*감사[ \t]*[①-⑳㉑-㉟㊱-㊿]")
+# HTML — 주석 · 태그 속의 `## ` 는 렌더되지 않는다
+_HTML = re.compile(r"[ >\t]*<|.*<!--")
+# Setext 머리의 밑줄 — 글자가 있는 줄 바로 아래의 `---` · `===` 는 그 줄을 머리로 만든다
+_UNDERLINE = re.compile(r"[ >\t]*(?:=+|-+)[ \t]*")
 
 
 def _round_sections(text: str) -> list[tuple[str, str]]:
@@ -410,12 +377,11 @@ def _round_sections(text: str) -> list[tuple[str, str]]:
 
     **코드 블록 안의 `## ` 는 머리가 아니다** — 대장이 양식을 보이려고 적은 예가 절로
     세이면 예가 떨어지거나, 예외의 머리를 인용한 예가 낡은 예외를 붙잡아 둔다.
-    울타리는 `_unfenced` 가 가른다.
     """
     sections: list[tuple[str, str]] = []
     head: str | None = None
-    for _, line, is_fence in _unfenced(text):
-        if is_fence:
+    for _, line, in_code in _ledger_lines(text):
+        if in_code:
             if head is not None:  # 절이 코드 블록으로 열리면 그 울타리가 첫 줄이다
                 sections.append((head, line))
                 head = None
@@ -432,6 +398,29 @@ def _round_sections(text: str) -> list[tuple[str, str]]:
     return sections
 
 
+def _off_contract(text: str) -> list[str]:
+    """대장이 지키는 모양을 벗어난 줄 — 코드 블록 안은 보지 않는다."""
+    lines = list(_ledger_lines(text))
+    found = []
+    for number, line, in_code in lines:
+        if in_code:
+            continue
+        if _FENCE_CHARS.search(line):
+            found.append(
+                f"  {number}: 코드 블록은 줄 머리의 울타리로만 연다 — 다른 자리에 쓰지 않는다"
+            )
+        if _ANY_ROUND_HEAD.search(line) and not line.startswith("## 감사 "):
+            found.append(f"  {number}: 감사 머리는 줄 머리의 `## 감사 ` 로 쓴다")
+        if _HTML.match(line):
+            found.append(f"  {number}: HTML 을 두지 않는다")
+    found += [
+        f"  {number}: 글자 있는 줄 바로 아래에 `---` · `===` 를 두지 않는다 — 위를 비운다"
+        for (_, above, above_code), (number, line, in_code) in pairwise(lines)
+        if not (above_code or in_code) and above.strip(" >\t") and _UNDERLINE.fullmatch(line)
+    ]
+    return found
+
+
 def test_a_round_section_names_the_commit_it_audited() -> None:
     """**회차 절은 감사한 커밋으로 연다** — 다음 회차의 기준이 그 SHA 다.
 
@@ -446,36 +435,14 @@ def test_a_round_section_names_the_commit_it_audited() -> None:
     `## 감사 ` 로 시작하되 위 머리 꼴을 벗어난 절 — 그런 절은 감사를 돌린 절로 세지 않는다.
     브리핑에 커밋 안 된 변경이 들었는데 줄 끝의 `· 커밋 안 된 변경 포함` 이 빠진 것도
     못 본다 — 그 역시 브리핑과 견줘야 안다(빠져도 다음 회차는 그 SHA 부터 다시 볼 뿐이다).
+
+    **마크다운을 해석하지 않는다.** 인용 · 목록 · Setext · HTML 을 가르는 해석기를 여기 세웠다가
+    리뷰마다 새 틈이 났다(ERP#17, 2026-09-29). 대신 가르지 않는 모양이 대장에 **없게** 한다 —
+    넓게 막아 평범한 문장이 걸릴 수 있고, 그러면 문장을 고친다.
     """
     ledger = _LEDGER.read_text()
-    # **HTML 블록은 받지 않는다** — 가르지 못하는 모양은 세지 않고 막는다. 주석 속의 옛 머리가
-    # 낡은 예외를 붙잡거나, 주석 속 예가 진짜 절로 세인다. 대장은 지금 HTML 을 쓰지 않는다
-    offside = [
-        f"  {number}: {why}"
-        for number, line, is_fence in _unfenced(ledger)
-        for why in (
-            "HTML 블록을 두지 않는다" if not is_fence and _HTML_BLOCK.match(line) else "",
-            "코드 블록은 줄 머리에서 연다"
-            if _OFFSIDE_FENCE.match(line) and not re.match(r"`{3,}|~{3,}", line)
-            else "",
-            "감사 머리는 줄 머리의 `## 감사 ` 로 쓴다"
-            if _OFFSIDE_HEAD.match(line) and not line.startswith("## 감사 ")
-            else "",
-        )
-        if why
-    ]
-    offside += [
-        f"  {number}: Setext 머리를 두지 않는다 — 머리는 `#` 으로 쓴다"
-        for (above_no, above, above_fence), (number, line, is_fence) in pairwise(
-            _unfenced(ledger)
-        )
-        if number == above_no + 1
-        and not (is_fence or above_fence)
-        and not re.fullmatch(_CONTAINER, above)  # 빈 줄 · 빈 인용(`>`) 아래는 가로줄이다
-        and _SETEXT_UNDERLINE.fullmatch(line)
-        and _quote_depth(above) == _quote_depth(line)
-    ]
-    assert offside == [], "대장이 이 게이트가 가르는 모양을 벗어났다:\n" + "\n".join(offside)
+    off = _off_contract(ledger)
+    assert off == [], "대장이 이 게이트가 가르는 모양을 벗어났다:\n" + "\n".join(off)
 
     sections = _round_sections(ledger)
     assert sections, "회차 절을 찾지 못했다 — 이 게이트가 아무것도 세지 않는다"
