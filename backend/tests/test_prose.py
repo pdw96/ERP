@@ -109,6 +109,29 @@ def test_there_is_still_no_screen() -> None:
     assert not (REPO_ROOT / "package.json").exists()
 
 
+# `CLAUDE.md` 의 줄 천장. **한 자리에만 적는다** — 산문에 이 수를 베끼지 않는다
+_CLAUDE_MD_CEILING = 250
+
+
+def test_claude_md_stays_short() -> None:
+    """**`CLAUDE.md` 는 매 세션 통째로 읽히는 입력물이다** — 길어지면 규칙이 묻힌다.
+
+    2026-09-29 에 그 파일의 절반 넘게가 조각마다 쌓인 기록(「지금 어디인가」)이었다.
+    기록은 `docs/지나온-길.md` 로, 리뷰를 처리할 때만 읽는 절은 `docs/리뷰-루프.md` 로
+    옮겼다. 기록은 조각이 설 때마다 늘어나므로 **적어 두기만 해서는 다시 분다** —
+    그래서 천장을 둔다. 넘으면 새 기록은 `docs/` 로, 특정 작업 때만 필요한 절은 그
+    작업의 문서로 옮기고 여기에는 가리키는 줄만 남긴다.
+
+    **이 게이트가 못 보는 부류**(W-6 ③): 천장 아래에서 기록이 규칙 사이에 섞여 드는 것,
+    그리고 한 줄에 길게 몰아 쓰는 것 — 줄 수만 센다.
+    """
+    lines = (REPO_ROOT / "CLAUDE.md").read_text().splitlines()
+    assert len(lines) <= _CLAUDE_MD_CEILING, (
+        f"CLAUDE.md 가 {len(lines)} 줄이다(천장 {_CLAUDE_MD_CEILING}) — "
+        "기록은 docs/ 로 옮기고 여기에는 가리키는 줄만 남긴다"
+    )
+
+
 _MUTATIONS = REPO_ROOT / "docs/audit/mutations.md"
 
 # 묶음 제목이 드는 커밋. 이 파일의 관용구가 백틱이라 백틱까지 본다 — 맨 글자만
