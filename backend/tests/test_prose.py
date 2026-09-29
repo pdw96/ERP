@@ -366,8 +366,13 @@ _FENCE_CHARS = re.compile(r"`{3,}|~{3,}")
 # 감사 머리의 꼴 — 줄 머리의 `## 감사 ` 가 아니면 렌더되는데 셈에서 빠진다(들여쓰기 · 인용 ·
 # 목록 안 · 다른 수준)
 _ANY_ROUND_HEAD = re.compile(r"#[ \t]*감사[ \t]*[①-⑳㉑-㉟㊱-㊿]")
-# HTML — 주석 · 태그 속의 `## ` 는 렌더되지 않는다
-_HTML = re.compile(r"[ >\t]*<|.*<!--")
+# HTML — 주석 · 태그 속의 `## ` 는 렌더되지 않는다. 줄 머리 · 목록 · 문장 가운데 어디든
+# 태그(`<em>` · `</em>`) · 주석 · 처리 지시 · 선언을 찾는다. 인라인 코드(`` `<SHA>` ``)는
+# 글자라 먼저 지운다. 자동 링크(`<https://…>`)는 태그 이름 뒤에 `:` 가 와서 걸리지 않는다
+_HTML = re.compile(
+    r"<(?:[A-Za-z][A-Za-z0-9-]*(?=[\s/>]|$)|/[A-Za-z][A-Za-z0-9-]*[ \t]*>|!--|\?|!)"
+)
+_CODE_SPAN = re.compile(r"`[^`]*`")
 # Setext 머리의 밑줄 — 글자가 있는 줄 바로 아래의 `---` · `===` 는 그 줄을 머리로 만든다
 _UNDERLINE = re.compile(r"[ >\t]*(?:=+|-+)[ \t]*")
 
@@ -411,7 +416,7 @@ def _off_contract(text: str) -> list[str]:
             )
         if _ANY_ROUND_HEAD.search(line) and not line.startswith("## 감사 "):
             found.append(f"  {number}: 감사 머리는 줄 머리의 `## 감사 ` 로 쓴다")
-        if _HTML.match(line):
+        if _HTML.search(_CODE_SPAN.sub("", line)):
             found.append(f"  {number}: HTML 을 두지 않는다")
     found += [
         f"  {number}: 글자 있는 줄 바로 아래에 `---` · `===` 를 두지 않는다 — 위를 비운다"
