@@ -191,6 +191,14 @@ def _cells(row: str) -> int:
     return len(row.replace("\\|", "").strip("|").split("|"))
 
 
+# 표의 구분선(GFM) — 칸마다 하이픈 하나 이상과 앞뒤 콜론. 하이픈 수의 하한은 없다(`| - |` 도
+# 구분선이다). 공백은 `|` 뒤에서만 먹고 되풀이는 `|` 로 시작해 한 가지로만 읽힌다 —
+# 공백 두 벌이 맞닿으면 긴 줄에서 역추적이 제곱으로 는다(공백 5000 칸에 0.3 초)
+_DELIMITER = re.compile(
+    r"[ \t]*(?:\|[ \t]*)?:?-+:?[ \t]*(?:\|[ \t]*:?-+:?[ \t]*)*(?:\|[ \t]*)?"
+)
+
+
 def test_a_table_row_does_not_carry_a_cell_the_header_did_not_declare() -> None:
     """**선언한 열보다 셀이 많은 줄은 그 셀을 잃는다.**
 
@@ -202,18 +210,33 @@ def test_a_table_row_does_not_carry_a_cell_the_header_did_not_declare() -> None:
     채워 주므로 뜻이 사라지지는 않는다)과 **헤더 자체가 틀린** 표 — 셀 수만
     맞으면 통과한다. 이스케이프한 구분자는 **`_cells` 가 세지 않는다**(NC-157) —
     여기 「못 보는 것」으로 적혀 있었으나 실제로는 **거짓 양성**이었다.
+
+    **머리는 구분선 너머에 있다.** `_table_rows` 는 구분선을 빼므로 머리와 첫 본문 사이에
+    줄 번호가 하나 빈다 — 그 틈을 표의 끊김으로 읽어 **머리가 셈에서 빠지고** 첫 본문 줄이
+    머리 노릇을 했다. `| a |` / `|---|` / `| b | c |` 가 통과했다(ERP#17 리뷰 중 찾음).
+    그 틈은 머리 **바로** 아래, 머리와 칸 수가 같은 구분선일 때만 잇는다(GFM 의 표 조건 —
+    칸 수가 다르면 표가 아니다).
     """
     overflowing = []
     for path in REPO_ROOT.rglob("*.md"):
         if ".venv" in path.parts or ".git" in path.parts:
             continue
         relative = path.relative_to(REPO_ROOT).as_posix()
+        text = path.read_text()
+        lines = text.splitlines()
         width: int | None = None
-        previous = 0
-        for number, row in _table_rows(path.read_text()):
-            if number != previous + 1:
-                width = None  # 표가 끊겼다 — 다음 줄이 새 표의 머리다
+        previous = seen = 0
+        for number, row in _table_rows(text):
+            between = lines[number - 2] if number == previous + 2 else ""
+            delimiter = (
+                seen == 1  # 머리 바로 아래
+                and _DELIMITER.fullmatch(between) is not None
+                and _cells(between.strip()) == width
+            )
+            if number != previous + 1 and not delimiter:
+                width, seen = None, 0  # 표가 끊겼다 — 다음 줄이 새 표의 머리다
             previous = number
+            seen += 1
             if width is None:
                 width = _cells(row)
                 continue
