@@ -216,7 +216,9 @@ def _overflowing_rows(text: str) -> list[tuple[int, int, int]]:
     # 원시 HTML 은 살리지 않는다 — 셀 안에 적은 `<th>` · `</table>` 이 파서가 만든 태그와 섞여
     # 칸 수를 부풀린다. 파서가 만든 태그에만 `data-sourcepos` 가 붙는다
     html = cmarkgfm.github_flavored_markdown_to_html(text, options=Options.CMARK_OPT_SOURCEPOS)
-    lines = text.splitlines()
+    # cmark 의 줄 끝은 `\n` · `\r\n` · `\r` 뿐이다 — `splitlines()` 는 U+2028 · 폼피드
+    # 따위에서도 끊어, 그 뒤 표의 줄 번호가 파서와 어긋난다
+    lines = re.split(r"\r\n|\r|\n", text)
     found = []
     for table in re.finditer(r"<table data-sourcepos=[^>]*>(.*?)</table>", html, re.S):
         head, _, body = table.group(1).partition("</thead>")
