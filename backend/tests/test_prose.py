@@ -294,3 +294,83 @@ def test_a_round_that_closed_leaves_a_line_in_the_round_table() -> None:
         "회차 절은 있는데 회차별 W 표에 줄이 없다 — 회차를 닫는 사람이 적는다:\n"
         + "\n".join(f"  감사 {round_} 절은 있고 표에 줄이 없다" for round_ in missing)
     )
+
+
+# **감사한 커밋을 적지 않은 회차들.** ① ~ ⑬ 은 절마다 `감사한 커밋` 줄을 두었는데
+# ⑭ 부터 여섯 회차가 그 줄 없이 지나갔다 — 적는 사람이 잊었고 아무것도 묻지 않았다.
+# 회차 기록은 소급해 고치지 않으므로(대장이 그렇게 정했다) 여기에 이름으로 둔다.
+# **예외가 늘면 이 목록이 diff 에 보인다.**
+_NO_COMMIT_LINE = {
+    "⑭": "적지 않았다 — 소급해 고치지 않는다",
+    "⑮": "적지 않았다 — 소급해 고치지 않는다",
+    "⑯": "적지 않았다 — 소급해 고치지 않는다",
+    "⑰": "적지 않았다 — 소급해 고치지 않는다",
+    "⑱": "적지 않았다 — 소급해 고치지 않는다",
+    "⑲": "적지 않았다 — 소급해 고치지 않는다",
+}
+_COMMIT_LINE = re.compile(r"- \*\*감사한 커밋\*\*: `[0-9a-f]{7,40}`")
+# 감사를 **돌린** 절의 머리 — `감사 ⑧(audit-data) —` · `감사 ⑤-b —` 꼴. `감사 ⑧ 의 번호 대조`
+# 처럼 회차를 가리키기만 하는 절은 감사를 돌린 것이 아니다
+_RUN_HEAD = re.compile(r"## 감사 ([①-⑳])(?:-b)?(?:\(| —)")
+
+
+def _round_sections(text: str) -> list[tuple[str, str]]:
+    """감사를 돌린 `## 감사 …` 절마다 (머리 줄, 몸) — 몸은 다음 `## ` 까지다."""
+    # 절의 회차는 머리의 **첫** 기호뿐이다 — `⑱ … ⑭~⑰ 의 새 산문` 처럼 다른 회차를
+    # 가리키는 기호가 머리에 함께 적힌다
+    sections: list[tuple[str, str]] = []
+    head: str | None = None
+    body: list[str] = []
+    for line in text.splitlines():
+        if line.startswith("## "):
+            if head is not None:
+                sections.append((head, "\n".join(body)))
+            head, body = (line, []) if _RUN_HEAD.match(line) else (None, [])
+        elif head is not None:
+            body.append(line)
+    if head is not None:
+        sections.append((head, "\n".join(body)))
+    return sections
+
+
+def _own_round(head: str) -> str:
+    match = _RUN_HEAD.match(head)
+    assert match, head
+    return match.group(1)
+
+
+def test_a_round_section_names_the_commit_it_audited() -> None:
+    """**회차 절은 감사한 커밋을 적는다** — 다음 회차의 기준이 그 SHA 다.
+
+    브리핑 보관본(`.claude/briefs/`)은 `.gitignore` 에 있어 저장소에 남지 않으므로
+    「그 회차가 어느 커밋을 봤는가」는 대장의 이 줄에만 남는다. ⑭ 부터 여섯 회차가
+    적지 않았고, ⑲ 다음 회차의 기준을 판정 커밋의 부모로 **짐작해야** 했다
+    (2026-09-29, `/audit-brief` 실사용 시험). 적는 규칙은 ① 부터 있었다 — 지키는
+    것이 사람뿐이라 끊겼다.
+
+    **이 게이트가 못 보는 부류**(W-6 ③): 줄은 있는데 **SHA 가 틀린** 것 — 그 회차가
+    실제로 본 커밋인지는 브리핑과 견줘야 하고, 브리핑은 저장소에 없다.
+    """
+    sections = _round_sections(_LEDGER.read_text())
+    assert sections, "회차 절을 찾지 못했다 — 이 게이트가 아무것도 세지 않는다"
+
+    missing = [
+        head
+        for head, body in sections
+        if not _COMMIT_LINE.search(body) and _own_round(head) not in _NO_COMMIT_LINE
+    ]
+    assert missing == [], (
+        "회차 절에 「- **감사한 커밋**: `<SHA>`」 줄이 없다 — "
+        "브리핑의 「대상」 SHA 를 옮긴다:\n" + "\n".join(f"  {head}" for head in missing)
+    )
+
+    stale = sorted(
+        round_
+        for round_ in _NO_COMMIT_LINE
+        if all(
+            _COMMIT_LINE.search(body) for head, body in sections if _own_round(head) == round_
+        )
+    )
+    assert (
+        stale == []
+    ), f"예외 목록의 회차가 이제 감사한 커밋을 적고 있다 — 목록에서 뺀다: {stale}"
