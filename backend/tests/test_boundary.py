@@ -124,9 +124,9 @@ def test_the_entrypoint_is_executable() -> None:
     """
     entrypoint = BACKEND_ROOT / "docker-entrypoint.sh"
 
-    assert (
-        entrypoint.stat().st_mode & 0o111
-    ), f"{entrypoint} 에 실행 비트가 없다 — `ENTRYPOINT` 가 그것을 요구한다"
+    assert entrypoint.stat().st_mode & 0o111, (
+        f"{entrypoint} 에 실행 비트가 없다 — `ENTRYPOINT` 가 그것을 요구한다"
+    )
 
 
 def _test_database_url() -> str:

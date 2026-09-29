@@ -26,6 +26,9 @@ lock_all() {
   for src in "${INPUTS[@]}"; do
     "$LOCK_PIP_COMPILE" --quiet --allow-unsafe --strip-extras "$@" \
       --output-file="${src%.in}.txt" "$src"
+    # click 8.2 이상에서 pip-compile 이 머리의 명령 줄에 `--no-index` 를 잘못 찍는다(ADR 0006).
+    # 그 줄은 사람이 읽는 주석이라 지운다 — 버그가 고쳐지면 아무것도 바꾸지 않는다.
+    sed -i -E '/^#    pip-compile /s/ --no-index//' "${src%.in}.txt"
   done
 }
 
