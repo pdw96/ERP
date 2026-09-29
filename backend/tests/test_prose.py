@@ -18,6 +18,7 @@
 """
 
 import re
+from collections.abc import Iterator
 from pathlib import Path
 
 BACKEND_ROOT = Path(__file__).resolve().parents[1]
@@ -164,16 +165,39 @@ def test_a_mutation_bundle_says_which_commit_it_was_measured_on() -> None:
     )
 
 
+# 코드 블록의 울타리(GFM) — 들여쓰기 0 ~ 3 칸, 같은 글자(`` ` `` 나 `~`) 셋 이상. 닫는 울타리는
+# 같은 글자로 여는 것 이상 길고 뒤에 공백만 온다. 백틱 울타리의 꼬리에는 백틱이 없다.
+_FENCE_OPEN = re.compile(r" {0,3}(`{3,}|~{3,})(.*)")
+
+
+def _unfenced(text: str) -> Iterator[tuple[int, str, bool]]:
+    """코드 블록 **밖의** 줄을 (번호, 줄, 여는 울타리인가) 로 — 블록의 안과 닫는 울타리는 뺀다.
+
+    **「백틱 셋으로 시작하는가」만 보면 틀린다**: `~~~` 울타리를 못 보고, 네 칸
+    들여쓴(곧 코드인) 백틱 셋 줄에서 뒤집혀 그 뒤의 진짜 절을 코드로 삼킨다.
+    닫히지 않은 블록은 문서 끝까지다.
+    """
+    fence: tuple[str, int] | None = None
+    for number, line in enumerate(text.splitlines(), start=1):
+        if fence is not None:
+            char, length = fence
+            if re.fullmatch(rf" {{0,3}}{re.escape(char)}{{{length},}}[ \t]*", line):
+                fence = None
+            continue
+        opened = _FENCE_OPEN.fullmatch(line)
+        if opened and (opened.group(1)[0] == "~" or "`" not in opened.group(2)):
+            fence = (opened.group(1)[0], len(opened.group(1)))
+            yield number, line, True
+            continue
+        yield number, line, False
+
+
 def _table_rows(text: str) -> list[tuple[int, str]]:
     """표의 줄만 돌려준다 — 구분선(`|---|`)과 코드 블록 안은 뺀다."""
     rows: list[tuple[int, str]] = []
-    fenced = False
-    for number, line in enumerate(text.splitlines(), start=1):
-        if line.lstrip().startswith("```"):
-            fenced = not fenced
-            continue
+    for number, line, is_fence in _unfenced(text):
         stripped = line.strip()
-        if fenced or not stripped.startswith("|") or set(stripped) <= set("|-: "):
+        if is_fence or not stripped.startswith("|") or set(stripped) <= set("|-: "):
             continue
         rows.append((number, stripped))
     return rows
@@ -232,11 +256,11 @@ _ROUND = re.compile(r"[①-⑳]")
 
 
 def _rounds_with_a_section(text: str) -> set[str]:
-    """회차 절이 선 회차들 — `## 감사 ⑬(...)` 의 기호만 센다."""
+    """회차 절이 선 회차들 — `## 감사 ⑬(...)` 의 기호만 센다. 코드 블록 안은 절이 아니다."""
     return {
         found
-        for line in text.splitlines()
-        if line.startswith("## 감사 ")
+        for _, line, is_fence in _unfenced(text)
+        if not is_fence and line.startswith("## 감사 ")
         for found in _ROUND.findall(line)
     }
 
@@ -317,7 +341,8 @@ _NO_COMMIT_LINE = {
 }
 # 절이 **여는** 줄 — 몸의 첫 줄이 이것이어야 한다. 몸 어딘가에 있는 것으로는 모자란다:
 # 인용한 예(`> - **감사한 커밋**: …`)나 산문 뒤의 줄은 다음 회차가 기준을 고르는 자리가 아니다
-_COMMIT_LINE = re.compile(r"- \*\*감사한 커밋\*\*: `[0-9a-f]{7,40}`")
+# 짧은 SHA 의 길이는 `core.abbrev` 가 정한다(4 까지 줄어든다). SHA-256 저장소면 64 까지 길다
+_COMMIT_LINE = re.compile(r"- \*\*감사한 커밋\*\*: `[0-9a-f]{4,64}`")
 # 감사를 **돌린** 절의 머리 — `감사 ⑧(audit-data) —` · `감사 ⑤-b —` 꼴. `감사 ⑧ 의 번호 대조`
 # 처럼 회차를 가리키기만 하는 절은 감사를 돌린 것이 아니다. 기호는 ⑳ 에서 끝나지 않는다 —
 # ㉑ ~ ㉟ · ㊱ ~ ㊿ 은 유니코드에서 다른 자리에 있어, 빠뜨리면 그 절을 **말없이** 건너뛴다
@@ -329,19 +354,15 @@ def _round_sections(text: str) -> list[tuple[str, str]]:
 
     **코드 블록 안의 `## ` 는 머리가 아니다** — 대장이 양식을 보이려고 적은 예가 절로
     세이면 예가 떨어지거나, 예외의 머리를 인용한 예가 낡은 예외를 붙잡아 둔다.
-    `_table_rows` 와 같은 방식으로 울타리를 센다.
+    울타리는 `_unfenced` 가 가른다.
     """
     sections: list[tuple[str, str]] = []
     head: str | None = None
-    fenced = False
-    for line in text.splitlines():
-        if line.lstrip().startswith("```"):
-            fenced = not fenced
+    for _, line, is_fence in _unfenced(text):
+        if is_fence:
             if head is not None:  # 절이 코드 블록으로 열리면 그 울타리가 첫 줄이다
                 sections.append((head, line))
                 head = None
-            continue
-        if fenced:
             continue
         if line.startswith("## "):
             if head is not None:
