@@ -97,7 +97,7 @@ def test_a_failure_halfway_leaves_nothing_behind(
     (fake / "02_broken.sql").write_text("INSERT INTO 없는표 VALUES (1);", encoding="utf-8")
     monkeypatch.setattr(seed_module, "SEED_DIR", fake)
 
-    with pytest.raises(Exception, match="없는표|does not exist"):
+    with pytest.raises(Exception, match=r"없는표|does not exist"):
         seed_module.seed(blank)
 
     assert _count(blank, "code_groups") == 0, "터진 시드가 앞 파일의 줄을 남겼다"
@@ -505,8 +505,7 @@ def test_every_measured_standard_says_in_what_unit(blank: Engine) -> None:
         _count(
             blank,
             "process_inspection_standards",
-            "(upper_spec_limit IS NOT NULL OR lower_spec_limit IS NOT NULL)"
-            " AND unit IS NULL",
+            "(upper_spec_limit IS NOT NULL OR lower_spec_limit IS NOT NULL) AND unit IS NULL",
         )
         == 0
     )

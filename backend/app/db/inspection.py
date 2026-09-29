@@ -182,8 +182,7 @@ class Inspection(Base):
         # 근거를 들고 있는 것이고, 특채인데 비어 있으면 위의 외래키가 통째로
         # 건너뛰어진다 — 복합 외래키는 한 칸이라도 `NULL` 이면 검사하지 않는다.
         CheckConstraint(
-            f"(result = '{codes.JUDGMENT_SPECIAL}')"
-            " = (special_acceptance_allowed IS NOT NULL)",
+            f"(result = '{codes.JUDGMENT_SPECIAL}') = (special_acceptance_allowed IS NOT NULL)",
             name="ck_inspection_special_acceptance_matches_result",
         ),
         # 차 있다면 참이다. **거짓을 받으면** 그 줄은 「특채가 닫힌 사유로 특채를

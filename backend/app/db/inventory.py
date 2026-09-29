@@ -114,7 +114,7 @@ class Lot(Base):
         #
         # 비는 것은 그대로 허용한다 — 기초재고에는 적을 합격일이 없다.
         CheckConstraint(
-            "passed_date IS NULL" " OR passed_date >= COALESCE(received_date, produced_date)",
+            "passed_date IS NULL OR passed_date >= COALESCE(received_date, produced_date)",
             name="ck_lot_passed_after_arrival",
         ),
         CheckConstraint(

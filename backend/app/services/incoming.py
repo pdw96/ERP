@@ -370,8 +370,7 @@ def receive(session: Session, request: IncomingInspection) -> Judged:
         # 불합격은 로트를 만들지 않아 그 CHECK 에 닿지 않기 때문이다.
         raise RefusedInspection(
             Refusal.RECEIVED_DATE_IS_IN_THE_FUTURE,
-            f"아직 오지 않은 날짜다: {request.received_date} —"
-            " 받지 않은 물건은 검사할 수 없다",
+            f"아직 오지 않은 날짜다: {request.received_date} — 받지 않은 물건은 검사할 수 없다",
         )
 
     standards = _standards(session, item.material_group)

@@ -22,10 +22,18 @@ LOCK_PIP_COMPILE="${LOCK_PIP_COMPILE:-pip-compile}"
 INPUTS=(requirements.in requirements-dev.in requirements-tools.in)
 
 lock_all() {
-  local src
+  local src fixed
   for src in "${INPUTS[@]}"; do
     "$LOCK_PIP_COMPILE" --quiet --allow-unsafe --strip-extras "$@" \
       --output-file="${src%.in}.txt" "$src"
+    # click 8.2 이상에서 pip-compile 이 머리의 명령 줄에 `--no-index` 를 잘못 찍는다(ADR 0006).
+    # 그 줄은 사람이 읽는 주석이라 지운다 — 버그가 고쳐지면 아무것도 바꾸지 않는다.
+    # `sed -i` 를 쓰지 않는다 — BSD(macOS) 의 sed 는 `-i` 뒤를 백업 접미사로 읽는다(ERP#29).
+    # 임시 파일을 거쳐 원래 파일에 다시 쓴다 — `mv` 는 파일의 권한을 바꾼다.
+    fixed="$(mktemp)"
+    sed -E '/^#    pip-compile /s/ --no-index//' "${src%.in}.txt" >"$fixed"
+    cat "$fixed" >"${src%.in}.txt"
+    rm -f "$fixed"
   done
 }
 

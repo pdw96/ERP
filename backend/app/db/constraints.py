@@ -78,6 +78,5 @@ def is_finite(column: str) -> str:
     으로는 `NaN` 을 막지 못한다.
     """
     return (
-        f"{column} > '-Infinity'::double precision"
-        f" AND {column} < 'Infinity'::double precision"
+        f"{column} > '-Infinity'::double precision AND {column} < 'Infinity'::double precision"
     )
