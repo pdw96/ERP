@@ -19,10 +19,13 @@
   다른 플랫폼에서만 붙는 의존성은 잠금에 없어 그 자리에서 설치가 멈춘다 —
   조용히 통과하지는 않는다.
 - **잠금의 하위 의존성이 입력에서 실제로 나오는가.** 풀이를 다시 하지 않으므로
-  「입력이 직접 부른다」고 적힌 줄만 입력과 견준다.
+  「입력이 직접 부른다」고 적힌 줄과, 입력이 고른 **extra** 가 부르는 것만 견준다.
+  extra 는 설치된 메타데이터의 마커에서 `extra == "…"` 를 글자로 찾는다 — 마커를
+  풀어 계산하지 않는다.
 """
 
 import re
+from importlib.metadata import metadata, requires
 from pathlib import Path
 
 BACKEND_ROOT = Path(__file__).resolve().parents[1]
@@ -37,13 +40,19 @@ _PAIRS = (
 
 # 입력 한 줄의 모양. **이 두 모양 밖이면 떨어진다** — 마커나 URL 을 조용히
 # 건너뛰면 그 줄이 견주기 밖에 선다.
-_INPUT_PIN = re.compile(r"([A-Za-z0-9][A-Za-z0-9._-]*)(?:\[[A-Za-z0-9,._-]+\])?==(\S+)")
+_INPUT_PIN = re.compile(r"([A-Za-z0-9][A-Za-z0-9._-]*)(?:\[([A-Za-z0-9,._-]+)\])?==(\S+)")
 _INPUT_INCLUDE = re.compile(r"-r\s+(\S+)")
 # 제약은 입력이 아니라 잠금을 가리킨다 — 고정을 더하지 않는다.
 _INPUT_CONSTRAINT = re.compile(r"-c\s+\S+")
 
 # 잠금 한 항목의 머리 — `name==version \`.
 _LOCK_PIN = re.compile(r"^([A-Za-z0-9][A-Za-z0-9._-]*)==(\S+) \\$")
+# 그 항목을 무엇이 불렀는가 — `# via -r 입력` · `#   -c 잠금` · `#   패키지`.
+_LOCK_VIA = re.compile(r"\s*#\s+(?:via\s+)?(-[rc] \S+|[A-Za-z0-9][A-Za-z0-9._-]*)")
+
+# 요구 한 줄의 이름과, 마커가 그것을 거는 extra.
+_REQUIREMENT_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*")
+_MARKER_EXTRA = re.compile(r"extra\s*==\s*(['\"])(.+?)\1")
 
 
 def _normalize(name: str) -> str:
@@ -51,36 +60,70 @@ def _normalize(name: str) -> str:
     return re.sub(r"[-_.]+", "-", name).lower()
 
 
-def _input_pins(name: str) -> dict[str, str]:
-    """입력 파일이 **직접** 고정한 것. `-r` 을 따라간다."""
-    pins: dict[str, str] = {}
+def _input(name: str) -> dict[str, tuple[str, frozenset[str]]]:
+    """입력 파일이 **직접** 고정한 것 — 이름마다 (버전, 고른 extra). `-r` 을 따라간다."""
+    pins: dict[str, tuple[str, frozenset[str]]] = {}
     for raw in (BACKEND_ROOT / name).read_text().splitlines():
         line = raw.split("#", 1)[0].strip()
         if not line:
             continue
         if include := _INPUT_INCLUDE.fullmatch(line):
-            pins |= _input_pins(include.group(1))
+            pins |= _input(include.group(1))
             continue
         if _INPUT_CONSTRAINT.fullmatch(line):
             continue
         pin = _INPUT_PIN.fullmatch(line)
         assert pin, f"{name}: 이 검사가 읽지 못하는 줄이다 — {line!r}"
-        pins[_normalize(pin.group(1))] = pin.group(2)
+        extras = frozenset(_normalize(e) for e in (pin.group(2) or "").split(",") if e)
+        pins[_normalize(pin.group(1))] = (pin.group(3), extras)
     return pins
 
 
-def _lock(name: str) -> tuple[dict[str, str], set[str]]:
-    """잠금의 전체 고정 · 그리고 그 가운데 **입력이 직접 부른다**고 적힌 것."""
+def _lock(name: str) -> tuple[dict[str, str], dict[str, set[str]]]:
+    """잠금의 전체 고정 · 그리고 항목마다 **무엇이 불렀는가**(pip-compile 의 `# via`)."""
     pins: dict[str, str] = {}
-    direct: set[str] = set()
+    via: dict[str, set[str]] = {}
     current = ""
     for line in (BACKEND_ROOT / name).read_text().splitlines():
         if head := _LOCK_PIN.match(line):
             current = _normalize(head.group(1))
             pins[current] = head.group(2)
-        elif current and re.fullmatch(r"\s*#\s+(?:via\s+)?-r \S+", line):
-            direct.add(current)
-    return pins, direct
+            via[current] = set()
+        elif current and (by := _LOCK_VIA.fullmatch(line)) and by.group(1) != "via":
+            via[current].add(by.group(1))
+    return pins, via
+
+
+def _direct(via: dict[str, set[str]]) -> set[str]:
+    """잠금에 **입력이 직접 부른다**(`-r`)고 적힌 것."""
+    return {name for name, by in via.items() if any(b.startswith("-r ") for b in by)}
+
+
+def _parents(by: set[str]) -> set[str]:
+    """`# via` 가운데 패키지인 것 — 입력 · 잠금을 가리키는 줄은 뺀다."""
+    return {_normalize(b) for b in by if not b.startswith("-")}
+
+
+def _extra_deps(package: str) -> dict[str, set[str]]:
+    """설치된 `package` 의 extra 마다 **그 extra 때문에** 더 부르는 것.
+
+    extra 없이도 부르는 것은 뺀다 — SQLAlchemy 는 `greenlet` 을 플랫폼 마커로 늘
+    부르고 `asyncio` 같은 extra 에서도 다시 부른다. 그것은 extra 의 몫이 아니다.
+    """
+    always: set[str] = set()
+    found: dict[str, set[str]] = {
+        _normalize(extra): set() for extra in metadata(package).get_all("Provides-Extra") or []
+    }
+    for spec in requires(package) or []:
+        head = _REQUIREMENT_NAME.match(spec)
+        assert head, spec
+        name = _normalize(head.group(0))
+        extras = [extra for _, extra in _MARKER_EXTRA.findall(spec)]
+        if not extras:
+            always.add(name)
+        for extra in extras:
+            found.setdefault(_normalize(extra), set()).add(name)
+    return {extra: deps - always for extra, deps in found.items()}
 
 
 def test_every_pin_in_the_input_is_the_pin_in_the_lock() -> None:
@@ -91,8 +134,8 @@ def test_every_pin_in_the_input_is_the_pin_in_the_lock() -> None:
     「입력이 부른다」로 남으면 지운 것이 계속 깔린다. 두 방향을 다 본다.
     """
     for source, lock in _PAIRS:
-        wanted = _input_pins(source)
-        locked, direct = _lock(lock)
+        wanted = {name: version for name, (version, _) in _input(source).items()}
+        locked, via = _lock(lock)
 
         drifted = {
             name: (version, locked.get(name))
@@ -101,8 +144,36 @@ def test_every_pin_in_the_input_is_the_pin_in_the_lock() -> None:
         }
         assert drifted == {}, f"{source} 와 {lock} 가 갈렸다(입력, 잠금): {drifted}"
 
-        orphaned = sorted(direct - wanted.keys())
+        orphaned = sorted(_direct(via) - wanted.keys())
         assert orphaned == [], f"{lock} 에 입력이 부르지 않는 직접 의존성이 남았다: {orphaned}"
+
+
+def test_the_extras_the_input_picks_are_the_extras_the_lock_carries() -> None:
+    """**입력에서 extra 를 떼거나 붙이고 잠금을 다시 만들지 않으면 떨어진다.**
+
+    잠금은 `--strip-extras` 로 풀려 `psycopg[binary]` 가 아니라 `psycopg` 와
+    `psycopg-binary` 두 줄로 남는다. 그래서 버전만 견주면 입력의 `[binary]` 를 떼도
+    **초록이고, 뗀 패키지가 계속 깔린다**(ERP#22 의 Codex 리뷰가 짚었고 재현했다).
+    두 방향을 본다 — 고른 extra 가 부르는 것이 잠금에 없는 것, 고르지 않은 extra 가
+    부르는 것이 **그 패키지 하나 때문에만** 잠금에 남은 것.
+    """
+    for source, lock in _PAIRS:
+        locked, via = _lock(lock)
+        missing: dict[str, list[str]] = {}
+        stale: dict[str, list[str]] = {}
+        for name, (_, picked) in _input(source).items():
+            for extra, deps in _extra_deps(name).items():
+                if extra in picked:
+                    if gone := sorted(deps - locked.keys()):
+                        missing[f"{name}[{extra}]"] = gone
+                    continue
+                # 고르지 않은 extra 의 것이 **이 패키지 하나 때문에만** 남았다
+                only_here = [d for d in deps & locked.keys() if _parents(via[d]) == {name}]
+                if only_here:
+                    stale[f"{name}[{extra}]"] = sorted(only_here)
+
+        assert missing == {}, f"{source} 가 고른 extra 의 의존성이 {lock} 에 없다: {missing}"
+        assert stale == {}, f"{source} 가 떼어 낸 extra 의 의존성이 {lock} 에 남았다: {stale}"
 
 
 def test_the_runtime_lock_and_the_dev_lock_agree() -> None:
