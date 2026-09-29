@@ -1,3 +1,5 @@
+# 개발. 이 파일도 입력이다 — 잠금은 `requirements-dev.lock`, 다시 만드는 법은
+# `requirements.txt` 머리에 있다.
 -r requirements.txt
 
 # **httpx2** — starlette 의 `TestClient` 가 이것 위에 서 있다. 엔드포인트를
