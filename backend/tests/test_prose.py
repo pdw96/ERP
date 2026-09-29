@@ -366,12 +366,19 @@ _FENCE_CHARS = re.compile(r"`{3,}|~{3,}")
 # 감사 머리의 꼴 — 줄 머리의 `## 감사 ` 가 아니면 렌더되는데 셈에서 빠진다(들여쓰기 · 인용 ·
 # 목록 안 · 다른 수준)
 _ANY_ROUND_HEAD = re.compile(r"#[ \t]*감사[ \t]*[①-⑳㉑-㉟㊱-㊿]")
+# 꾸민 감사 머리(`## **감사 ㉑** —`) — 머리 줄에서 꾸밈 글자를 빼고 보이는 글이 「감사 + 회차
+# 기호」로 시작하면 감사 머리다. 줄 머리의 `## 감사 ` 가 아니면 절로 세이지 않는다
+_HEADING = re.compile(r"[ >\t]*(?:(?:[-*+]|\d{1,9}[.)])[ >\t]*)?#{1,6}(?:[ \t]|$)")
+_DECORATION = re.compile(r"[*_`~\[\]()<>\\]")
+_ROUND_TEXT = re.compile(r"[ \t]*감사[ \t]*[①-⑳㉑-㉟㊱-㊿]")
 # HTML — 주석 · 태그 속의 `## ` 는 렌더되지 않는다. 줄 머리 · 목록 · 문장 가운데 어디든
 # 태그(`<em>` · `</em>`) · 주석 · 처리 지시 · 선언을 찾는다. 인라인 코드(`` `<SHA>` ``)는
 # 글자라 먼저 지운다. 자동 링크(`<https://…>`)는 태그 이름 뒤에 `:` 가 와서 걸리지 않는다
 _HTML = re.compile(
     r"<(?:[A-Za-z][A-Za-z0-9-]*(?=[\s/>]|$)|/[A-Za-z][A-Za-z0-9-]*[ \t]*>|!--|\?|!)"
 )
+# 인라인 코드 — 백틱 하나로 여닫는 것만 지운다. 이스케이프한 백틱(`\``)이나 겹 백틱이 있는 줄은
+# 코드 스팬을 가르지 않고 원문을 본다(넓게 막는다 — 인라인 코드 속 `<…>` 는 백틱 하나로 감싼다)
 _CODE_SPAN = re.compile(r"`[^`]*`")
 # Setext 머리의 밑줄 — 글자가 있는 줄 바로 아래의 `---` · `===` 는 그 줄을 머리로 만든다
 _UNDERLINE = re.compile(r"[ >\t]*(?:=+|-+)[ \t]*")
@@ -414,9 +421,12 @@ def _off_contract(text: str) -> list[str]:
             found.append(
                 f"  {number}: 코드 블록은 줄 머리의 울타리로만 연다 — 다른 자리에 쓰지 않는다"
             )
-        if _ANY_ROUND_HEAD.search(line) and not line.startswith("## 감사 "):
+        heading = _HEADING.match(line)
+        formatted = heading and _ROUND_TEXT.match(_DECORATION.sub("", line[heading.end() :]))
+        if (_ANY_ROUND_HEAD.search(line) or formatted) and not line.startswith("## 감사 "):
             found.append(f"  {number}: 감사 머리는 줄 머리의 `## 감사 ` 로 쓴다")
-        if _HTML.search(_CODE_SPAN.sub("", line)):
+        plain = line if "\\`" in line or "``" in line else _CODE_SPAN.sub("", line)
+        if _HTML.search(plain):
             found.append(f"  {number}: HTML 을 두지 않는다")
     found += [
         f"  {number}: 글자 있는 줄 바로 아래에 `---` · `===` 를 두지 않는다 — 위를 비운다"
