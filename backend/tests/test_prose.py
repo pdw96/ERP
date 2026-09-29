@@ -166,21 +166,44 @@ def test_a_mutation_bundle_says_which_commit_it_was_measured_on() -> None:
     )
 
 
-def _table_rows(text: str) -> list[tuple[int, str]]:
-    """표의 줄만 돌려준다 — 구분선(`|---|`)과 코드 블록 안은 뺀다.
+# 코드 블록의 여는 울타리 — 백틱이나 물결 셋 이상
+_FENCE_OPEN = re.compile(r"[ \t]*(`{3,}|~{3,})")
+# HTML 블록의 머리 — 줄 머리(0 ~ 3 칸)의 주석이나 태그. 그 안의 `|` 줄은 표로 렌더되지 않는다
+_HTML_BLOCK = re.compile(r" {0,3}<(?:!--|/?[A-Za-z][A-Za-z0-9-]*(?:[\s/>]|$))")
 
-    울타리는 백틱 셋과 물결 셋 둘 다다. 닫는 울타리는 여는 것과 같은 글자여야 한다 —
-    `~~~` 블록 안의 백틱 셋 줄로 블록이 닫히지 않는다.
+
+def _table_rows(text: str) -> list[tuple[int, str]]:
+    """표의 줄만 돌려준다 — 구분선(`|---|`), 코드 블록 안, HTML 블록 안은 뺀다.
+
+    울타리는 백틱과 물결 둘 다다. 닫는 울타리는 여는 것과 같은 글자로 **그 이상 길고** 뒤에
+    공백만 온다(GFM) — `~~~~` 블록 안의 `~~~` 줄로는 닫히지 않는다. HTML 블록은 주석이면
+    `-->` 까지, 태그면 빈 줄까지다.
     """
     rows: list[tuple[int, str]] = []
-    fence = ""
+    fence: tuple[str, int] | None = None
+    html_until = ""  # "" · "-->" · "빈 줄"
     for number, line in enumerate(text.splitlines(), start=1):
-        mark = line.lstrip()[:3]
-        if mark in ("```", "~~~") and fence in ("", mark):
-            fence = "" if fence else mark
+        if fence is not None:
+            char, length = fence
+            if re.fullmatch(rf"[ \t]*{re.escape(char)}{{{length},}}[ \t]*", line):
+                fence = None
+            continue
+        if html_until:
+            if "-->" in line if html_until == "-->" else not line.strip():
+                html_until = ""
+            continue
+        opened = _FENCE_OPEN.match(line)
+        if opened:
+            fence = (opened.group(1)[0], len(opened.group(1)))
+            continue
+        if _HTML_BLOCK.match(line):
+            if line.lstrip().startswith("<!--"):
+                html_until = "" if "-->" in line.split("<!--", 1)[1] else "-->"
+            else:
+                html_until = "빈 줄"
             continue
         stripped = line.strip()
-        if fence or not stripped.startswith("|") or set(stripped) <= set("|-: "):
+        if not stripped.startswith("|") or set(stripped) <= set("|-: "):
             continue
         rows.append((number, stripped))
     return rows
@@ -245,9 +268,10 @@ def test_a_table_row_does_not_carry_a_cell_the_header_did_not_declare() -> None:
                 and "|" in between  # `|` 없는 `---` 는 Setext 밑줄이다
                 and _DELIMITER.fullmatch(between) is not None
                 and _cells(between.strip()) == width
-                # 네 칸 들여 쓴 머리 · 구분선은 들여쓴 코드 블록의 줄이다 — 표가 아니다
+                # 네 칸 들여 쓴 머리 · 구분선 · 본문은 들여쓴 코드 블록의 줄이다 — 표가 아니다
                 and _indent(lines[previous - 1]) < 4
                 and _indent(between) < 4
+                and _indent(lines[number - 1]) < 4
             )
             if number != previous + 1 and not delimiter:
                 width, seen = None, 0  # 표가 끊겼다 — 다음 줄이 새 표의 머리다
