@@ -193,11 +193,16 @@ def _unfenced(text: str) -> Iterator[tuple[int, str, bool]]:
 
 
 def _table_rows(text: str) -> list[tuple[int, str]]:
-    """표의 줄만 돌려준다 — 구분선(`|---|`)과 코드 블록 안은 뺀다."""
+    """표의 줄만 돌려준다 — 구분선(`|---|`)과 코드 블록 안은 뺀다.
+
+    네 칸 이상(또는 탭으로) 들여쓴 줄도 뺀다 — 들여쓴 코드 블록이라 표로 렌더되지 않는다.
+    **못 보는 부류**: 목록 안에 네 칸 들여 적은 표(이 저장소에는 없다).
+    """
     rows: list[tuple[int, str]] = []
     for number, line, is_fence in _unfenced(text):
         stripped = line.strip()
-        if is_fence or not stripped.startswith("|") or set(stripped) <= set("|-: "):
+        indented = line.startswith(("    ", "\t"))
+        if is_fence or indented or not stripped.startswith("|") or set(stripped) <= set("|-: "):
             continue
         rows.append((number, stripped))
     return rows
@@ -253,6 +258,8 @@ _LEDGER = REPO_ROOT / "docs" / "audit" / "README.md"
 
 # 회차 기호. 대장이 ① ~ ⑳ 을 쓰고, 「⑦-b」처럼 꼬리가 붙는 회차가 있다.
 _ROUND = re.compile(r"[①-⑳]")
+# 머리는 세 칸까지 들여 써도 머리다(GFM). 네 칸부터는 코드다
+_HEADING = re.compile(r" {0,3}(#{1,6}(?: .*)?)")
 
 
 def _rounds_with_a_section(text: str) -> set[str]:
@@ -260,8 +267,10 @@ def _rounds_with_a_section(text: str) -> set[str]:
     return {
         found
         for _, line, is_fence in _unfenced(text)
-        if not is_fence and line.startswith("## 감사 ")
-        for found in _ROUND.findall(line)
+        if not is_fence
+        and (heading := _HEADING.fullmatch(line))
+        and heading.group(1).startswith("## 감사 ")
+        for found in _ROUND.findall(heading.group(1))
     }
 
 
@@ -347,6 +356,8 @@ _COMMIT_LINE = re.compile(r"- \*\*감사한 커밋\*\*: `[0-9a-f]{4,64}`")
 # 처럼 회차를 가리키기만 하는 절은 감사를 돌린 것이 아니다. 기호는 ⑳ 에서 끝나지 않는다 —
 # ㉑ ~ ㉟ · ㊱ ~ ㊿ 은 유니코드에서 다른 자리에 있어, 빠뜨리면 그 절을 **말없이** 건너뛴다
 _RUN_HEAD = re.compile(r"## 감사 [①-⑳㉑-㉟㊱-㊿](?:-b)?(?:\(| —)")
+# 줄 머리의 HTML 블록 — 주석 · 태그. 그 안의 `## ` 는 렌더되지 않는다
+_HTML_BLOCK = re.compile(r" {0,3}<")
 
 
 def _round_sections(text: str) -> list[tuple[str, str]]:
@@ -364,10 +375,11 @@ def _round_sections(text: str) -> list[tuple[str, str]]:
                 sections.append((head, line))
                 head = None
             continue
-        if line.startswith("## "):
+        heading = _HEADING.fullmatch(line)
+        if heading and heading.group(1).startswith("## "):
             if head is not None:
                 sections.append((head, ""))
-            head = line if _RUN_HEAD.match(line) else None
+            head = heading.group(1) if _RUN_HEAD.match(heading.group(1)) else None
         elif head is not None and line.strip():
             sections.append((head, line))
             head = None
@@ -389,7 +401,19 @@ def test_a_round_section_names_the_commit_it_audited() -> None:
     실제로 본 커밋인지는 브리핑과 견줘야 하고, 브리핑은 저장소에 없다. 그리고
     `## 감사 ` 로 시작하되 위 머리 꼴을 벗어난 절 — 그런 절은 감사를 돌린 절로 세지 않는다.
     """
-    sections = _round_sections(_LEDGER.read_text())
+    ledger = _LEDGER.read_text()
+    # **HTML 블록은 받지 않는다** — 가르지 못하는 모양은 세지 않고 막는다. 주석 속의 옛 머리가
+    # 낡은 예외를 붙잡거나, 주석 속 예가 진짜 절로 세인다. 대장은 지금 HTML 을 쓰지 않는다
+    html = [
+        number
+        for number, line, is_fence in _unfenced(ledger)
+        if not is_fence and _HTML_BLOCK.match(line)
+    ]
+    assert (
+        html == []
+    ), f"대장에 HTML 블록을 두지 않는다 — 그 안의 머리를 가르지 못한다: 줄 {html}"
+
+    sections = _round_sections(ledger)
     assert sections, "회차 절을 찾지 못했다 — 이 게이트가 아무것도 세지 않는다"
 
     missing = [
