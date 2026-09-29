@@ -4,8 +4,8 @@ ENV PYTHONUNBUFFERED=1 PYTHONDONTWRITEBYTECODE=1
 WORKDIR /app
 
 # **잠금에서 해시까지 맞춰 깐다.** 입력(`requirements.in`)은 하위 의존성을 고정하지
-# 않고, 같은 이름 · 같은 버전으로 다른 파일이 와도 막지 못한다. 견주는 검사는
-# `tests/test_dependencies.py` 다.
+# 않고, 같은 이름 · 같은 버전으로 다른 파일이 와도 막지 못한다. 잠금이 입력에서
+# 다시 나오는지는 CI 의 「잠금」 스텝(`scripts/lock.sh --check`)이 본다.
 COPY requirements.txt ./
 RUN pip install --no-cache-dir --require-hashes -r requirements.txt
 

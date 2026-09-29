@@ -3,18 +3,10 @@
 # **이 파일은 사람이 고치는 입력이다. 설치는 `requirements.txt` 에서 한다** — 하위
 # 의존성까지 버전과 해시가 박힌 잠금이다(감사 ⑳ 이 넘긴 「의존성 무결성」). 이름은
 # pip-tools 의 관례(`.in` → `.txt`)를 따른다 — Dependabot 이 이 관례로만 잠금을 알아보고
-# 매주 갱신 PR 을 연다(`.github/dependabot.yml`). 손으로 고쳤으면 잠금 둘을
-# **이 순서로** 다시 만든다(`backend/` 에서):
-#
-#     pip-compile --allow-unsafe --generate-hashes --strip-extras \
-#         --output-file=requirements.txt requirements.in
-#     pip-compile --allow-unsafe --generate-hashes --strip-extras \
-#         --output-file=requirements-dev.txt requirements-dev.in
-#
-# 파이썬 3.12 · pip-tools 7.6.1 · click 8.1.8 로 만들었다 — click 8.2 이상에서는 잠금
-# 머리의 명령에 `--no-index` 가 잘못 찍힌다. 잊으면 `tests/test_dependencies.py` 가
-# 떨어진다. **해시는 처음 고른 패키지가 진짜인지는 말하지 않는다** — 더하는 날 사람이
-# 이름과 출처를 본다.
+# 매주 갱신 PR 을 연다(`.github/dependabot.yml`). 손으로 고쳤으면 `scripts/lock.sh` 로
+# 잠금을 다시 만든다 — 명령과 도구는 그 스크립트와 `requirements-tools.in` 이 든다.
+# 잊으면 CI 의 「잠금」 스텝이 떨어진다. **해시는 처음 고른 패키지가 진짜인지는 말하지
+# 않는다** — 더하는 날 사람이 이름과 출처를 본다.
 #
 # **FastAPI** — 첫 쓰기 엔드포인트가 여기서 선다. 요청 본문을 파이썬 타입으로
 # 검증하는 것을 이미 쓰는 pydantic 이 맡으므로 검증 규칙이 두 벌이 되지 않고,
