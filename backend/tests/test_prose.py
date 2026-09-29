@@ -187,17 +187,20 @@ def _unfenced(text: str) -> Iterator[tuple[int, str, bool]]:
     **못 보는 부류**: 목록 항목이 끝나 블록이 저절로 닫히는 것(GFM 은 컨테이너가 끝나면
     블록도 닫는다) — 닫는 울타리 없이 목록을 빠져나가면 문서 끝까지 코드로 본다.
     """
-    fence: tuple[str, int] | None = None
+    fence: tuple[str, int, int] | None = None
     for number, line in enumerate(text.splitlines(), start=1):
         if fence is not None:
-            char, length = fence
-            closing = rf"{_FENCE_CLOSE}{re.escape(char)}{{{length},}}[ \t]*"
+            char, length, indent = fence
+            closing = rf"{_FENCE_CLOSE}[ \t]{{0,{indent}}}{re.escape(char)}{{{length},}}[ \t]*"
             if re.fullmatch(closing, line):
                 fence = None
             continue
         opened = _FENCE_OPEN.fullmatch(line)
         if opened and (opened.group(1)[0] == "~" or "`" not in opened.group(2)):
-            fence = (opened.group(1)[0], len(opened.group(1)))
+            # 목록 표지 줄에서 열었으면 닫는 울타리는 그 항목의 내용 들여쓰기에 온다
+            # (`  - ```md` 는 네 칸 들여 닫는다) — 여는 울타리의 자리만큼 더 받는다
+            marked = opened.start(1) > len(line) - len(line.lstrip(" "))
+            fence = (opened.group(1)[0], len(opened.group(1)), opened.start(1) if marked else 0)
             yield number, line, True
             continue
         yield number, line, False
@@ -254,14 +257,21 @@ def test_a_table_row_does_not_carry_a_cell_the_header_did_not_declare() -> None:
         text = path.read_text()
         lines = text.splitlines()
         width: int | None = None
-        previous = 0
+        previous = seen = 0
         for number, row in _table_rows(text):
             # 머리와 첫 본문 사이의 구분선(`|---|`)은 `_table_rows` 가 뺀다 — 그 틈을 끊김으로
-            # 읽으면 **머리가 셈에서 빠지고** 첫 본문 줄이 머리 노릇을 한다(09-29 까지 그랬다)
-            delimiter = number == previous + 2 and _DELIMITER.fullmatch(lines[number - 2])
+            # 읽으면 **머리가 셈에서 빠지고** 첫 본문 줄이 머리 노릇을 한다(09-29 까지 그랬다).
+            # 잇는 것은 머리 **바로** 아래, 머리와 칸 수가 같은 구분선뿐이다(GFM 의 표 조건)
+            between = lines[number - 2] if number == previous + 2 else ""
+            delimiter = (
+                seen == 1
+                and _DELIMITER.fullmatch(between) is not None
+                and _cells(between.strip()) == width
+            )
             if number != previous + 1 and not delimiter:
-                width = None  # 표가 끊겼다 — 다음 줄이 새 표의 머리다
+                width, seen = None, 0  # 표가 끊겼다 — 다음 줄이 새 표의 머리다
             previous = number
+            seen += 1
             if width is None:
                 width = _cells(row)
                 continue
@@ -384,8 +394,15 @@ _OFFSIDE_FENCE = re.compile(_CONTAINER + r"(?:`{3,}|~{3,})")
 # 줄 머리의 `## 감사 ` 가 아닌 감사 머리 — 들여쓰기 · 인용 · 다른 수준. 렌더되는데 셈에서 빠진다
 _OFFSIDE_HEAD = re.compile(_CONTAINER + r"#{1,6}[ \t]+감사[ \t]+[①-⑳㉑-㉟㊱-㊿]")
 # Setext 머리의 밑줄 — 바로 윗줄(문단)을 머리로 만든다. `#` 이 없어 위 둘로는 안 보인다.
-# 인용 · 목록 안의 밑줄(`> ---`)도 그 안의 문단을 머리로 만든다
-_SETEXT_UNDERLINE = re.compile(_CONTAINER + r"(?:=+|-+)[ \t]*")
+# 인용 · 목록 안의 밑줄(`> ---`)도 그 안의 문단을 머리로 만든다. 목록 표지가 붙은 줄(`- ---`)은
+# 새 항목이라 밑줄이 아니고, 윗줄과 인용 깊이가 다르면(`문단` / `> ---`) 경계의 가로줄이다
+_SETEXT_UNDERLINE = re.compile(r"[ \t]*(?:>[ \t]*)*(?:=+|-+)[ \t]*")
+
+
+def _quote_depth(line: str) -> int:
+    """줄 앞 컨테이너 속 인용 표지(`>`)의 수."""
+    prefix = re.match(_CONTAINER, line)
+    return prefix.group().count(">") if prefix else 0
 
 
 def _round_sections(text: str) -> list[tuple[str, str]]:
@@ -456,6 +473,7 @@ def test_a_round_section_names_the_commit_it_audited() -> None:
         and not (is_fence or above_fence)
         and not re.fullmatch(_CONTAINER, above)  # 빈 줄 · 빈 인용(`>`) 아래는 가로줄이다
         and _SETEXT_UNDERLINE.fullmatch(line)
+        and _quote_depth(above) == _quote_depth(line)
     ]
     assert offside == [], "대장이 이 게이트가 가르는 모양을 벗어났다:\n" + "\n".join(offside)
 
