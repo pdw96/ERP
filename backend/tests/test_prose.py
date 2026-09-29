@@ -325,10 +325,24 @@ _RUN_HEAD = re.compile(r"## 감사 [①-⑳㉑-㉟㊱-㊿](?:-b)?(?:\(| —)")
 
 
 def _round_sections(text: str) -> list[tuple[str, str]]:
-    """감사를 돌린 `## 감사 …` 절마다 (머리 줄, 몸의 첫 줄) — 빈 줄은 건너뛴다."""
+    """감사를 돌린 `## 감사 …` 절마다 (머리 줄, 몸의 첫 줄) — 빈 줄은 건너뛴다.
+
+    **코드 블록 안의 `## ` 는 머리가 아니다** — 대장이 양식을 보이려고 적은 예가 절로
+    세이면 예가 떨어지거나, 예외의 머리를 인용한 예가 낡은 예외를 붙잡아 둔다.
+    `_table_rows` 와 같은 방식으로 울타리를 센다.
+    """
     sections: list[tuple[str, str]] = []
     head: str | None = None
+    fenced = False
     for line in text.splitlines():
+        if line.lstrip().startswith("```"):
+            fenced = not fenced
+            if head is not None:  # 절이 코드 블록으로 열리면 그 울타리가 첫 줄이다
+                sections.append((head, line))
+                head = None
+            continue
+        if fenced:
+            continue
         if line.startswith("## "):
             if head is not None:
                 sections.append((head, ""))
