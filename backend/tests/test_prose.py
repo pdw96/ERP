@@ -358,12 +358,15 @@ _RUN_HEAD = re.compile(r"## 감사 [①-⑳㉑-㉟㊱-㊿](?:-b)?(?:\(| —)")
 # 그 안의 머리가 절로 세이거나 빠지는 틈이 곧 이 게이트의 틈이다. 대장은 지금 셋 다 쓰지 않는다.
 # 줄 머리의 HTML 블록(주석 · 태그) — 그 안의 `## ` 는 렌더되지 않는다
 _HTML_BLOCK = re.compile(r" {0,3}<")
-# 줄 머리가 아닌 울타리 — 들여 쓰거나 목록 안에서 연 코드 블록. 그 몸이 머리로 읽힌다
-_OFFSIDE_FENCE = re.compile(r"[ \t]*(?:(?:[-*+]|\d{1,9}[.)])[ \t]+)?(?:`{3,}|~{3,})")
-# 줄 머리의 `## 감사 ` 가 아닌 감사 머리 — 들여쓰기 · 탭 · 다른 수준. 렌더되는데 셈에서 빠진다
-_OFFSIDE_HEAD = re.compile(r"[ \t]*#{1,6}[ \t]+감사[ \t]+[①-⑳㉑-㉟㊱-㊿]")
-# Setext 머리의 밑줄 — 바로 윗줄(문단)을 머리로 만든다. `#` 이 없어 위 둘로는 안 보인다
-_SETEXT_UNDERLINE = re.compile(r" {0,3}(?:=+|-+)[ \t]*")
+# 줄 앞의 컨테이너 — 들여쓰기 · 인용(`>`) · 목록 표지. 그 안의 머리와 울타리도 렌더된다
+_CONTAINER = r"(?:[ \t]*(?:>|[-*+]|\d{1,9}[.)])?[ \t]*)*"
+# 줄 머리가 아닌 울타리 — 들여 쓰거나 인용 · 목록 안에서 연 코드 블록. 그 몸이 머리로 읽힌다
+_OFFSIDE_FENCE = re.compile(_CONTAINER + r"(?:`{3,}|~{3,})")
+# 줄 머리의 `## 감사 ` 가 아닌 감사 머리 — 들여쓰기 · 인용 · 다른 수준. 렌더되는데 셈에서 빠진다
+_OFFSIDE_HEAD = re.compile(_CONTAINER + r"#{1,6}[ \t]+감사[ \t]+[①-⑳㉑-㉟㊱-㊿]")
+# Setext 머리의 밑줄 — 바로 윗줄(문단)을 머리로 만든다. `#` 이 없어 위 둘로는 안 보인다.
+# 인용 · 목록 안의 밑줄(`> ---`)도 그 안의 문단을 머리로 만든다
+_SETEXT_UNDERLINE = re.compile(_CONTAINER + r"(?:=+|-+)[ \t]*")
 
 
 def _round_sections(text: str) -> list[tuple[str, str]]:
@@ -405,6 +408,8 @@ def test_a_round_section_names_the_commit_it_audited() -> None:
     **이 게이트가 못 보는 부류**(W-6 ③): 줄은 있는데 **SHA 가 틀린** 것 — 그 회차가
     실제로 본 커밋인지는 브리핑과 견줘야 하고, 브리핑은 저장소에 없다. 그리고
     `## 감사 ` 로 시작하되 위 머리 꼴을 벗어난 절 — 그런 절은 감사를 돌린 절로 세지 않는다.
+    브리핑에 커밋 안 된 변경이 들었는데 줄 끝의 `· 커밋 안 된 변경 포함` 이 빠진 것도
+    못 본다 — 그 역시 브리핑과 견줘야 안다(빠져도 다음 회차는 그 SHA 부터 다시 볼 뿐이다).
     """
     ledger = _LEDGER.read_text()
     # **HTML 블록은 받지 않는다** — 가르지 못하는 모양은 세지 않고 막는다. 주석 속의 옛 머리가
@@ -430,7 +435,7 @@ def test_a_round_section_names_the_commit_it_audited() -> None:
         )
         if number == above_no + 1
         and not (is_fence or above_fence)
-        and above.strip()
+        and not re.fullmatch(_CONTAINER, above)  # 빈 줄 · 빈 인용(`>`) 아래는 가로줄이다
         and _SETEXT_UNDERLINE.fullmatch(line)
     ]
     assert offside == [], "대장이 이 게이트가 가르는 모양을 벗어났다:\n" + "\n".join(offside)
