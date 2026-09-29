@@ -22,6 +22,9 @@ from collections.abc import Iterator
 from itertools import pairwise
 from pathlib import Path
 
+import cmarkgfm
+from cmarkgfm.cmark import Options
+
 BACKEND_ROOT = Path(__file__).resolve().parents[1]
 REPO_ROOT = BACKEND_ROOT.parent
 
@@ -166,72 +169,64 @@ def test_a_mutation_bundle_says_which_commit_it_was_measured_on() -> None:
     )
 
 
-# 코드 블록의 여는 울타리 — 백틱이나 물결 셋 이상
-_FENCE_OPEN = re.compile(r"[ \t]*(`{3,}|~{3,})")
-# HTML 블록의 머리 — 줄 머리(0 ~ 3 칸)의 주석이나 태그. 그 안의 `|` 줄은 표로 렌더되지 않는다
-_HTML_BLOCK = re.compile(r" {0,3}<(?:!--|/?[A-Za-z][A-Za-z0-9-]*(?:[\s/>]|$))")
-
-
 def _table_rows(text: str) -> list[tuple[int, str]]:
-    """표의 줄만 돌려준다 — 구분선(`|---|`), 코드 블록 안, HTML 블록 안은 뺀다.
+    """표의 줄만 돌려준다 — 구분선(`|---|`)과 코드 블록 안은 뺀다.
 
-    울타리는 백틱과 물결 둘 다다. 닫는 울타리는 여는 것과 같은 글자로 **그 이상 길고** 뒤에
-    공백만 온다(GFM) — `~~~~` 블록 안의 `~~~` 줄로는 닫히지 않는다. HTML 블록은 주석이면
-    `-->` 까지, 태그면 빈 줄까지다.
+    **대장(`docs/audit/README.md`) 전용이다.** 대장은 줄 머리의 울타리로만 코드 블록을
+    연다(대장 게이트가 문다). 저장소 전체의 표는 GFM 파서가 가른다(`_overflowing_rows`).
     """
     rows: list[tuple[int, str]] = []
-    fence: tuple[str, int] | None = None
-    html_until = ""  # "" · "-->" · "빈 줄"
+    fenced = False
     for number, line in enumerate(text.splitlines(), start=1):
-        if fence is not None:
-            char, length = fence
-            if re.fullmatch(rf"[ \t]*{re.escape(char)}{{{length},}}[ \t]*", line):
-                fence = None
-            continue
-        if html_until:
-            if "-->" in line if html_until == "-->" else not line.strip():
-                html_until = ""
-            continue
-        opened = _FENCE_OPEN.match(line)
-        if opened:
-            fence = (opened.group(1)[0], len(opened.group(1)))
-            continue
-        if _HTML_BLOCK.match(line):
-            if line.lstrip().startswith("<!--"):
-                html_until = "" if "-->" in line.split("<!--", 1)[1] else "-->"
-            else:
-                html_until = "빈 줄"
+        if line.lstrip().startswith("```"):
+            fenced = not fenced
             continue
         stripped = line.strip()
-        if not stripped.startswith("|") or set(stripped) <= set("|-: "):
+        if fenced or not stripped.startswith("|") or set(stripped) <= set("|-: "):
             continue
         rows.append((number, stripped))
     return rows
 
 
 def _cells(row: str) -> int:
-    """칸 수. 앞뒤의 구분자는 GFM 에서 선택이라 벗기고 센다.
+    """칸 수. 앞뒤의 구분자는 GFM 에서 선택이라 **하나씩만** 벗기고 센다.
 
     **이스케이프한 `\\|` 는 구분자가 아니다** (NC-157). GFM 은 그것을 칸 안의
     글자로 읽는데 여기서 함께 세면 **거짓 양성**이 난다 — 셀 안에 `||` 를 적은
     줄이 그 자리다. 게이트가 자기 사각으로 적어 둔 것이 실은 거짓 양성이었다.
+
+    양끝의 `|` 를 모두 벗기면 `||a||` 가 한 칸이 된다 — GFM 은 한 개씩만 벗겨 세 칸으로
+    읽는다(Codex 리뷰, ERP#18).
     """
-    return len(row.replace("\\|", "").strip("|").split("|"))
+    row = row.replace("\\|", "")
+    row = row.removeprefix("|")
+    row = row.removesuffix("|")
+    return len(row.split("|"))
 
 
-# 표의 구분선(GFM) — 칸마다 하이픈 하나 이상과 앞뒤 콜론. 하이픈 수의 하한은 없다(`| - |` 도
-# 구분선이다). `|` 가 없는 `---` 는 윗줄을 Setext 머리로 만드는 밑줄이라 표를 잇지 않는다(아래).
-# 공백은 `|` 뒤에서만 먹고 되풀이는 `|` 로 시작해 한 가지로만 읽힌다 — 공백 두 벌이
-# 맞닿으면 긴 줄에서 역추적이 제곱으로 는다(공백 5000 칸에 0.3 초)
-_DELIMITER = re.compile(
-    r"[ \t]*(?:\|[ \t]*)?:?-+:?[ \t]*(?:\|[ \t]*:?-+:?[ \t]*)*(?:\|[ \t]*)?"
-)
+def _overflowing_rows(text: str) -> list[tuple[int, int, int]]:
+    """GFM 이 **표로 렌더한** 본문 줄 가운데 머리보다 칸이 많은 줄 — (줄 번호, 머리, 그 줄).
 
-
-def _indent(line: str) -> int:
-    """줄 앞 공백의 칸 수 — 탭은 네 칸으로 편다."""
-    expanded = line.expandtabs(4)
-    return len(expanded) - len(expanded.lstrip(" "))
+    **표인지는 GitHub 의 파서(cmark-gfm)가 가른다.** 여기서 마크다운을 흉내 내면
+    울타리 길이 · HTML 블록 · 목록 안 들여쓰기 · Setext 밑줄마다 틈이 났다 — ERP#18 의
+    리뷰가 여섯 번 연달아 그 틈을 짚었다. 머리의 칸 수는 렌더된 `<th>` 로 세고, 본문 줄의
+    칸 수는 원문에서 그 줄이 차지한 자리(`data-sourcepos`, 바이트 열)를 잘라 센다 —
+    넘친 칸은 렌더에서 사라지므로 원문에서만 보인다.
+    """
+    html = cmarkgfm.github_flavored_markdown_to_html(
+        text, options=Options.CMARK_OPT_SOURCEPOS | Options.CMARK_OPT_UNSAFE
+    )
+    lines = text.splitlines()
+    found = []
+    for table in re.finditer(r"<table[^>]*>(.*?)</table>", html, re.S):
+        head, _, body = table.group(1).partition("</thead>")
+        width = len(re.findall(r"<th[ >]", head))
+        for row in re.finditer(r'<tr data-sourcepos="(\d+):(\d+)-\d+:(\d+)"', body):
+            number, start, end = map(int, row.groups())
+            source = lines[number - 1].encode()[start - 1 : end].decode()
+            if _cells(source.strip()) > width:
+                found.append((number, width, _cells(source.strip())))
+    return found
 
 
 def test_a_table_row_does_not_carry_a_cell_the_header_did_not_declare() -> None:
@@ -246,44 +241,16 @@ def test_a_table_row_does_not_carry_a_cell_the_header_did_not_declare() -> None:
     맞으면 통과한다. 이스케이프한 구분자는 **`_cells` 가 세지 않는다**(NC-157) —
     여기 「못 보는 것」으로 적혀 있었으나 실제로는 **거짓 양성**이었다.
 
-    **머리는 구분선 너머에 있다.** `_table_rows` 는 구분선을 빼므로 머리와 첫 본문 사이에
-    줄 번호가 하나 빈다 — 그 틈을 표의 끊김으로 읽어 **머리가 셈에서 빠지고** 첫 본문 줄이
-    머리 노릇을 했다. `| a |` / `|---|` / `| b | c |` 가 통과했다(ERP#17 리뷰 중 찾음).
-    그 틈은 머리 **바로** 아래, 머리와 칸 수가 같은 구분선일 때만 잇는다(GFM 의 표 조건 —
-    칸 수가 다르면 표가 아니다).
+    **머리가 셈에서 빠져 있었다**(2026-09-29 까지). 줄을 손으로 가르면서 구분선이 만든 줄
+    번호 틈을 표의 끊김으로 읽어, 첫 본문 줄이 머리 노릇을 했다 — `| a |` / `|---|` /
+    `| b | c |` 가 통과했다. 이제 표는 파서가 가르고 머리는 렌더된 머리다(`_overflowing_rows`).
     """
-    overflowing = []
-    for path in REPO_ROOT.rglob("*.md"):
-        if ".venv" in path.parts or ".git" in path.parts:
-            continue
-        relative = path.relative_to(REPO_ROOT).as_posix()
-        text = path.read_text()
-        lines = text.splitlines()
-        width: int | None = None
-        previous = seen = 0
-        for number, row in _table_rows(text):
-            between = lines[number - 2] if number == previous + 2 else ""
-            delimiter = (
-                seen == 1  # 머리 바로 아래
-                and "|" in between  # `|` 없는 `---` 는 Setext 밑줄이다
-                and _DELIMITER.fullmatch(between) is not None
-                and _cells(between.strip()) == width
-                # 네 칸 들여 쓴 머리 · 구분선 · 본문은 들여쓴 코드 블록의 줄이다 — 표가 아니다
-                and _indent(lines[previous - 1]) < 4
-                and _indent(between) < 4
-                and _indent(lines[number - 1]) < 4
-            )
-            if number != previous + 1 and not delimiter:
-                width, seen = None, 0  # 표가 끊겼다 — 다음 줄이 새 표의 머리다
-            previous = number
-            seen += 1
-            if width is None:
-                width = _cells(row)
-                continue
-            if _cells(row) > width:
-                overflowing.append(
-                    f"{relative}:{number} — 머리는 {width} 칸인데 {_cells(row)} 칸이다"
-                )
+    overflowing = [
+        f"{path.relative_to(REPO_ROOT)}:{number} — 머리는 {width} 칸인데 {cells} 칸이다"
+        for path in REPO_ROOT.rglob("*.md")
+        if ".venv" not in path.parts and ".git" not in path.parts
+        for number, width, cells in _overflowing_rows(path.read_text())
+    ]
 
     assert overflowing == [], (
         "선언한 열보다 셀이 많다 — 넘치는 셀은 렌더에서 사라진다:\n" + "\n".join(overflowing)
