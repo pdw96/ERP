@@ -1,0 +1,57 @@
+name: CodeQL
+
+# **감사자가 아니라 게이트다**(ADR 0005). 입력이 흘러가는 길을 따라가 로그 주입 · 민감값
+# 기록 · 에러 응답의 내부 노출 같은 부류를 PR 마다 본다 — 감사 ⑲ 의 NC-173 · 174 가 사람의
+# 회차를 기다려 난 그 부류다. 워크플로(`actions`)도 함께 본다.
+#
+# **설정 화면(default setup)이 아니라 이 파일로 둔다.** 화면의 설정은 저장소에 보이지 않아
+# 리뷰도 감사(`audit-quality` 항목 1)도 닿지 않는다.
+#
+# **알림은 대장으로 옮기지 않는다** — 「목록을 두 벌 두지 않는다」. PR 안에서 고치거나,
+# 사유를 적어 기각한다. 이 게이트가 있다는 것과 못 보는 것은 ADR 0005 가 든다.
+#
+# **이 파일만으로는 머지를 막지 못한다**(NC-101). 룰셋의 「Require code scanning results」가
+# 걸어야 막는다 — 저장소 설정이라 이 파일 밖이다.
+#
+# **이 게이트가 못 보는 것**(W-6 ③): 정해진 질의에 없는 부류 — 권한 설계 · 업무 규칙 ·
+# 스키마 제약처럼 코드의 흐름이 아니라 뜻을 봐야 하는 것. 그 자리는 여전히 감사자다.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  # 코드가 그대로여도 질의가 늘어난다 — 주에 한 번 새 질의로 다시 본다.
+  schedule:
+    - cron: "17 3 * * 1"
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  analyze:
+    name: codeql (${{ matrix.language }})
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      # 결과를 저장소의 code scanning 에 올리는 권한. 이 잡에만 준다.
+      security-events: write
+    strategy:
+      fail-fast: false
+      matrix:
+        language: [python, actions]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: github/codeql-action/init@v4
+        with:
+          languages: ${{ matrix.language }}
+          # 파이썬과 워크플로는 빌드 없이 읽는다.
+          build-mode: none
+
+      - uses: github/codeql-action/analyze@v4
+        with:
+          category: "/language:${{ matrix.language }}"
