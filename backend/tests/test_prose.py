@@ -167,15 +167,20 @@ def test_a_mutation_bundle_says_which_commit_it_was_measured_on() -> None:
 
 
 def _table_rows(text: str) -> list[tuple[int, str]]:
-    """표의 줄만 돌려준다 — 구분선(`|---|`)과 코드 블록 안은 뺀다."""
+    """표의 줄만 돌려준다 — 구분선(`|---|`)과 코드 블록 안은 뺀다.
+
+    울타리는 백틱 셋과 물결 셋 둘 다다. 닫는 울타리는 여는 것과 같은 글자여야 한다 —
+    `~~~` 블록 안의 백틱 셋 줄로 블록이 닫히지 않는다.
+    """
     rows: list[tuple[int, str]] = []
-    fenced = False
+    fence = ""
     for number, line in enumerate(text.splitlines(), start=1):
-        if line.lstrip().startswith("```"):
-            fenced = not fenced
+        mark = line.lstrip()[:3]
+        if mark in ("```", "~~~") and fence in ("", mark):
+            fence = "" if fence else mark
             continue
         stripped = line.strip()
-        if fenced or not stripped.startswith("|") or set(stripped) <= set("|-: "):
+        if fence or not stripped.startswith("|") or set(stripped) <= set("|-: "):
             continue
         rows.append((number, stripped))
     return rows
@@ -192,11 +197,18 @@ def _cells(row: str) -> int:
 
 
 # 표의 구분선(GFM) — 칸마다 하이픈 하나 이상과 앞뒤 콜론. 하이픈 수의 하한은 없다(`| - |` 도
-# 구분선이다). 공백은 `|` 뒤에서만 먹고 되풀이는 `|` 로 시작해 한 가지로만 읽힌다 —
-# 공백 두 벌이 맞닿으면 긴 줄에서 역추적이 제곱으로 는다(공백 5000 칸에 0.3 초)
+# 구분선이다). `|` 가 없는 `---` 는 윗줄을 Setext 머리로 만드는 밑줄이라 표를 잇지 않는다(아래).
+# 공백은 `|` 뒤에서만 먹고 되풀이는 `|` 로 시작해 한 가지로만 읽힌다 — 공백 두 벌이
+# 맞닿으면 긴 줄에서 역추적이 제곱으로 는다(공백 5000 칸에 0.3 초)
 _DELIMITER = re.compile(
     r"[ \t]*(?:\|[ \t]*)?:?-+:?[ \t]*(?:\|[ \t]*:?-+:?[ \t]*)*(?:\|[ \t]*)?"
 )
+
+
+def _indent(line: str) -> int:
+    """줄 앞 공백의 칸 수 — 탭은 네 칸으로 편다."""
+    expanded = line.expandtabs(4)
+    return len(expanded) - len(expanded.lstrip(" "))
 
 
 def test_a_table_row_does_not_carry_a_cell_the_header_did_not_declare() -> None:
@@ -230,8 +242,12 @@ def test_a_table_row_does_not_carry_a_cell_the_header_did_not_declare() -> None:
             between = lines[number - 2] if number == previous + 2 else ""
             delimiter = (
                 seen == 1  # 머리 바로 아래
+                and "|" in between  # `|` 없는 `---` 는 Setext 밑줄이다
                 and _DELIMITER.fullmatch(between) is not None
                 and _cells(between.strip()) == width
+                # 네 칸 들여 쓴 머리 · 구분선은 들여쓴 코드 블록의 줄이다 — 표가 아니다
+                and _indent(lines[previous - 1]) < 4
+                and _indent(between) < 4
             )
             if number != previous + 1 and not delimiter:
                 width, seen = None, 0  # 표가 끊겼다 — 다음 줄이 새 표의 머리다
