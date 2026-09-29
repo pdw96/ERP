@@ -10,6 +10,12 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+# **토큰은 읽기만 한다.** 이 워크플로는 코드를 받아(`checkout`) 검사할 뿐 저장소에 아무것도
+# 쓰지 않는다. 적지 않으면 `GITHUB_TOKEN` 의 권한은 저장소 설정의 기본값을 따라 파일
+# 밖에서 넓어질 수 있다 — 감사 ⑳ 이 「담당 없음」으로 넘긴 자리다.
+permissions:
+  contents: read
+
 jobs:
   backend:
     runs-on: ubuntu-latest
