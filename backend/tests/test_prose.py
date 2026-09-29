@@ -18,6 +18,8 @@
 """
 
 import re
+from collections.abc import Iterator
+from itertools import pairwise
 from pathlib import Path
 
 BACKEND_ROOT = Path(__file__).resolve().parents[1]
@@ -228,15 +230,46 @@ def test_a_table_row_does_not_carry_a_cell_the_header_did_not_declare() -> None:
 _LEDGER = REPO_ROOT / "docs" / "audit" / "README.md"
 
 # 회차 기호. 대장이 ① ~ ⑳ 을 쓰고, 「⑦-b」처럼 꼬리가 붙는 회차가 있다.
-_ROUND = re.compile(r"[①-⑳]")
+_ROUND = re.compile(r"[①-⑳㉑-㉟㊱-㊿]")
+
+
+# **대장의 코드 블록은 줄 머리(0 칸)의 울타리로만 연다** — 대장이 지키는 모양이다(아래
+# `test_a_round_section_names_the_commit_it_audited` 가 다른 자리의 울타리를 막는다). 그래서
+# 들여쓰기 · 인용 · 목록 안의 울타리를 가르지 않는다. 닫는 울타리는 같은 글자로 여는 것
+# 이상 길고 뒤에 공백만 온다. 백틱 울타리의 꼬리에는 백틱이 없다(GFM)
+_LEDGER_FENCE = re.compile(r"(`{3,}|~{3,})(.*)")
+
+
+def _ledger_lines(text: str) -> Iterator[tuple[int, str, bool]]:
+    """대장의 줄을 (번호, 줄, 코드 블록의 줄인가) 로 — 울타리 줄도 코드 블록의 줄이다.
+
+    **닫히지 않은 블록은 실패다** — 문서 끝까지 코드로 삼켜 그 뒤의 절이 말없이 빠진다.
+    """
+    fence: tuple[str, int] | None = None
+    opened_at = 0
+    for number, line in enumerate(text.splitlines(), start=1):
+        if fence is not None:
+            char, length = fence
+            if re.fullmatch(rf"{re.escape(char)}{{{length},}}[ \t]*", line):
+                fence = None
+            yield number, line, True
+            continue
+        opened = _LEDGER_FENCE.fullmatch(line)
+        if opened and (opened.group(1)[0] == "~" or "`" not in opened.group(2)):
+            fence = (opened.group(1)[0], len(opened.group(1)))
+            opened_at = number
+            yield number, line, True
+            continue
+        yield number, line, False
+    assert fence is None, f"대장 {opened_at} 줄에서 연 코드 블록이 닫히지 않았다"
 
 
 def _rounds_with_a_section(text: str) -> set[str]:
-    """회차 절이 선 회차들 — `## 감사 ⑬(...)` 의 기호만 센다."""
+    """회차 절이 선 회차들 — `## 감사 ⑬(...)` 의 기호만 센다. 코드 블록 안은 절이 아니다."""
     return {
         found
-        for line in text.splitlines()
-        if line.startswith("## 감사 ")
+        for _, line, in_code in _ledger_lines(text)
+        if not in_code and line.startswith("## 감사 ")
         for found in _ROUND.findall(line)
     }
 
@@ -245,7 +278,7 @@ def _rounds_with_a_section(text: str) -> set[str]:
 # **「로 시작한다」로 고르면 안 된다**: 「아직 아무도 보지 않은 것」 표에도
 # `⑰ 이 고친 자리(…)` 처럼 회차 기호로 시작하는 행이 있어, 그것까지 세면
 # **회차별 W 표에서 줄을 지워도 게이트가 통과한다**(어긋내 확인했다).
-_ROUND_LABEL = re.compile(r"[①-⑳](?:-b)?(?:\s+[가-힣]{1,3})?\Z")
+_ROUND_LABEL = re.compile(r"[①-⑳㉑-㉟㊱-㊿](?:-b)?(?:\s+[가-힣]{1,3})?\Z")
 
 
 def _rounds_in_the_round_table(text: str) -> set[str]:
@@ -293,4 +326,160 @@ def test_a_round_that_closed_leaves_a_line_in_the_round_table() -> None:
     assert missing == [], (
         "회차 절은 있는데 회차별 W 표에 줄이 없다 — 회차를 닫는 사람이 적는다:\n"
         + "\n".join(f"  감사 {round_} 절은 있고 표에 줄이 없다" for round_ in missing)
+    )
+
+
+# **감사한 커밋을 적지 않은 회차 절들.** ① ~ ⑬ 은 절마다 `감사한 커밋` 줄을 두었는데
+# ⑭ 부터 여섯 절이 그 줄 없이 지나갔다 — 적는 사람이 잊었고 아무것도 묻지 않았다.
+# 회차 기록은 소급해 고치지 않으므로(대장이 그렇게 정했다) **절의 머리 그대로** 둔다 —
+# 회차 기호로 두면 같은 기호의 새 절(`⑭-b`)까지 풀려난다.
+# **예외가 늘면 이 목록이 diff 에 보인다.**
+_NO_COMMIT_LINE = {
+    "## 감사 ⑭(`audit-data`) — ⑩ 의 고침 셋 재감사 (2026-09-22)": "소급해 고치지 않는다",
+    "## 감사 ⑮(`audit-quality`) — ⑪ 의 고침 둘 재감사 (2026-09-22)": "소급해 고치지 않는다",
+    "## 감사 ⑯(`audit-contract`) — ⑫ 와 Codex 의 계약 고침 다섯 재감사 (2026-09-22)": (
+        "소급해 고치지 않는다"
+    ),
+    "## 감사 ⑰(`audit-ops`) — ⑬ 과 Codex 의 운영 고침 셋 재감사 (2026-09-22)": (
+        "소급해 고치지 않는다"
+    ),
+    "## 감사 ⑱(`audit-internal`) — ⑫ 의 고침 아홉 재감사 + ⑭~⑰ 의 새 산문 (2026-09-22)": (
+        "소급해 고치지 않는다"
+    ),
+    "## 감사 ⑲(`audit-secrets`) — ⑧ 이후 처음 (2026-09-22)": "소급해 고치지 않는다",
+}
+# 절이 **여는** 줄 — 몸의 첫 줄이 이것이어야 한다. 몸 어딘가에 있는 것으로는 모자란다:
+# 인용한 예(`> - **감사한 커밋**: …`)나 산문 뒤의 줄은 다음 회차가 기준을 고르는 자리가 아니다
+# 짧은 SHA 의 길이는 `core.abbrev` 가 정한다(4 까지 줄어든다). SHA-256 저장소면 64 까지 길다
+_COMMIT_LINE = re.compile(r"- \*\*감사한 커밋\*\*: `[0-9a-f]{4,64}`")
+# 감사를 **돌린** 절의 머리 — `감사 ⑧(audit-data) —` · `감사 ⑤-b —` 꼴. `감사 ⑧ 의 번호 대조`
+# 처럼 회차를 가리키기만 하는 절은 감사를 돌린 것이 아니다. 기호는 ⑳ 에서 끝나지 않는다 —
+# ㉑ ~ ㉟ · ㊱ ~ ㊿ 은 유니코드에서 다른 자리에 있어, 빠뜨리면 그 절을 **말없이** 건너뛴다
+_RUN_HEAD = re.compile(r"## 감사 [①-⑳㉑-㉟㊱-㊿](?:-b)?(?:\(| —)")
+# **대장이 지키는 모양.** 마크다운의 변형을 가르지 않고, 가르지 않은 모양이 **대장에 없게**
+# 한다 — 그 안의 머리가 절로 세이거나 빠지는 틈이 곧 이 게이트의 틈이다. 그래서 컨테이너를
+# 해석하지 않고 **글자로** 본다: 인용 · 목록 경계의 평범한 가로줄도 막힌다(가로줄 위에는
+# 빈 줄을 둔다). 대장은 지금 넷 다 쓰지 않는다(2026-09-29).
+# 코드 블록 밖의 울타리 글자 — 줄 머리가 아닌 울타리(들여쓰기 · 인용 · 목록 안)는 코드 블록을
+# 열어 그 몸이 머리로 읽히거나 빠진다
+_FENCE_CHARS = re.compile(r"`{3,}|~{3,}")
+# 감사 머리의 꼴 — 줄 머리의 `## 감사 ` 가 아니면 렌더되는데 셈에서 빠진다(들여쓰기 · 인용 ·
+# 목록 안 · 다른 수준)
+_ANY_ROUND_HEAD = re.compile(r"#[ \t]*감사[ \t]*[①-⑳㉑-㉟㊱-㊿]")
+# 꾸민 감사 머리(`## **감사 ㉑** —`) — 머리 줄에서 꾸밈 글자를 빼고 보이는 글이 「감사 + 회차
+# 기호」로 시작하면 감사 머리다. 줄 머리의 `## 감사 ` 가 아니면 절로 세이지 않는다
+_HEADING = re.compile(r"[ >\t]*(?:(?:[-*+]|\d{1,9}[.)])[ >\t]*)?#{1,6}(?:[ \t]|$)")
+_DECORATION = re.compile(r"[*_`~\[\]()<>\\]")
+_ROUND_TEXT = re.compile(r"[ \t]*감사[ \t]*[①-⑳㉑-㉟㊱-㊿]")
+# HTML — 주석 · 태그 속의 `## ` 는 렌더되지 않는다. 줄 머리 · 목록 · 문장 가운데 어디든
+# 태그(`<em>` · `</em>`) · 주석 · 처리 지시 · 선언을 찾는다. 인라인 코드(`` `<SHA>` ``)는
+# 글자라 먼저 지운다. 자동 링크(`<https://…>`)는 태그 이름 뒤에 `:` 가 와서 걸리지 않는다
+_HTML = re.compile(
+    r"<(?:[A-Za-z][A-Za-z0-9-]*(?=[\s/>]|$)|/[A-Za-z][A-Za-z0-9-]*[ \t]*>|!--|\?|!)"
+)
+# 인라인 코드 — 백틱 하나로 여닫는 것만 지운다. 이스케이프한 백틱(`\``)이나 겹 백틱이 있는 줄은
+# 코드 스팬을 가르지 않고 원문을 본다(넓게 막는다 — 인라인 코드 속 `<…>` 는 백틱 하나로 감싼다)
+_CODE_SPAN = re.compile(r"`[^`]*`")
+# Setext 머리의 밑줄 — 글자가 있는 줄 바로 아래의 `---` · `===` 는 그 줄을 머리로 만든다
+_UNDERLINE = re.compile(r"[ >\t]*(?:=+|-+)[ \t]*")
+
+
+def _round_sections(text: str) -> list[tuple[str, str]]:
+    """감사를 돌린 `## 감사 …` 절마다 (머리 줄, 몸의 첫 줄) — 빈 줄은 건너뛴다.
+
+    **코드 블록 안의 `## ` 는 머리가 아니다** — 대장이 양식을 보이려고 적은 예가 절로
+    세이면 예가 떨어지거나, 예외의 머리를 인용한 예가 낡은 예외를 붙잡아 둔다.
+    """
+    sections: list[tuple[str, str]] = []
+    head: str | None = None
+    for _, line, in_code in _ledger_lines(text):
+        if in_code:
+            if head is not None:  # 절이 코드 블록으로 열리면 그 울타리가 첫 줄이다
+                sections.append((head, line))
+                head = None
+            continue
+        if line.startswith("## "):
+            if head is not None:
+                sections.append((head, ""))
+            head = line if _RUN_HEAD.match(line) else None
+        elif head is not None and line.strip():
+            sections.append((head, line))
+            head = None
+    if head is not None:
+        sections.append((head, ""))
+    return sections
+
+
+def _off_contract(text: str) -> list[str]:
+    """대장이 지키는 모양을 벗어난 줄 — 코드 블록 안은 보지 않는다."""
+    lines = list(_ledger_lines(text))
+    found = []
+    for number, line, in_code in lines:
+        if in_code:
+            continue
+        if _FENCE_CHARS.search(line):
+            found.append(
+                f"  {number}: 코드 블록은 줄 머리의 울타리로만 연다 — 다른 자리에 쓰지 않는다"
+            )
+        heading = _HEADING.match(line)
+        formatted = heading and _ROUND_TEXT.match(_DECORATION.sub("", line[heading.end() :]))
+        if (_ANY_ROUND_HEAD.search(line) or formatted) and not line.startswith("## 감사 "):
+            found.append(f"  {number}: 감사 머리는 줄 머리의 `## 감사 ` 로 쓴다")
+        plain = line if "\\`" in line or "``" in line else _CODE_SPAN.sub("", line)
+        if _HTML.search(plain):
+            found.append(f"  {number}: HTML 을 두지 않는다")
+    found += [
+        f"  {number}: 글자 있는 줄 바로 아래에 `---` · `===` 를 두지 않는다 — 위를 비운다"
+        for (_, above, above_code), (number, line, in_code) in pairwise(lines)
+        if not (above_code or in_code) and above.strip(" >\t") and _UNDERLINE.fullmatch(line)
+    ]
+    return found
+
+
+def test_a_round_section_names_the_commit_it_audited() -> None:
+    """**회차 절은 감사한 커밋으로 연다** — 다음 회차의 기준이 그 SHA 다.
+
+    브리핑 보관본(`.claude/briefs/`)은 `.gitignore` 에 있어 저장소에 남지 않으므로
+    「그 회차가 어느 커밋을 봤는가」는 대장의 이 줄에만 남는다. ⑭ 부터 여섯 절이
+    적지 않았고, ⑲ 다음 회차의 기준을 판정 커밋의 부모로 **짐작해야** 했다
+    (2026-09-29, `/audit-brief` 실사용 시험). 적는 규칙은 ① 부터 있었다 — 지키는
+    것이 사람뿐이라 끊겼다.
+
+    **이 게이트가 못 보는 부류**(W-6 ③): 줄은 있는데 **SHA 가 틀린** 것 — 그 회차가
+    실제로 본 커밋인지는 브리핑과 견줘야 하고, 브리핑은 저장소에 없다. 그리고
+    `## 감사 ` 로 시작하되 위 머리 꼴을 벗어난 절 — 그런 절은 감사를 돌린 절로 세지 않는다.
+    브리핑에 커밋 안 된 변경이 들었는데 줄 끝의 `· 커밋 안 된 변경 포함` 이 빠진 것도
+    못 본다 — 그 역시 브리핑과 견줘야 안다(빠져도 다음 회차는 그 SHA 부터 다시 볼 뿐이다).
+
+    **마크다운을 해석하지 않는다.** 인용 · 목록 · Setext · HTML 을 가르는 해석기를 여기 세웠다가
+    리뷰마다 새 틈이 났다(ERP#17, 2026-09-29). 대신 가르지 않는 모양이 대장에 **없게** 한다 —
+    넓게 막아 평범한 문장이 걸릴 수 있고, 그러면 문장을 고친다.
+    """
+    ledger = _LEDGER.read_text()
+    off = _off_contract(ledger)
+    assert off == [], "대장이 이 게이트가 가르는 모양을 벗어났다:\n" + "\n".join(off)
+
+    sections = _round_sections(ledger)
+    assert sections, "회차 절을 찾지 못했다 — 이 게이트가 아무것도 세지 않는다"
+
+    missing = [
+        head
+        for head, first in sections
+        if not _COMMIT_LINE.match(first) and head not in _NO_COMMIT_LINE
+    ]
+    assert missing == [], (
+        "회차 절의 첫 줄이 「- **감사한 커밋**: `<SHA>`」가 아니다 — "
+        "브리핑의 「대상」 SHA 로 연다:\n" + "\n".join(f"  {head}" for head in missing)
+    )
+
+    # 예외는 **그 한 절**의 것이다 — 같은 머리가 두 번이면 새 절이 옛 예외에 묻어 간다
+    stale = sorted(
+        head
+        for head in _NO_COMMIT_LINE
+        if [h for h, _ in sections].count(head) != 1
+        or any(_COMMIT_LINE.match(first) for h, first in sections if h == head)
+    )
+    assert stale == [], (
+        "예외 목록의 절이 사라졌거나, 둘이 되었거나, 이제 감사한 커밋으로 연다:\n"
+        + "\n".join(f"  {head}" for head in stale)
     )
