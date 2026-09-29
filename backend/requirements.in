@@ -1,0 +1,36 @@
+# 런타임.
+#
+# **이 파일은 사람이 고치는 입력이다. 설치는 `requirements.txt` 에서 한다** — 하위
+# 의존성까지 버전과 해시가 박힌 잠금이다(감사 ⑳ 이 넘긴 「의존성 무결성」). 이름은
+# pip-tools 의 관례(`.in` → `.txt`)를 따른다 — Dependabot 이 이 관례로만 잠금을 알아보고
+# 매주 갱신 PR 을 연다(`.github/dependabot.yml`). 손으로 고쳤으면 잠금 둘을
+# **이 순서로** 다시 만든다(`backend/` 에서):
+#
+#     pip-compile --allow-unsafe --generate-hashes --strip-extras \
+#         --output-file=requirements.txt requirements.in
+#     pip-compile --allow-unsafe --generate-hashes --strip-extras \
+#         --output-file=requirements-dev.txt requirements-dev.in
+#
+# 파이썬 3.12 · pip-tools 7.6.1 · click 8.1.8 로 만들었다 — click 8.2 이상에서는 잠금
+# 머리의 명령에 `--no-index` 가 잘못 찍힌다. 잊으면 `tests/test_dependencies.py` 가
+# 떨어진다. **해시는 처음 고른 패키지가 진짜인지는 말하지 않는다** — 더하는 날 사람이
+# 이름과 출처를 본다.
+#
+# **FastAPI** — 첫 쓰기 엔드포인트가 여기서 선다. 요청 본문을 파이썬 타입으로
+# 검증하는 것을 이미 쓰는 pydantic 이 맡으므로 검증 규칙이 두 벌이 되지 않고,
+# 타입힌트에서 OpenAPI 가 나와 「문서와 코드가 다르다」가 구조적으로 줄어든다.
+#
+# **uvicorn** — FastAPI 는 ASGI 앱일 뿐이라 띄우는 것이 따로 있어야 한다.
+# 표준 ASGI 서버이고 compose 의 `api` 서비스가 이것으로 뜬다. 빈 의존성을 두지
+# 않는다는 규칙대로, 부르는 쪽이 생기는 이 조각에서 함께 온다.
+# **starlette 를 함께 고정한다.** FastAPI 는 그것을 `>=` 로만 묶으므로 고정하지
+# 않으면 설치하는 날마다 다른 버전이 온다 — 실제로 CI 가 1.6.0 을 골라 테스트
+# 클라이언트가 다른 패키지를 요구했고, 그 버전이 이미 깔려 있던 로컬만 통과했다.
+# **환경에 따라 다르게 도는 검사**는 검사가 아니다.
+FastAPI==0.141.1
+starlette==1.6.0
+uvicorn==0.40.0
+SQLAlchemy==2.0.36
+alembic==1.14.0
+psycopg[binary]==3.2.3
+pydantic-settings==2.6.1

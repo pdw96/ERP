@@ -1,14 +1,14 @@
 """의존성은 **잠금 파일**에서 해시까지 맞춰 설치한다 — 감사 ⑳ 이 넘긴 「의존성 무결성」.
 
-`requirements.txt` · `requirements-dev.txt` 는 **사람이 고치는 입력**이다. 무엇을
-왜 쓰는지 적는 자리이고, 하위 의존성까지 고정하지는 않는다. 설치는
-`requirements.lock` · `requirements-dev.lock` 에서 `--require-hashes` 로 한다 —
+`requirements.in` · `requirements-dev.in` 은 **사람이 고치는 입력**이다. 무엇을
+왜 쓰는지 적는 자리이고, 하위 의존성까지 고정하지는 않는다. 설치는 잠금
+`requirements.txt` · `requirements-dev.txt` 에서 `--require-hashes` 로 한다 —
 하위 의존성까지 버전과 해시가 박혀 있어 **같은 이름 · 같은 버전으로 다른 파일이
 오면 설치가 멈춘다.**
 
 입력과 잠금은 **두 벌**이다. 합칠 수 없으므로(입력에 해시를 적으면 사람이 고칠
 수 없다) 견주는 검사가 그 자리를 대신한다 — 「목록을 두 벌 두지 않는다. 두 벌이면
-반드시 갈린다」.
+반드시 갈린다」. 잠금을 매주 갱신하는 Dependabot 의 PR 도 이 검사를 탄다.
 
 **이 파일이 못 보는 부류**(W-6 ③):
 
@@ -28,16 +28,19 @@ from pathlib import Path
 BACKEND_ROOT = Path(__file__).resolve().parents[1]
 REPO_ROOT = BACKEND_ROOT.parent
 
-# 입력 → 잠금. 개발 입력은 `-r requirements.txt` 로 런타임 입력을 품는다.
+# 입력 → 잠금. 개발 입력은 `-r requirements.in` 으로 런타임 입력을 품고,
+# `-c requirements.txt` 로 런타임 잠금을 제약으로 받는다.
 _PAIRS = (
-    ("requirements.txt", "requirements.lock"),
-    ("requirements-dev.txt", "requirements-dev.lock"),
+    ("requirements.in", "requirements.txt"),
+    ("requirements-dev.in", "requirements-dev.txt"),
 )
 
 # 입력 한 줄의 모양. **이 두 모양 밖이면 떨어진다** — 마커나 URL 을 조용히
 # 건너뛰면 그 줄이 견주기 밖에 선다.
 _INPUT_PIN = re.compile(r"([A-Za-z0-9][A-Za-z0-9._-]*)(?:\[[A-Za-z0-9,._-]+\])?==(\S+)")
 _INPUT_INCLUDE = re.compile(r"-r\s+(\S+)")
+# 제약은 입력이 아니라 잠금을 가리킨다 — 고정을 더하지 않는다.
+_INPUT_CONSTRAINT = re.compile(r"-c\s+\S+")
 
 # 잠금 한 항목의 머리 — `name==version \`.
 _LOCK_PIN = re.compile(r"^([A-Za-z0-9][A-Za-z0-9._-]*)==(\S+) \\$")
@@ -57,6 +60,8 @@ def _input_pins(name: str) -> dict[str, str]:
             continue
         if include := _INPUT_INCLUDE.fullmatch(line):
             pins |= _input_pins(include.group(1))
+            continue
+        if _INPUT_CONSTRAINT.fullmatch(line):
             continue
         pin = _INPUT_PIN.fullmatch(line)
         assert pin, f"{name}: 이 검사가 읽지 못하는 줄이다 — {line!r}"
@@ -104,11 +109,11 @@ def test_the_runtime_lock_and_the_dev_lock_agree() -> None:
     """**검사가 도는 환경과 이미지가 도는 환경이 같은 버전이다.**
 
     둘을 따로 풀면 하위 의존성이 날마다 달리 올 수 있다 — 「환경에 따라 다르게
-    도는 검사는 검사가 아니다」(`requirements.txt` 의 starlette 사고). 개발 잠금은
-    런타임 잠금을 제약(`-c`)으로 받아 풀므로 겹치는 것은 같아야 한다.
+    도는 검사는 검사가 아니다」(`requirements.in` 의 starlette 사고). 개발 입력이
+    런타임 잠금을 제약(`-c`)으로 받아 풀리므로 겹치는 것은 같아야 한다.
     """
-    runtime, _ = _lock("requirements.lock")
-    dev, _ = _lock("requirements-dev.lock")
+    runtime, _ = _lock("requirements.txt")
+    dev, _ = _lock("requirements-dev.txt")
 
     differs = {
         name: (version, dev.get(name))
@@ -127,5 +132,5 @@ def test_the_image_and_ci_install_from_the_lock_with_hashes() -> None:
     dockerfile = (BACKEND_ROOT / "Dockerfile").read_text()
     ci = (REPO_ROOT / ".github" / "workflows" / "ci.yml").read_text()
 
-    assert re.search(r"pip install .*--require-hashes -r requirements\.lock\b", dockerfile)
-    assert re.search(r"pip install .*--require-hashes -r requirements-dev\.lock\b", ci)
+    assert re.search(r"pip install .*--require-hashes -r requirements\.txt\b", dockerfile)
+    assert re.search(r"pip install .*--require-hashes -r requirements-dev\.txt\b", ci)

@@ -1,0 +1,21 @@
+# **잠금을 사람이 기억해서 갱신하지 않는다.** 하위 의존성까지 해시로 고정하면(감사 ⑳ 이 넘긴
+# 「의존성 무결성」) 보안 패치가 설치하는 날 저절로 들어오지 않는다. 그 빈자리를 이 파일이
+# 메운다 — 매주 `backend/requirements*.in` 을 보고 잠금(`.txt`)을 다시 만든 PR 을 연다.
+# 갱신 PR 도 같은 CI 를 탄다. 입력과 잠금 · 두 잠금이 갈리면 `tests/test_dependencies.py` 가
+# 떨어진다.
+#
+# **이 파일이 못 보는 것**(W-6 ③): 알려진 취약점이 나온 날 바로 여는 PR(security updates)은
+# 저장소 설정이다 — 이 파일은 주기만 정한다. 그리고 갱신 PR 이 **새로 끌어오는 패키지**가
+# 진짜인지는 해시도 CI 도 말하지 않는다 — 머지하는 사람이 본다.
+version: 2
+updates:
+  - package-ecosystem: pip
+    directory: /backend
+    schedule:
+      interval: weekly
+    # 부 · 수 버전은 한 PR 로 묶는다 — 패키지마다 PR 이 쌓이면 읽지 않고 머지하게 된다.
+    # 주 버전은 따로 온다. 깨지는 변경이 그 자리에서 나오기 때문이다.
+    groups:
+      python:
+        update-types: [minor, patch]
+    open-pull-requests-limit: 5

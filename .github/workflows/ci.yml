@@ -47,14 +47,14 @@ jobs:
         with:
           python-version: "3.12"
           cache: pip
-          cache-dependency-path: backend/requirements-dev.lock
+          cache-dependency-path: backend/requirements-dev.txt
 
       # **잠금에서 해시까지 맞춰 깐다**(감사 ⑳ 이 넘긴 「의존성 무결성」). 입력
-      # (`requirements-dev.txt`)으로 깔면 하위 의존성이 설치하는 날마다 달리 오고,
+      # (`requirements-dev.in`)으로 깔면 하위 의존성이 설치하는 날마다 달리 오고,
       # 같은 이름 · 같은 버전으로 다른 파일이 와도 막지 못한다. 입력과 잠금을
       # 견주는 것은 `tests/test_dependencies.py` 다.
       - name: 의존성
-        run: pip install --require-hashes -r requirements-dev.lock
+        run: pip install --require-hashes -r requirements-dev.txt
 
       - name: 린트
         run: ruff check .
@@ -95,8 +95,8 @@ jobs:
         run: git ls-files -z ':(top)*.sh' | xargs -0 --no-run-if-empty shellcheck
 
       # 이미지를 **빌드해 본다.** 이것이 없으면 `Dockerfile` 이나
-      # `requirements.lock` 이 깨져도 CI 는 전부 초록이다 — CI 는 이미지를 쓰지
-      # 않고 `requirements-dev.lock` 으로 따로 깔기 때문이다.
+      # `requirements.txt` 가 깨져도 CI 는 전부 초록이다 — CI 는 이미지를 쓰지
+      # 않고 `requirements-dev.txt` 로 따로 깔기 때문이다.
       #
       # **이 스텝이 못 보는 것**(W-6 ③, 감사 ⑮ NC-154): 빌드가 초록인 것과
       # 이미지가 **뜨는** 것은 다르다. `COPY . .` 는 `.dockerignore` 가 필요한
