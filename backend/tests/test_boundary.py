@@ -156,6 +156,54 @@ def test_the_entrypoint_stops_at_the_first_failure() -> None:
     )
 
 
+# 엔트리포인트 머리의 「막는 것」 목록 한 줄 — `#   <리비전>  <무엇이 막는가>` 꼴
+_ENTRYPOINT_REVISION = re.compile(r"^#\s+([0-9a-f]{12})\s{2,}\S")
+_REVISION = re.compile(r'^revision: str = "([0-9a-f]{12})"$', re.MULTILINE)
+_DOWN_REVISION = re.compile(
+    r'^down_revision: str \| None = (?:"([0-9a-f]{12})"|None)$', re.MULTILINE
+)
+
+
+def _chain_from_head() -> list[str]:
+    """`migrations/versions/` 의 사슬을 head 에서 맨 아래까지 — 갈래가 없다는 전제다."""
+    down: dict[str, str | None] = {}
+    for path in (BACKEND_ROOT / "migrations" / "versions").glob("*.py"):
+        text = path.read_text()
+        revision, below = _REVISION.search(text), _DOWN_REVISION.search(text)
+        assert revision and below, f"{path.name} 에서 리비전 줄을 읽지 못했다"
+        down[revision.group(1)] = below.group(1)
+
+    heads = set(down) - {below for below in down.values() if below}
+    assert len(heads) == 1, f"head 가 하나가 아니다: {sorted(heads)}"
+    chain = [heads.pop()]
+    while (below := down[chain[-1]]) is not None:
+        chain.append(below)
+    assert len(chain) == len(down), "사슬에 닿지 않는 리비전이 있다"
+    return chain
+
+
+def test_the_entrypoint_lists_the_whole_chain() -> None:
+    """**엔트리포인트의 「막는 것」 목록은 마이그레이션 사슬 전부다** (감사 ㉓ OB-1 · ㉖).
+
+    그 목록은 `versions/` 사슬의 산문 사본이다. 처음에는 여섯에서 끊겨 맨 아래가
+    「멈추지 않는다」는 것이 빠졌고(감사 ⑱ NC-168), 저장소 소유자가 「사슬 끝까지
+    적는다」를 규칙으로 정했는데(⑱ 답 4) 그 규칙이 대장에만 있었다. 새 리비전이
+    목록을 늘리지 않으면 같은 모양이 다시 선다 — 그래서 번호를 견준다(소유자가 정했다,
+    2026-09-30). **순서까지** 본다 — 목록은 head 에서 내려가는 순서로 읽힌다.
+
+    **이 검사가 못 보는 부류**(W-6 ③): 각 줄의 **설명**이 그 리비전의 `downgrade()`
+    가 실제로 막는 것과 맞는가 — 뜻이라 사람이 본다. 그리고 사슬에 갈래(merge
+    리비전)가 서는 날 — 그때는 이 검사가 먼저 빨개진다.
+    """
+    lines = (BACKEND_ROOT / "docker-entrypoint.sh").read_text().splitlines()
+    listed = [found.group(1) for line in lines if (found := _ENTRYPOINT_REVISION.match(line))]
+
+    assert listed == _chain_from_head(), (
+        "엔트리포인트의 「막는 것」 목록이 마이그레이션 사슬(head → 맨 아래)과 다르다 — "
+        f"목록: {listed}"
+    )
+
+
 def _test_database_url() -> str:
     """검사용 DB 주소. `conftest.py` 가 세우는 환경변수를 그대로 읽는다."""
     import os

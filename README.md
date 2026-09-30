@@ -61,7 +61,7 @@ python3 -m venv .venv && .venv/bin/pip install --require-hashes -r requirements-
 python3 -m venv /tmp/lock-tools && /tmp/lock-tools/bin/pip install --require-hashes -r requirements-tools.txt
 LOCK_PIP_COMPILE=/tmp/lock-tools/bin/pip-compile scripts/lock.sh
 
-# 로컬에서 도는 검사 — 무엇이 도는지는 `.github/workflows/ci.yml` 이 든다
+# 로컬에서 도는 검사 — 무엇이 돌고 무엇이 머지를 막는지는 `CLAUDE.md` 「로컬에서 도는 검사」가 든다
 .venv/bin/ruff check .
 .venv/bin/ruff format --check .
 .venv/bin/mypy app migrations
