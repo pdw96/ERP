@@ -175,6 +175,9 @@ def _mutation_bundles() -> str:
 # 세면 산문 속의 우연한 16진 토막이 통과시킨다.
 _COMMIT = re.compile(r"`[0-9a-f]{7,40}`")
 
+# 칸 구분자 — 이스케이프한 `\\|` 는 칸 안의 글자다(NC-157)
+_UNESCAPED_BAR = re.compile(r"(?<!\\)\|")
+
 
 # 제목 줄 — 수준을 가리지 않는다(감사 ㉕ NC-186). 대장의 W 표 절을 자르는 데 쓴다
 _ANY_HEADING = re.compile(r"#{1,6} ")
@@ -640,7 +643,11 @@ def _section(text: str, head: str) -> str:
 
 
 def _row_cells(row: str) -> list[str]:
-    return [cell.strip() for cell in row.strip().removeprefix("|").removesuffix("|").split("|")]
+    """칸 — **이스케이프하지 않은** 구분자로만 가른다(NC-157 과 같다). 셀 안의 `\\|` 를 구분자로
+    읽으면 뒤 칸이 밀려 상태 칸이 다른 칸이 된다(PR #38 Codex 리뷰)."""
+    inner = row.strip().removeprefix("|")
+    inner = inner[:-1] if inner.endswith("|") and not inner.endswith("\\|") else inner
+    return [cell.strip() for cell in _UNESCAPED_BAR.split(inner)]
 
 
 def _closed_ncs(text: str) -> set[int]:
@@ -793,8 +800,6 @@ def test_every_nc_status_opens_with_a_word_the_ledger_defined() -> None:
 # 목록은 이름이다 — 게이트 파일이 새로 서면 여기 더한다(아래 「못 보는 부류」).
 _GATE_FILES = ("tests/test_prose.py", "tests/test_boundary.py", "tests/test_dependencies.py")
 _TEST_NAME = re.compile(r"test_[a-z0-9_]+")
-# 칸 구분자 — 이스케이프한 `\\|` 는 칸 안의 글자다(NC-157)
-_UNESCAPED_BAR = re.compile(r"(?<!\\)\|")
 
 
 # 기록 표의 머리 — 이 모양의 표만 「빨개진 검사」 칸을 든다
@@ -874,20 +879,41 @@ def test_every_gate_has_a_record_of_turning_red() -> None:
     )
 
 
+# 셋째 칸이 빨강도 초록도 아닌 **옛 줄** — 「통과한 줄은 `**없다` 로 연다」 앞의 기록이라 고치지
+# 않는다(규칙은 소급하지 않는다 — 대장 「닫는 규칙」). 여기 없는 줄이 그 모양이면 빨갛다
+_LEGACY_RESULT = {
+    ("72392cf", "79"): "「통과했다」로 연 초록 — 규칙 앞",
+    ("b2bb637", "154"): "검사가 아니라 명령의 범위를 잰 줄",
+    ("fcb7570", "123"): "검사 이름 대신 제약이 문다고 적은 줄",
+}
+
+
 def _green_and_later_red() -> tuple[list[tuple[str, str, int]], dict[str, int]]:
     """기록 표의 초록 줄 (커밋, NC, 순번) 과, NC 마다 **마지막** 빨강 줄의 순번.
 
     초록 줄은 셋째 칸을 굵은 `**없다` 로 연 줄이다(이 파일의 규칙). 초록과 빨강을 **같은 기록 표
     집합**에서 읽는다 — 줄 머리 파이프로 손으로 가르면 인용 안 · 앞 파이프 없는 기록 표의 초록
     줄이 빠지고, 설명 표의 수 칸이 빨강으로 읽혔다(PR #38 Codex 리뷰).
+
+    빨강은 셋째 칸에 검사 이름이 들거나 「같은 검사」로 여는 줄이다. **둘 다 아니고 초록도 아닌
+    줄은 실패다** — 그대로 빨강으로 치면 형식을 어긴 초록 줄이 앞 초록 줄을 거짓으로 닫았다
+    (PR #38 Codex 리뷰). 옛 줄은 `_LEGACY_RESULT` 에 이름으로 든다.
     """
     green: list[tuple[str, str, int]] = []
     last_red: dict[str, int] = {}
+    strange: list[str] = []
     for order, (commit, cells, html) in enumerate(_mutation_record_rows()):
         if html[2].startswith("<strong>없다"):
             green.append((commit, cells[0], order))
-        elif cells[0].isdigit():
-            last_red[cells[0]] = order
+        elif _TEST_NAME.search(cells[2]) or cells[2].startswith("같은 검사"):
+            if cells[0].isdigit():
+                last_red[cells[0]] = order
+        elif (commit, cells[0]) not in _LEGACY_RESULT:
+            strange.append(f"  묶음 `{commit}` · NC {cells[0]} — {cells[2][:40]}")
+    assert strange == [], (
+        "기록 표의 셋째 칸이 빨강(검사 이름 · 「같은 검사」)도 초록(`**없다`)도 아니다 — "
+        "어느 쪽인지 가를 수 없다:\n" + "\n".join(strange)
+    )
     return green, last_red
 
 
@@ -903,9 +929,10 @@ def test_a_mutation_that_stayed_green_is_closed_later_or_listed() -> None:
     그 묶음의 커밋과 NC 로 든다(닫는 조건과 지금이 함께 적힌다). 절의 줄은 닫혀도 지우지 않고
     「지금」 칸을 고친다 — 그 사각이 언제 어떻게 닫혔는지가 남는다.
 
-    **이 게이트가 못 보는 부류**(W-6 ③): 셋째 칸을 `**없다` 로 열지 않은 옛 줄(⑧ 의 79 따위 —
-    그 규칙 전의 기록이라 고치지 않는다), 뒤의 빨강 줄이 **다른 어긋냄**을 문 것(NC 만 견준다),
-    NC 가 `—` 인 초록 줄이 한 묶음에 둘 이상일 때 어느 것인지, 그리고 절의 「지금」 칸이 참인지.
+    **이 게이트가 못 보는 부류**(W-6 ③): 셋째 칸을 `**없다` 로 열지 않은 옛 줄
+    (`_LEGACY_RESULT` — 그 규칙 전의 기록이라 고치지 않는다), 뒤의 빨강 줄이 **다른 어긋냄**을
+    문 것(NC 만 견준다), NC 가 `—` 인 초록 줄이 한 묶음에 둘 이상일 때 어느 것인지, 그리고 절의
+    「지금」 칸이 참인지.
     """
     green, last_red = _green_and_later_red()
     assert green, "초록 줄을 찾지 못했다 — 이 게이트가 아무것도 세지 않는다"

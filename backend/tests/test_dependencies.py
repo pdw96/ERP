@@ -55,15 +55,40 @@ _CI_STEPS = {
 }
 
 
-def _ci_steps(ci: str) -> dict[str, str]:
-    """`ci.yml` 의 스텝 — 이름 → 그 스텝의 **주석이 아닌** 줄(뒤 스텝의 머리 주석은 빠진다)."""
-    steps: dict[str, str] = {}
-    blocks = re.split(r"^      - ", ci.split("\n    steps:\n", 1)[1], flags=re.MULTILINE)
-    for block in blocks:
+def _backend_job(ci: str) -> str:
+    """`ci.yml` 의 `jobs.backend` 몸 — 룰셋이 거는 잡이다. 다른 잡의 스텝이 그 자리를 채우지
+    못하게 그 잡만 자른다(PR #38 Codex 리뷰)."""
+    jobs = ci.split("\njobs:\n", 1)[1]
+    found = re.search(r"^  backend:\n(.*?)(?=^  \S|\Z)", jobs, re.M | re.S)
+    assert found, "ci.yml 에 backend 잡이 없다"
+    return found.group(1)
+
+
+def _ci_steps(job: str) -> dict[str, tuple[str, str]]:
+    """잡의 스텝 — 이름 → (스텝의 **주석이 아닌** 줄, 그 스텝의 `run` 값).
+
+    명령은 `run` 값에서만 찾는다 — 스텝 블록 전체에서 찾으면 `env:` 에 옛 명령 글자를 두고
+    `run: echo skipped` 로 바꿔도 통과했다(PR #38 Codex 리뷰). `run` 은 한 줄(`run: …`)이거나
+    블록(`run: |` 아래 더 들여쓴 줄들)이다.
+    """
+    steps: dict[str, tuple[str, str]] = {}
+    for block in re.split(r"^      - ", job.split("\n    steps:\n", 1)[1], flags=re.MULTILINE):
         named = re.match(r"name: (.+)", block)
-        if named:
-            code = [line for line in block.splitlines() if not line.lstrip().startswith("#")]
-            steps[named.group(1).strip()] = "\n".join(code)
+        if not named:
+            continue
+        code = [line for line in block.splitlines() if not line.lstrip().startswith("#")]
+        run = ""
+        for index, line in enumerate(code):
+            if (single := re.fullmatch(r"        run: (?![|>])(.+)", line)) is not None:
+                run = single.group(1)
+            elif re.fullmatch(r"        run: [|>]-?", line):
+                body = []
+                for inner in code[index + 1 :]:
+                    if inner.strip() and not inner.startswith("          "):
+                        break
+                    body.append(inner)
+                run = "\n".join(body)
+        steps[named.group(1).strip()] = ("\n".join(code), run)
     return steps
 
 
@@ -82,19 +107,20 @@ def test_every_check_step_is_still_there_and_can_still_fail() -> None:
     """
     workflows = REPO_ROOT / ".github" / "workflows"
     ci = (workflows / "ci.yml").read_text()
-    steps = _ci_steps(ci)
-    assert steps, "ci.yml 에서 스텝을 찾지 못했다 — 이 검사가 아무것도 세지 않는다"
+    job = _backend_job(ci)
+    steps = _ci_steps(job)
+    assert steps, "backend 잡에서 스텝을 찾지 못했다 — 이 검사가 아무것도 세지 않는다"
 
     missing = [
         name
         for name, command in _CI_STEPS.items()
-        if name not in steps or not re.search(command, steps[name])
+        if name not in steps or not re.search(command, steps[name][1])
     ]
-    assert missing == [], f"ci.yml 에서 검사 스텝이나 그 명령이 사라졌다: {missing}"
+    assert missing == [], f"backend 잡에서 검사 스텝이나 그 run 명령이 사라졌다: {missing}"
 
     swallowing = [
         f"{name}: {found.group(0).strip()}"
-        for name, code in steps.items()
+        for name, (code, _) in steps.items()
         if (found := re.search(r"^\s+(?:continue-on-error|if):.*$|\|\|\s*true\b", code, re.M))
     ]
     # **잡 자체를 끄는 것도 삼킨다**(PR #38 Codex 리뷰). 룰셋이 거는 것은 `backend` 잡이고, 잡의
