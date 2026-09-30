@@ -1010,24 +1010,28 @@ _BEFORE_AND_AFTER = {
 # 빨강 줄의 셋째 칸에 **고치기 전의 결과**가 함께 든 표시 — 「전 · 후는 두 줄로」
 # (`mutations.md` 규칙 줄)를 어긴 모양이다. 검사 이름으로 열기만 하면 빨강으로 세던 때는
 # 「`test_…` — 통과했다」인 순수한 초록 줄이 앞 초록을 닫고 기록 게이트의 기록을 채웠다
-# (감사 ㉙ NC-214, 어긋내 확인했다)
-_A_PASS_INSIDE_RED = re.compile(r"통과했다|초록이었다|고치기 전|전에는|전까지")
+# (감사 ㉙ NC-214, 어긋내 확인했다). 이 파일에 이미 쓰인 전(前) 표현을 모두 든다 —
+# 「처음에는」 · 「첫 판」은 `_BEFORE_AND_AFTER` 의 옛 줄이 쓴 말인데 처음에 빠졌다
+# (PR #41 Codex 리뷰)
+_A_PASS_INSIDE_RED = re.compile(r"통과했다|초록이었다|고치기 전|전에는|전까지|처음에는|첫 판")
 
 # 한 칸에 고치기 전 · 뒤를 함께 적은 옛 줄 가운데 **검사 이름으로 연** 것 — 뒤의 빨강을
 # 기록하므로 빨강으로 센다. 옛 줄을 어떻게 두는지는 `mutations.md` 규칙 줄 한 자리가
-# 든다(감사 ㉙ NC-218)
+# 든다(감사 ㉙ NC-218). 규칙 앞의 줄이고, `e0159e2` 의 203 만 규칙 바로 뒤에 섰다(감사 ㉙
+# NC-219 — 고치기 전 결과는 돌린 것이 아니다, 「감사 ㉙ 의 고침」 묶음이 바로잡는다).
+# **셋째 칸이 여는 글자까지 든다** — (커밋, NC) 만으로는 같은 묶음 · 같은 NC 의 다른 줄까지
+# 봐주었다(PR #41 Codex 리뷰 — `_BEFORE_AND_AFTER` 와 같은 까닭)
 _RED_WITH_A_PASS = {
-    ("fc940e8", "87"): "규칙 앞",
-    ("fc940e8", "90"): "규칙 앞",
-    ("5f9922c", "132"): "규칙 앞",
-    ("4abd1b6", "186"): "규칙 앞",
-    ("4abd1b6", "188"): "규칙 앞",
-    ("4abd1b6", "190"): "규칙 앞",
-    ("0a92e57", "195"): "규칙 앞",
-    ("0a92e57", "198"): "규칙 앞",
-    ("bbfb6e8", "—"): "규칙 앞",
-    ("e0159e2", "203"): "규칙 바로 뒤에 선 줄 — 감사 ㉙ NC-219. 고치기 전 결과는 돌린 것이"
-    " 아니다(「감사 ㉙ 의 고침」 묶음이 바로잡는다)",
+    ("fc940e8", "87"): "test_a_pass_is_actually_committed — 그 전에는",
+    ("fc940e8", "90"): "test_the_same_request_twice_makes_two_lots · test_a_split_delivery_of",
+    ("5f9922c", "132"): "같은 검사 — 앵커가 물었다. 그 전까지",
+    ("4abd1b6", "186"): "test_a_mutation_bundle_says_which_commit_it_was_measured_on — 고치기",
+    ("4abd1b6", "188"): "test_a_round_that_closed_leaves_a_line_in_the_round_table — 고치기 전",
+    ("4abd1b6", "190"): "test_the_entrypoint_stops_at_the_first_failure — 고치기 전",
+    ("0a92e57", "195"): "test_a_mutation_bundle_says_which_commit_it_was_measured_on — 고치기",
+    ("0a92e57", "198"): "test_every_gate_has_a_record_of_turning_red — 고치기 전",
+    ("bbfb6e8", "—"): "test_every_check_step_is_still_there_and_can_still_fail — ㉕ M6-d",
+    ("e0159e2", "203"): "test_every_gate_has_a_record_of_turning_red — 초록 줄의 이름은",
 }
 
 
@@ -1058,7 +1062,7 @@ def _green_and_later_red() -> tuple[list[tuple[str, str, int]], dict[str, int]]:
         elif (
             _RED_OPENING.match(html[2])
             and _A_PASS_INSIDE_RED.search(cells[2])
-            and (commit, cells[0]) not in _RED_WITH_A_PASS
+            and not cells[2].startswith(_RED_WITH_A_PASS.get((commit, cells[0]), "\0"))
         ):
             strange.append(f"  묶음 `{commit}` · NC {cells[0]} — 고치기 전 결과가 함께 들었다")
         elif _RED_OPENING.match(html[2]) or cells[2].startswith(
