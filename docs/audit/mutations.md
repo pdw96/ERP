@@ -68,6 +68,9 @@
 | `8154399` | 204 | `_AWAITING` 에서 「열림」을 빼도 통과한다 — 고친 뒤에도 같다 | `audit-quality` | 초록 — 게이트는 고치지 않았다. `30ef34f` 196 줄과 같은 자리다 |
 | `8154399` | 206 | 표 번호가 든 줄에 문서 이름을 같은 줄에 적은 것 | `audit-quality` | 초록이 맞다 — 대조군 |
 | `8154399` | 210 | `echo \` 다음 줄의 명령 — 고친 뒤에도 같다 | `audit-internal` | 초록 — 의도한 경계(㉘ NC-210). `a35dd14` 210 줄과 같은 자리다 |
+| `143a527` | — | 옛 전 · 후 줄과 같은 (커밋, NC) 의 다른 줄에서 검사 이름을 빼도 초록 검사가 통과한다 | `audit-quality` | **닫혔다** — 예외가 셋째 칸의 여는 글자까지 든다(「PR #39 Codex 리뷰 1 라운드의 고침」 묶음) |
+| `143a527` | — | 진짜 `린트` 앞에 `echo` 만 하는 같은 이름의 `린트` 스텝을 두어도 스텝 검사가 통과한다 | `audit-quality` | **닫혔다** — `run` 스텝의 이름이 겹치면 빨갛다(같은 묶음) |
+| `5d579d9` | — | 「대표 1명을 지정한다」 줄 | `audit-quality` | 초록이 맞다 — 다른 낱말의 끝인 「표」는 표 번호가 아니다(대조군) |
 
 ## ⑧ 의 고침 (`03b6c1f`)
 
@@ -676,3 +679,27 @@ CI 스텝 게이트에 쏠림 신호가 두 번째로 섰고(4 · 5 라운드), 
 | NC | 무엇을 어긋냈나 | 빨개진 검사 |
 |---|---|---|
 | 203 | ㉕ 가 돌린 묶음의 `test_claude_md_stays_short` 를 `…_x` 로 바꾸고, 그 이름을 든 **굵은** 초록 줄의 묶음을 더했다 | `test_every_gate_has_a_record_of_turning_red` — 초록 줄의 이름은 기록이 아니다(고치기 전에는 세었다 — ㉘(`audit-quality`) OB-2) |
+
+## PR #39 Codex 리뷰 1 라운드 — 고치기 전 (`143a527`)
+
+Codex 의 지적 셋을 저장소의 실제 파일에 넣어 재현했다(`docs/리뷰-루프.md`). 같은 입력을 `main`(`a35dd14`)에도 넣어
+견줬다 — 첫째 · 셋째는 `main` 이 맞고 이 PR 이 틀린 **회귀**(5 · 5), 둘째는 `main` 도 똑같이 놓치는 **기존 한계 · 조용한
+통과**(2)다. 라운드 점수 12. `test_prose.py` · `test_dependencies.py` 만 돌렸다.
+
+| NC | 무엇을 어긋냈나 | 빨개진 검사 |
+|---|---|---|
+| — | `b701a19` 묶음 142 의 「같은 검사」 줄 하나를 「지웠다」로 바꿨다 — 같은 (커밋, NC) 의 옛 전 · 후 줄 곁 | **없다 — 통과했다** (`test_a_mutation_that_stayed_green_is_closed_later_or_listed`) — `main` 에서는 빨강 |
+| — | `backend` 잡의 `린트` 앞에 `run: echo skipped` 인 `린트` 스텝을 하나 더 뒀다 | **없다 — 통과했다** (`test_every_check_step_is_still_there_and_can_still_fail`) — `main` 도 초록 |
+| — | `docs/지나온-길.md` 에 「대표 1명을 지정한다.」 줄을 더했다 | `test_a_third_document_names_the_schema_document_with_a_table_number` — **거짓 양성**이다. `main` 에는 이 게이트가 없다 |
+
+## PR #39 Codex 리뷰 1 라운드의 고침 (`5d579d9`)
+
+같은 셋과 대조군 둘. 셋은 `test_prose.py` · `test_dependencies.py` 만, 대조군은 `pytest` 전체(실제 PostgreSQL 16)를 돌렸다.
+
+| NC | 무엇을 어긋냈나 | 빨개진 검사 |
+|---|---|---|
+| — | `b701a19` 묶음 142 의 「같은 검사」 줄 하나를 「지웠다」로 바꿨다 | `test_a_mutation_that_stayed_green_is_closed_later_or_listed` — 빨강도 초록도 아닌 줄 |
+| — | `린트` 앞에 `run: echo skipped` 인 `린트` 스텝을 하나 더 뒀다 | `test_every_check_step_is_still_there_and_can_still_fail` — 이름이 겹친다 |
+| — | 「대표 1명을 지정한다.」 줄을 더했다 | **없다 — 통과했다** (`test_a_third_document_names_the_schema_document_with_a_table_number`) — 고친 대로다 |
+| 206 | `test_write_path.py` 의 주석을 「표 18 이 설 때는」으로 되돌렸다(대조군 — 게이트가 느슨해지지 않았다) | `test_a_third_document_names_the_schema_document_with_a_table_number` |
+| 203 | `_BEFORE_AND_AFTER` 에서 `("5472330", "164")` 를 뺐다(대조군) | `test_a_mutation_that_stayed_green_is_closed_later_or_listed` |
