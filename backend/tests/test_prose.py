@@ -158,6 +158,60 @@ def test_claude_md_stays_short() -> None:
     )
 
 
+# 두 스키마 문서의 표 번호 — 「표 N」 · 「§N」. 「N번」은 「N 회」와 겹쳐 세지 않고,
+# 「표 N개」는 수라 번호가 아니다
+# 「표」 앞에 한글이 붙으면 다른 낱말의 끝이다(「대표 1명」 — PR #39 Codex 리뷰)
+_TABLE_NUMBER = re.compile(r"(?<![가-힣])(?:표|§)\s?\d{1,2}(?!\d|\s?개)")
+_SCHEMA_DOCUMENTS = ("schema.md", "schema-2단계.md")
+
+# 번호를 문서 이름 없이 써도 되는 파일 — 이름과 사유로 든다
+_TABLE_NUMBER_OWNERS = {
+    "docs/schema.md": "번호의 주인 — 자기 표를 번호로 부른다",
+    "docs/schema-2단계.md": "번호의 주인 — 자기 표를 번호로 부른다",
+    "docs/audit/README.md": "감사 기록 — 이 규칙 앞의 문장을 고치지 않는다",
+    "docs/audit/mutations.md": "어긋냄 기록 — 규칙을 어긴 글자를 어긋냄으로 옮겨 적는다",
+}
+
+
+def test_a_third_document_names_the_schema_document_with_a_table_number() -> None:
+    """**제3 문서는 두 스키마 문서의 표를 문서 이름 없이 번호로 부르지 않는다** (㉘ NC-206).
+
+    두 문서의 번호 체계가 어긋나 있어 문서 이름 없는 번호는 잘못 따라가도 그럴듯하게 읽힌다 —
+    규칙은 `docs/schema-2단계.md` 머리가 든다. 지키는 것이 사람뿐이라 같은 모양이 NC-139 · 170 ·
+    ㉓ OB-3 · NC-200 으로 넷째까지 났고, 매번 사람이 한 자리씩 주웠다. 번호가 든 줄에 두 문서
+    가운데 하나의 이름이 **같은 줄에** 있어야 한다.
+
+    **이 게이트가 못 보는 부류**(W-6 ③): 「N번」 꼴(「N 회」와 겹쳐 세지 않는다), 문서 이름이
+    **앞 줄에** 있는 것(그때는 거짓 양성이다 — 같은 줄로 옮긴다), 그리고 다른 번호 체계(ADR ·
+    NC · 회차)를 쓰면서 「표」라는 낱말을 붙인 것 — 그 모양은 거짓 양성이 된다.
+    """
+    files = [
+        path
+        for path in _repo_files("*")
+        if path.relative_to(REPO_ROOT).as_posix() not in _TABLE_NUMBER_OWNERS
+    ]
+    assert files, "훑을 파일이 없다 — 이 게이트가 아무것도 세지 않는다"
+
+    bare = []
+    for path in files:
+        try:
+            text = path.read_text()
+        except UnicodeDecodeError:
+            continue
+        for number, line in enumerate(text.splitlines(), start=1):
+            if _TABLE_NUMBER.search(line) and not any(
+                name in line for name in _SCHEMA_DOCUMENTS
+            ):
+                bare.append(
+                    f"  {path.relative_to(REPO_ROOT).as_posix()}:{number} — {line.strip()}"
+                )
+
+    assert bare == [], (
+        "두 스키마 문서의 표를 문서 이름 없이 번호로 부른다 — 이름(`stock_ledger_entries` "
+        "처럼)으로 부르거나 같은 줄에 문서 이름을 적는다:\n" + "\n".join(bare)
+    )
+
+
 _MUTATIONS = REPO_ROOT / "docs/audit/mutations.md"
 
 # 아직 초록인 어긋냄을 모으는 절(감사 ㉕ OB-1). 묶음이 아니라 **묶음을 가리키는 색인**이라
@@ -166,9 +220,21 @@ _STILL_GREEN = "아직 초록인 어긋냄"
 
 
 def _mutation_bundles() -> str:
-    """`mutations.md` 에서 「아직 초록인 어긋냄」 절을 뺀 것 — 어긋냄 묶음만 남는다."""
-    text = _MUTATIONS.read_text()
-    return text.replace(_section(text, _STILL_GREEN), "\n")
+    """`mutations.md` 에서 「아직 초록인 어긋냄」의 **색인 표**를 뺀 것 — 어긋냄 묶음만 남는다.
+
+    처음에는 절을 통째로 뺐는데, 그러면 그 절과 다음 `## ` 사이에 `###` 로 둔 묶음이 커밋이
+    없어도, 초록 줄이 색인에 없어도 모든 게이트를 지났다(감사 ㉘ NC-205, 어긋내 확인했다). 이제
+    머리가 `기록` 으로 여는 표의 줄만 빈 줄로 바꾼다 — 줄 번호도 원문과 같게 남는다.
+    """
+    lines = _MUTATIONS.read_text().split("\n")
+    start = lines.index(f"## {_STILL_GREEN}")
+    head = next(
+        number for number in range(start, len(lines)) if lines[number].startswith("| 기록 |")
+    )
+    end = head
+    while end < len(lines) and lines[end].startswith("|"):
+        end += 1
+    return "\n".join(lines[:head] + [""] * (end - head) + lines[end:])
 
 
 # 묶음 제목이 드는 커밋. 이 파일의 관용구가 백틱이라 백틱까지 본다 — 맨 글자만
@@ -806,6 +872,26 @@ _TEST_NAME = re.compile(r"test_[a-z0-9_]+")
 _RECORD_HEAD = ["NC", "무엇을 어긋냈나", "빨개진 검사"]
 
 
+def _green_outside_record_tables() -> list[str]:
+    """머리가 기록 표가 **아닌** 표에서 셋째 칸 아무 데나 `<strong>없다` 로 여는 칸 — 기록 표의
+    머리를 한 낱말 바꾸면 그 표의 초록 줄이 초록 게이트 밖에 섰다(감사 ㉘ NC-205)."""
+    html = cmarkgfm.github_flavored_markdown_to_html(
+        _mutation_bundles(), options=Options.CMARK_OPT_SOURCEPOS
+    )
+    found: list[str] = []
+    for table in re.finditer(r'<table data-sourcepos="(\d+):[^"]*">(.*?)</table>', html, re.S):
+        head, _, body = table.group(2).partition("</thead>")
+        names = [
+            re.sub(r"<[^>]+>", "", cell).strip()
+            for cell in re.findall(r"<th[^>]*>(.*?)</th>", head, re.S)
+        ]
+        if names == _RECORD_HEAD:
+            continue
+        if re.search(r"<td[^>]*>\s*<strong>없다", body):
+            found.append(f"  mutations.md:{table.group(1)} — 머리 {names}")
+    return found
+
+
 def _mutation_record_rows() -> list[tuple[str, list[str], list[str]]]:
     """어긋냄 묶음의 **기록 표** 본문 줄 — (잰 커밋, 칸의 글자, 칸의 HTML), 문서 순서대로.
 
@@ -849,8 +935,10 @@ def test_every_gate_has_a_record_of_turning_red() -> None:
     파일의 **표 안에** 나와야 한다 — 산문에 이름만 든 것은 기록이 아니다.
 
     **이 게이트가 못 보는 부류**(W-6 ③): 기록이 있으나 **지금도 참인지** — 그 뒤 검사가
-    바뀌어 더는 물지 않아도 옛 줄이 통과시킨다(묶음의 커밋이 그것을 되짚는 자리다). 표의
-    셋째 칸이 「통과했다」인 줄도 이름만 있으면 센다. 그리고 `_GATE_FILES` 밖의 테스트 —
+    바뀌어 더는 물지 않아도 옛 줄이 통과시킨다(묶음의 커밋이 그것을 되짚는 자리다). 셋째 칸을
+    `**없다` 로 연 초록 줄의 이름은 **세지 않는다**(감사 ㉘ NC-203 — 초록을 기계로 가를 수 있게
+    된 뒤다). 그 규칙 전의 옛 초록 줄(`_LEGACY_RESULT`)은 이름이 있으면 센다. 그리고
+    `_GATE_FILES` 밖의 테스트 —
     게이트 파일이 새로 서도 이 목록에 들기 전에는 보지 않는다. 줄 머리의 `def test_` 만
     세므로 **들여쓴 메서드와 `async def` 검사**도 보지 않는다(오늘 0 건).
 
@@ -863,7 +951,10 @@ def test_every_gate_has_a_record_of_turning_red() -> None:
     없는 표는 보이지 않았다.
     """
     recorded = {
-        name for _, cells, _ in _mutation_record_rows() for name in _TEST_NAME.findall(cells[2])
+        name
+        for _, cells, html in _mutation_record_rows()
+        if not html[2].startswith("<strong>없다")
+        for name in _TEST_NAME.findall(cells[2])
     }
     gates = [
         (path, name)
@@ -880,11 +971,28 @@ def test_every_gate_has_a_record_of_turning_red() -> None:
 
 
 # 셋째 칸이 빨강도 초록도 아닌 **옛 줄** — 「통과한 줄은 `**없다` 로 연다」 앞의 기록이라 고치지
-# 않는다(규칙은 소급하지 않는다 — 대장 「닫는 규칙」). 여기 없는 줄이 그 모양이면 빨갛다
+# 않는다(`mutations.md` 규칙 줄의 「이 규칙 전의 옛 줄 … 고치지 않는다」). 여기 없는 줄이 그
+# 모양이면 빨갛다
 _LEGACY_RESULT = {
     ("72392cf", "79"): "「통과했다」로 연 초록 — 규칙 앞",
     ("b2bb637", "154"): "검사가 아니라 명령의 범위를 잰 줄",
     ("fcb7570", "123"): "검사 이름 대신 제약이 문다고 적은 줄",
+}
+
+
+# 빨강 줄의 셋째 칸이 여는 모양 — 검사 이름의 코드이거나 「같은 검사」(감사 ㉘ NC-203)
+_RED_OPENING = re.compile(r"<code>test_|같은 검사")
+
+# 한 칸에 「고치기 전에는 초록, 고친 뒤 빨강」을 함께 적은 **옛 줄** — 뒤의 빨강을 기록하므로
+# 빨강으로 센다. 빨강 줄의 여는 모양(`_RED_OPENING`)이 서기 전의 기록이라 고치지 않는다. 새로
+# 적을 때는 두 줄로 나눈다 — 초록 줄과 빨강 줄. **셋째 칸이 여는 글자까지 든다** — (커밋, NC)
+# 만으로는 같은 묶음 · 같은 NC 의 다른 줄까지 봐주었다(PR #39 Codex 리뷰)
+_BEFORE_AND_AFTER = {
+    ("b2bb637", "153"): "고치기 전에는",
+    ("b2bb637", "155"): "고치기 전에는",
+    ("5472330", "164"): "처음에는 없었다",
+    ("b701a19", "142"): "첫 판에서는",
+    ("9c09a96", "109"): "처음에는 통과했다",
 }
 
 
@@ -895,9 +1003,12 @@ def _green_and_later_red() -> tuple[list[tuple[str, str, int]], dict[str, int]]:
     집합**에서 읽는다 — 줄 머리 파이프로 손으로 가르면 인용 안 · 앞 파이프 없는 기록 표의 초록
     줄이 빠지고, 설명 표의 수 칸이 빨강으로 읽혔다(PR #38 Codex 리뷰).
 
-    빨강은 셋째 칸에 검사 이름이 들거나 「같은 검사」로 여는 줄이다. **둘 다 아니고 초록도 아닌
-    줄은 실패다** — 그대로 빨강으로 치면 형식을 어긴 초록 줄이 앞 초록 줄을 거짓으로 닫았다
-    (PR #38 Codex 리뷰). 옛 줄은 `_LEGACY_RESULT` 에 이름으로 든다.
+    빨강은 셋째 칸을 검사 이름(코드)이나 「같은 검사」로 **여는** 줄이다. 처음에는 검사 이름이
+    칸 **어디에** 들어도 빨강으로 셌는데, 이 파일의 초록 줄은 검사 이름을 괄호로 들므로 `**` 만
+    빠뜨린 초록 줄이 빨강으로 읽혀 색인 없이 지나고 앞 초록까지 닫았다(감사 ㉘ NC-203, 어긋내
+    확인했다). **셋 다 아닌 줄은 실패다** — 그대로 빨강으로 치면 형식을 어긴 초록 줄이 앞
+    초록 줄을 거짓으로 닫았다(PR #38 Codex 리뷰). 옛 줄은 `_LEGACY_RESULT` ·
+    `_BEFORE_AND_AFTER` 에 이름으로 든다.
     """
     green: list[tuple[str, str, int]] = []
     last_red: dict[str, int] = {}
@@ -905,7 +1016,9 @@ def _green_and_later_red() -> tuple[list[tuple[str, str, int]], dict[str, int]]:
     for order, (commit, cells, html) in enumerate(_mutation_record_rows()):
         if html[2].startswith("<strong>없다"):
             green.append((commit, cells[0], order))
-        elif _TEST_NAME.search(cells[2]) or cells[2].startswith("같은 검사"):
+        elif _RED_OPENING.match(html[2]) or cells[2].startswith(
+            _BEFORE_AND_AFTER.get((commit, cells[0]), "\0")
+        ):
             if cells[0].isdigit():
                 last_red[cells[0]] = order
         elif (commit, cells[0]) not in _LEGACY_RESULT:
@@ -931,11 +1044,21 @@ def test_a_mutation_that_stayed_green_is_closed_later_or_listed() -> None:
 
     **이 게이트가 못 보는 부류**(W-6 ③): 셋째 칸을 `**없다` 로 열지 않은 옛 줄
     (`_LEGACY_RESULT` — 그 규칙 전의 기록이라 고치지 않는다), 뒤의 빨강 줄이 **다른 어긋냄**을
-    문 것(NC 만 견준다), NC 가 `—` 인 초록 줄이 한 묶음에 둘 이상일 때 어느 것인지, 그리고 절의
-    「지금」 칸이 참인지.
+    문 것(NC 만 견준다 — 실제로 ㉗ 의 196 초록을 다른 어긋냄의 빨강이 닫았고, 그 줄은 색인에
+    따로 든다, 감사 ㉘ NC-204), NC 가 `—` 인 초록 줄이 한 묶음에 둘 이상일 때 어느 것인지, 원시
+    HTML `<table>` 로 쓴 표(파서가 표로 만들지 않는다), 그리고 절의 「지금」 칸이 참인지.
+
+    **훑는 집합을 낱말이 정하지 않게 했다**(감사 ㉘ NC-205). 기록 표가 아닌 표의 칸이
+    `**없다` 로 열면 빨갛고, 초록 절에서는 색인 표만 뺀다 — 그 절 안에 둔 묶음도 훑는다.
     """
     green, last_red = _green_and_later_red()
     assert green, "초록 줄을 찾지 못했다 — 이 게이트가 아무것도 세지 않는다"
+
+    misheaded = _green_outside_record_tables()
+    assert misheaded == [], (
+        "초록 줄(`**없다`)이 기록 표가 아닌 표에 있다 — 머리를 "
+        f"{' · '.join(_RECORD_HEAD)} 로 쓴다:\n" + "\n".join(misheaded)
+    )
 
     listed = set()
     for _, row in _table_rows(_section(_MUTATIONS.read_text(), _STILL_GREEN)):
