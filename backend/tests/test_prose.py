@@ -183,7 +183,12 @@ def test_a_third_document_names_the_schema_document_with_a_table_number() -> Non
 
     **이 게이트가 못 보는 부류**(W-6 ③): 「N번」 꼴(「N 회」와 겹쳐 세지 않는다), 문서 이름이
     **앞 줄에** 있는 것(그때는 거짓 양성이다 — 같은 줄로 옮긴다), 그리고 다른 번호 체계(ADR ·
-    NC · 회차)를 쓰면서 「표」라는 낱말을 붙인 것 — 그 모양은 거짓 양성이 된다.
+    NC · 회차)를 쓰면서 「표」라는 낱말을 붙인 것 — 그 모양은 거짓 양성이 된다. 그리고
+    `_TABLE_NUMBER_OWNERS` 가 **통째로** 빼는 네 파일 안의 줄이다(감사 ㉙ NC-215, 어긋내
+    확인했다) — 두 스키마 문서가 서로의 표를 번호로 부르는 것(위에 든 NC-139 · 170 이 바로 그
+    모양이다), 그리고 규칙 **뒤에** 대장 · `mutations.md` 에 새로 쓰는 줄. 이름이 같은 줄에
+    **있는지만** 보므로, 같은 줄의 문서 이름이 **틀린** 것(「`docs/schema.md` 의 표 18」)도 못
+    본다.
     """
     files = [
         path
@@ -215,7 +220,8 @@ def test_a_third_document_names_the_schema_document_with_a_table_number() -> Non
 _MUTATIONS = REPO_ROOT / "docs/audit/mutations.md"
 
 # 아직 초록인 어긋냄을 모으는 절(감사 ㉕ OB-1). 묶음이 아니라 **묶음을 가리키는 색인**이라
-# 잰 커밋이 없고, 셋째 칸도 「빨개진 검사」가 아니다 — 묶음을 훑는 게이트는 이 절을 뺀다
+# 잰 커밋이 없고, 셋째 칸도 「빨개진 검사」가 아니다 — 묶음을 훑는 게이트는 이 절의
+# **색인 표만** 뺀다(`_mutation_bundles`). 처음에는 절을 통째로 뺐다(감사 ㉘ NC-205 · ㉙ NC-216)
 _STILL_GREEN = "아직 초록인 어긋냄"
 
 
@@ -873,8 +879,13 @@ _RECORD_HEAD = ["NC", "무엇을 어긋냈나", "빨개진 검사"]
 
 
 def _green_outside_record_tables() -> list[str]:
-    """머리가 기록 표가 **아닌** 표에서 셋째 칸 아무 데나 `<strong>없다` 로 여는 칸 — 기록 표의
-    머리를 한 낱말 바꾸면 그 표의 초록 줄이 초록 게이트 밖에 섰다(감사 ㉘ NC-205)."""
+    """머리가 기록 표가 **아닌** 표에서 **어느 칸이든** `없다` 로 여는 칸 — 굵게 하든 않든 본다.
+
+    기록 표의 머리를 한 낱말 바꾸면 그 표의 초록 줄이 초록 게이트 밖에 섰다(감사 ㉘ NC-205).
+    처음에는 굵은 `<strong>없다` 만 봐서, 머리가 다른 표에 **굵게 하지 않은** 초록 줄을
+    두면 어느 게이트에도 걸리지 않았다(감사 ㉙ NC-213, 어긋내 확인했다). 독스트링은 한때
+    「셋째 칸」이라 적었는데 코드는 처음부터 모든 칸을 봤다(감사 ㉙ NC-217).
+    """
     html = cmarkgfm.github_flavored_markdown_to_html(
         _mutation_bundles(), options=Options.CMARK_OPT_SOURCEPOS
     )
@@ -887,7 +898,7 @@ def _green_outside_record_tables() -> list[str]:
         ]
         if names == _RECORD_HEAD:
             continue
-        if re.search(r"<td[^>]*>\s*<strong>없다", body):
+        if re.search(r"<td[^>]*>\s*(?:<strong>)?없다", body):
             found.append(f"  mutations.md:{table.group(1)} — 머리 {names}")
     return found
 
@@ -983,16 +994,40 @@ _LEGACY_RESULT = {
 # 빨강 줄의 셋째 칸이 여는 모양 — 검사 이름의 코드이거나 「같은 검사」(감사 ㉘ NC-203)
 _RED_OPENING = re.compile(r"<code>test_|같은 검사")
 
-# 한 칸에 「고치기 전에는 초록, 고친 뒤 빨강」을 함께 적은 **옛 줄** — 뒤의 빨강을 기록하므로
-# 빨강으로 센다. 빨강 줄의 여는 모양(`_RED_OPENING`)이 서기 전의 기록이라 고치지 않는다. 새로
-# 적을 때는 두 줄로 나눈다 — 초록 줄과 빨강 줄. **셋째 칸이 여는 글자까지 든다** — (커밋, NC)
-# 만으로는 같은 묶음 · 같은 NC 의 다른 줄까지 봐주었다(PR #39 Codex 리뷰)
+# 한 칸에 고치기 전 · 뒤를 함께 적은 옛 줄 가운데 **고치기 전의 글자로 연** 것 — 뒤의
+# 빨강을 기록하므로 빨강으로 센다. 옛 줄을 어떻게 두는지는 `mutations.md` 규칙 줄 한 자리가
+# 든다(감사 ㉙ NC-218). **셋째 칸이 여는 글자까지 든다** — (커밋, NC) 만으로는 같은 묶음 ·
+# 같은 NC 의 다른 줄까지 봐주었다(PR #39 Codex 리뷰)
 _BEFORE_AND_AFTER = {
     ("b2bb637", "153"): "고치기 전에는",
     ("b2bb637", "155"): "고치기 전에는",
     ("5472330", "164"): "처음에는 없었다",
     ("b701a19", "142"): "첫 판에서는",
     ("9c09a96", "109"): "처음에는 통과했다",
+}
+
+
+# 빨강 줄의 셋째 칸에 **고치기 전의 결과**가 함께 든 표시 — 「전 · 후는 두 줄로」
+# (`mutations.md` 규칙 줄)를 어긴 모양이다. 검사 이름으로 열기만 하면 빨강으로 세던 때는
+# 「`test_…` — 통과했다」인 순수한 초록 줄이 앞 초록을 닫고 기록 게이트의 기록을 채웠다
+# (감사 ㉙ NC-214, 어긋내 확인했다)
+_A_PASS_INSIDE_RED = re.compile(r"통과했다|초록이었다|고치기 전|전에는|전까지")
+
+# 한 칸에 고치기 전 · 뒤를 함께 적은 옛 줄 가운데 **검사 이름으로 연** 것 — 뒤의 빨강을
+# 기록하므로 빨강으로 센다. 옛 줄을 어떻게 두는지는 `mutations.md` 규칙 줄 한 자리가
+# 든다(감사 ㉙ NC-218)
+_RED_WITH_A_PASS = {
+    ("fc940e8", "87"): "규칙 앞",
+    ("fc940e8", "90"): "규칙 앞",
+    ("5f9922c", "132"): "규칙 앞",
+    ("4abd1b6", "186"): "규칙 앞",
+    ("4abd1b6", "188"): "규칙 앞",
+    ("4abd1b6", "190"): "규칙 앞",
+    ("0a92e57", "195"): "규칙 앞",
+    ("0a92e57", "198"): "규칙 앞",
+    ("bbfb6e8", "—"): "규칙 앞",
+    ("e0159e2", "203"): "규칙 바로 뒤에 선 줄 — 감사 ㉙ NC-219. 고치기 전 결과는 돌린 것이"
+    " 아니다(「감사 ㉙ 의 고침」 묶음이 바로잡는다)",
 }
 
 
@@ -1009,6 +1044,10 @@ def _green_and_later_red() -> tuple[list[tuple[str, str, int]], dict[str, int]]:
     확인했다). **셋 다 아닌 줄은 실패다** — 그대로 빨강으로 치면 형식을 어긴 초록 줄이 앞
     초록 줄을 거짓으로 닫았다(PR #38 Codex 리뷰). 옛 줄은 `_LEGACY_RESULT` ·
     `_BEFORE_AND_AFTER` 에 이름으로 든다.
+
+    **검사 이름으로 열어도 고치기 전의 결과(`_A_PASS_INSIDE_RED`)를 함께 적은 줄은 실패다** —
+    여는 모양만 보던 때는 「`test_…` — 통과했다」인 초록 줄이 빨강으로 읽혀 앞 초록을
+    닫았다(감사 ㉙ NC-214). 두 줄로 나눈다. 옛 줄은 `_RED_WITH_A_PASS` 에 이름으로 든다.
     """
     green: list[tuple[str, str, int]] = []
     last_red: dict[str, int] = {}
@@ -1016,6 +1055,12 @@ def _green_and_later_red() -> tuple[list[tuple[str, str, int]], dict[str, int]]:
     for order, (commit, cells, html) in enumerate(_mutation_record_rows()):
         if html[2].startswith("<strong>없다"):
             green.append((commit, cells[0], order))
+        elif (
+            _RED_OPENING.match(html[2])
+            and _A_PASS_INSIDE_RED.search(cells[2])
+            and (commit, cells[0]) not in _RED_WITH_A_PASS
+        ):
+            strange.append(f"  묶음 `{commit}` · NC {cells[0]} — 고치기 전 결과가 함께 들었다")
         elif _RED_OPENING.match(html[2]) or cells[2].startswith(
             _BEFORE_AND_AFTER.get((commit, cells[0]), "\0")
         ):
@@ -1024,8 +1069,8 @@ def _green_and_later_red() -> tuple[list[tuple[str, str, int]], dict[str, int]]:
         elif (commit, cells[0]) not in _LEGACY_RESULT:
             strange.append(f"  묶음 `{commit}` · NC {cells[0]} — {cells[2][:40]}")
     assert strange == [], (
-        "기록 표의 셋째 칸이 빨강(검사 이름 · 「같은 검사」)도 초록(`**없다`)도 아니다 — "
-        "어느 쪽인지 가를 수 없다:\n" + "\n".join(strange)
+        "기록 표의 셋째 칸이 빨강(검사 이름 · 「같은 검사」)도 초록(`**없다`)도 아니거나, "
+        "빨강 칸에 고치기 전 결과가 함께 들었다 — 두 줄로 나눈다:\n" + "\n".join(strange)
     )
     return green, last_red
 
@@ -1049,7 +1094,8 @@ def test_a_mutation_that_stayed_green_is_closed_later_or_listed() -> None:
     HTML `<table>` 로 쓴 표(파서가 표로 만들지 않는다), 그리고 절의 「지금」 칸이 참인지.
 
     **훑는 집합을 낱말이 정하지 않게 했다**(감사 ㉘ NC-205). 기록 표가 아닌 표의 칸이
-    `**없다` 로 열면 빨갛고, 초록 절에서는 색인 표만 뺀다 — 그 절 안에 둔 묶음도 훑는다.
+    `없다` 로 열면 굵게 하든 않든 빨갛고(감사 ㉙ NC-213), 초록 절에서는 색인 표만 뺀다 — 그 절
+    안에 둔 묶음도 훑는다.
     """
     green, last_red = _green_and_later_red()
     assert green, "초록 줄을 찾지 못했다 — 이 게이트가 아무것도 세지 않는다"
@@ -1060,7 +1106,7 @@ def test_a_mutation_that_stayed_green_is_closed_later_or_listed() -> None:
         f"{' · '.join(_RECORD_HEAD)} 로 쓴다:\n" + "\n".join(misheaded)
     )
 
-    listed = set()
+    listed: set[tuple[str, str]] = set()
     for _, row in _table_rows(_section(_MUTATIONS.read_text(), _STILL_GREEN)):
         cells = _row_cells(row)
         if cells[0] != "기록":

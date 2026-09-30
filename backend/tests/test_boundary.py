@@ -169,9 +169,9 @@ def _chain_from_head() -> list[str]:
     down: dict[str, str | None] = {}
     for path in (BACKEND_ROOT / "migrations" / "versions").glob("*.py"):
         text = path.read_text()
-        revision, below = _REVISION.search(text), _DOWN_REVISION.search(text)
-        assert revision and below, f"{path.name} 에서 리비전 줄을 읽지 못했다"
-        down[revision.group(1)] = below.group(1)
+        revision, down_line = _REVISION.search(text), _DOWN_REVISION.search(text)
+        assert revision and down_line, f"{path.name} 에서 리비전 줄을 읽지 못했다"
+        down[revision.group(1)] = down_line.group(1)
 
     heads = set(down) - {below for below in down.values() if below}
     assert len(heads) == 1, f"head 가 하나가 아니다: {sorted(heads)}"

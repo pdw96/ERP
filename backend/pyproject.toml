@@ -39,6 +39,16 @@ ignore = [
 [tool.mypy]
 python_version = "3.11"
 strict = true
+# **범위는 여기 한 자리다** — CI 와 로컬은 인자 없이 `mypy` 를 부른다. 테스트 가운데 검사 장치인
+# 게이트 파일만 넣는다(ADR 0007). 게이트 파일의 목록은 `tests/test_prose.py` 의 `_GATE_FILES` 이고,
+# `tests/test_dependencies.py` 가 둘을 견준다 — 목록을 두 벌 두지 않는다
+files = [
+    "app",
+    "migrations",
+    "tests/test_prose.py",
+    "tests/test_boundary.py",
+    "tests/test_dependencies.py",
+]
 # **SQLAlchemy 의 mypy 플러그인을 쓰지 않는다.** 2.0 에서 deprecated 되었고
 # mypy 1.10.1 까지만 지원하는데 이 저장소는 1.14 를 고정한다 — 켜 두면 도는지
 # 안 도는지 모르는 채로 「검사하고 있다」고 믿게 된다.
@@ -46,6 +56,12 @@ strict = true
 # 필요도 없다. 모델이 전부 `Mapped[...]` · `mapped_column()` 네이티브 선언이라
 # 플러그인 없이도 타입이 읽힌다: `Mapped[str]` 을 int 로 돌려주거나
 # `int | None` 에 바로 더하면 mypy 가 그대로 잡는다(확인함).
+
+[[tool.mypy.overrides]]
+# cmark-gfm 의 바인딩은 타입 정보(스텁 · `py.typed`)를 싣지 않고 스텁 패키지도 없다 — 게이트
+# 파일이 부르는 자리만 `Any` 로 읽는다
+module = ["cmarkgfm", "cmarkgfm.*"]
+ignore_missing_imports = true
 
 [[tool.mypy.overrides]]
 module = "tests.*"

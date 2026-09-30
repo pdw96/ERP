@@ -28,7 +28,7 @@
 cd backend
 .venv/bin/ruff check .
 .venv/bin/ruff format --check .
-.venv/bin/mypy app migrations
+.venv/bin/mypy          # 범위는 pyproject.toml 의 [tool.mypy] files
 ERP_TEST_DATABASE_URL="postgresql+psycopg://erp:erp@127.0.0.1:5432/erp_test" .venv/bin/pytest
 ```
 

@@ -18,7 +18,9 @@
 """
 
 import re
+import tomllib
 from pathlib import Path
+from typing import Any
 
 import yaml
 
@@ -54,7 +56,7 @@ _CI_STEPS = {
     "잠금": r"scripts/lock\.sh --check",
     "린트": r"ruff check \.",
     "포맷": r"ruff format --check \.",
-    "타입체크": r"mypy app migrations",
+    "타입체크": r"mypy$",
     "테스트": r"pytest",
     "셸": r"git ls-files .*\| xargs .*shellcheck",
     "이미지": r"docker build ",
@@ -62,7 +64,7 @@ _CI_STEPS = {
 }
 
 
-def _backend_steps(ci: str) -> tuple[dict[str, object], dict[str, dict[str, object]]]:
+def _backend_steps(ci: str) -> tuple[dict[str, Any], dict[str, dict[str, Any]]]:
     """`ci.yml` 의 `jobs.backend` 와 그 스텝(이름 → 스텝) — **YAML 파서가 읽는다.**
 
     룰셋이 CI 에서 거는 상태 체크가 `backend` 잡이라 그 잡만 본다(CodeQL 은 따로 선
@@ -178,3 +180,25 @@ def test_every_check_step_is_still_there_and_can_still_fail() -> None:
     ]
     swallowing += _swallowing_jobs(workflows)
     assert swallowing == [], "CI 가 실패를 삼키는 자리가 있다:\n" + "\n".join(swallowing)
+
+
+def test_the_type_check_covers_every_gate_file() -> None:
+    """**타입 검사의 범위가 앱 · 마이그레이션과 게이트 파일 전부를 든다** (감사 ㉙ — ADR 0007).
+
+    범위는 `pyproject.toml` 의 `[tool.mypy] files` 한 자리이고, CI 와 로컬은 인자 없이 `mypy` 를
+    부른다(인자를 주면 `files` 를 덮는다 — 그래서 위 검사가 `타입체크` 스텝의 명령을 `mypy` 한
+    낱말로 문다). 게이트 파일의 목록은 `tests/test_prose.py` 의 `_GATE_FILES` 라 **두 벌**이다 —
+    게이트 파일이 새로 서서 `_GATE_FILES` 에 들고 `files` 에 들지 않으면 여기서 빨개진다.
+
+    **이 검사가 못 보는 부류**(W-6 ③): `_GATE_FILES` 에 들지 않은 게이트 파일(그 목록의
+    「못 보는 부류」와 같다), 그리고 `files` 에 든 경로가 실제로 타입 검사를 **통과하는지** —
+    그것은 `타입체크` 스텝이 문다.
+    """
+    from tests.test_prose import _GATE_FILES
+
+    config = tomllib.loads((BACKEND_ROOT / "pyproject.toml").read_text())
+    files = config["tool"]["mypy"].get("files", [])
+    assert files, "[tool.mypy] files 가 비었다 — 인자 없는 mypy 가 무엇을 볼지 정해지지 않는다"
+
+    missing = [path for path in ("app", "migrations", *_GATE_FILES) if path not in files]
+    assert missing == [], f"타입 검사의 범위([tool.mypy] files)에 없다: {missing}"
