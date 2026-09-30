@@ -180,9 +180,9 @@ def upgrade() -> None:
         ["inspection_id", "inspection_result"],
         ["id", "result"],
     )
-    # **원장의 입고 줄이 「그 로트를 만든 검사」를 가리키게 묶는다.** 표 18 이
-    # 설 때는 로트가 검사를 몰라 이 쌍을 만들 수 없었고, 그래서 미결로 들어 두었던
-    # 자리다. 둘을 따로 가리키면 둘 다 실재한다는 것까지만 증명된다.
+    # **원장의 입고 줄이 「그 로트를 만든 검사」를 가리키게 묶는다.** 수불 원장
+    # (`stock_ledger_entries`)이 설 때는 로트가 검사를 몰라 이 쌍을 만들 수 없었고,
+    # 그래서 미결로 들어 두었던 자리다. 둘을 따로 가리키면 둘 다 실재한다는 것까지만 증명된다.
     op.drop_constraint("fk_stock_ledger_entry_lot", "stock_ledger_entries", type_="foreignkey")
     op.drop_constraint(
         "fk_stock_ledger_entry_inspection", "stock_ledger_entries", type_="foreignkey"

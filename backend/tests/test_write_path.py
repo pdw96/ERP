@@ -845,7 +845,8 @@ def test_another_item_does_not_wait(prepared: Session, engine: Engine) -> None:
 def test_a_receipt_line_cannot_name_someone_elses_judgement(prepared: Session) -> None:
     """**원장 줄이 가리키는 검사가 그 로트를 만든 검사여야 한다.**
 
-    표 18 이 설 때는 로트가 검사를 몰라 이것을 묶을 수 없었고 미결로 들어 두었다.
+    수불 원장(`stock_ledger_entries`)이 설 때는 로트가 검사를 몰라 이것을 묶을 수 없었고
+    미결로 들어 두었다.
     로트가 자기를 만든 검사를 가리키게 된 지금, 원장이 **쌍으로** 가리켜 그 한
     겹이 닫힌다 — 둘을 따로 가리키면 둘 다 실재한다는 것까지만 증명된다.
     """

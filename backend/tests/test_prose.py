@@ -21,6 +21,7 @@
 """
 
 import re
+import subprocess
 from collections.abc import Iterator
 from itertools import pairwise
 from pathlib import Path
@@ -55,14 +56,33 @@ _ALLOWED = {
 }
 
 
+def _repo_files(pattern: str) -> list[Path]:
+    """**git 이 드는 파일만** — 추적하는 것과, 추적 안 됐으나 무시되지 않는 것(감사 ㉗ NC-202).
+
+    처음에는 `rglob` 로 모으고 `.venv` · `.git` 만 뺐다. 그러면 `.gitignore` 에 든 브리핑 보관본
+    (`.claude/briefs/`)까지 읽혀, 보관본이 diff 로 담은 `CLAUDE.md` 의 줄이 예외 목록을 벗어난
+    경로에서 다시 나타났다 — 감사를 돌린 작업트리에서만 빨갛고 CI 에서는 초록이라 **로컬과
+    CI 가 갈렸다.** 커밋될 수 있는 파일은 git 이 안다. 추적 안 된 새 파일도 들이므로
+    `git add` 전에도 문다.
+
+    **이 선택이 못 보는 부류**(W-6 ③): `.gitignore` 에 잘못 든 파일 — 무시되면 이 게이트들도
+    보지 않는다. git 이 없는 자리에서는 돌지 않고 실패한다(건너뛰지 않는다).
+    """
+    listed = subprocess.run(
+        ["git", "ls-files", "-z", "--cached", "--others", "--exclude-standard", "--", pattern],
+        cwd=REPO_ROOT,
+        capture_output=True,
+        check=True,
+    ).stdout.decode()
+    return [
+        path for name in listed.split("\0") if name and (path := REPO_ROOT / name).is_file()
+    ]
+
+
 def _tracked() -> list[Path]:
     found: list[Path] = []
     for pattern in _PROSE:
-        found += [
-            path
-            for path in REPO_ROOT.rglob(pattern)
-            if ".venv" not in path.parts and ".git" not in path.parts
-        ]
+        found += _repo_files(pattern)
     return found
 
 
@@ -142,7 +162,7 @@ _MUTATIONS = REPO_ROOT / "docs/audit/mutations.md"
 _COMMIT = re.compile(r"`[0-9a-f]{7,40}`")
 
 
-# 제목 줄 — 수준을 가리지 않는다(감사 ㉕ NC-186)
+# 제목 줄 — 수준을 가리지 않는다(감사 ㉕ NC-186). 대장의 W 표 절을 자르는 데 쓴다
 _ANY_HEADING = re.compile(r"#{1,6} ")
 
 
@@ -153,17 +173,26 @@ def _bundles_with_a_table(text: str) -> list[tuple[int, str]]:
     **수준**에도 기대지 않는다(NC-186) — `## ` 만 보면 `###` 묶음과 한 절의 둘째 표가
     훑는 집합 밖에 섰다. 위에 제목이 없는 표는 그 표의 첫 줄을 제목 자리에 둔다 —
     커밋이 없으니 빨갛다.
+
+    **표와 제목은 GitHub 의 파서(cmark-gfm)가 가른다**(감사 ㉗ NC-195). 줄 머리 글자로
+    가르면 앞 파이프를 뺀 표 · 인용 안의 표 · 목록 안의 표가 훑는 집합에 아예 들어오지
+    않았고(어긋내 확인했다), Setext 제목은 제목으로 보이지 않았으며, 울타리 코드 안의 `#`
+    줄은 제목으로 읽혀 뒤 표에 커밋을 빌려주었다. `_overflowing_rows` 와 같은 방식이다 —
+    파서가 알려 준 시작 줄(`data-sourcepos`)의 원문을 제목으로 읽는다.
     """
+    html = cmarkgfm.github_flavored_markdown_to_html(text, options=Options.CMARK_OPT_SOURCEPOS)
+    lines = re.split(r"\r\n|\r|\n", text)
+    blocks = sorted(
+        (int(found.group(2)), found.group(1))
+        for found in re.finditer(r'<(h[1-6]|table) data-sourcepos="(\d+):', html)
+    )
     found: list[tuple[int, str]] = []
     heading: tuple[int, str] | None = None
-    in_table = False
-    for number, line in enumerate(text.splitlines(), start=1):
-        if _ANY_HEADING.match(line):
-            heading = (number, line)
-        row = line.startswith("|")
-        if row and not in_table:
-            found.append(heading if heading is not None else (number, line))
-        in_table = row
+    for number, tag in blocks:
+        if tag.startswith("h"):
+            heading = (number, lines[number - 1])
+        else:
+            found.append(heading if heading is not None else (number, lines[number - 1]))
     return found
 
 
@@ -185,6 +214,9 @@ def test_a_mutation_bundle_says_which_commit_it_was_measured_on() -> None:
     표가 아닌 것은 산문이다. **표마다 바로 위의 제목**을 본다 — 처음에는 `## ` 절의
     첫 표만 셌는데, 그러면 `###` 묶음과 한 절에 덧붙인 둘째 표가 커밋 없이도 초록이었다
     (감사 ㉕ NC-186, 어긋내 확인했다).
+
+    표와 제목은 파서가 가른다 — 줄 머리 글자로 가르던 때는 앞 파이프 없는 표와 인용 안의
+    표가 훑는 집합 밖이었다(감사 ㉗ NC-195, 어긋내 확인했다).
 
     **이 게이트가 못 보는 부류**(W-6 ③): 커밋이 적혀 있으나 **그 트리가 아닌**
     것 — 모양만 보고 값을 보지 않는다. 그리고 「`X` 뒤」처럼 **바탕**을 가리키는
@@ -290,8 +322,7 @@ def test_a_table_row_does_not_carry_a_cell_the_header_did_not_declare() -> None:
     """
     overflowing = [
         f"{path.relative_to(REPO_ROOT)}:{number} — 머리는 {width} 칸인데 {cells} 칸이다"
-        for path in REPO_ROOT.rglob("*.md")
-        if ".venv" not in path.parts and ".git" not in path.parts
+        for path in _repo_files("*.md")
         for number, width, cells in _overflowing_rows(path.read_text())
     ]
 
@@ -708,11 +739,47 @@ def test_an_nc_waiting_for_a_reaudit_has_a_row_that_waits_for_it() -> None:
     )
 
 
+# 상태 칸의 어휘 — 대장 「닫는 규칙」이 정한 말. 굵게 연다. 여기 없는 말로 쓴 줄은 위 두
+# 게이트가 기다리는지 · 닫혔는지를 가르지 못한다(감사 ㉗ NC-196)
+_STATUS = re.compile(
+    r"\*\*(?:닫힘|부분 닫힘|고침|등록|반박|중복|열림 — 저자 판정 대기)(?=[ *(—])"
+)
+
+
+def test_every_nc_status_opens_with_a_word_the_ledger_defined() -> None:
+    """**부적합 대장의 상태 칸은 정해진 말로 연다** (감사 ㉗ — NC-196).
+
+    대장 「닫는 규칙」은 판정 전 상태를 「열림 — 저자 판정 대기」로 적고 「다른 말로 적지
+    않는다」고 했는데 그것을 무는 것이 산문뿐이었다. 위의 두 게이트는 상태 칸의 **머리
+    글자**(`**고침` · `**열림` · `**닫힘`)로 가르므로, 「판정 대기」처럼 적거나 굵게 하지
+    않으면 재감사를 기다리는 줄이 아무 줄에도 없어도 초록이었다(어긋내 확인했다).
+
+    **이 게이트가 못 보는 부류**(W-6 ③): 말은 맞는데 **상태가 틀린** 줄 — 재감사가 닫지
+    않았는데 「닫힘」으로 적은 것은 문장을 읽어야 가른다. 그리고 부적합 대장 밖의 표.
+    """
+    rows = [
+        cells
+        for _, row in _table_rows(_section(_LEDGER.read_text(), "부적합 대장"))
+        if (cells := _row_cells(row))[0].isdigit()
+    ]
+    assert rows, "부적합 대장에서 NC 줄을 찾지 못했다 — 이 게이트가 아무것도 세지 않는다"
+
+    strange = [
+        f"  NC-{cells[0]} — {cells[4][:40]}" for cells in rows if not _STATUS.match(cells[4])
+    ]
+    assert strange == [], (
+        "상태 칸이 대장 「닫는 규칙」이 정한 말(굵게)로 열리지 않는다 — 기다리는 표 게이트가 "
+        "그 줄을 가르지 못한다:\n" + "\n".join(strange)
+    )
+
+
 # **게이트 파일** — 산문 · 경계 · 의존성을 무는 검사가 사는 자리(감사 ㉕ NC-189). 이 파일들의
 # 검사는 어긋내 빨개지는 것을 본 기록이 `docs/audit/mutations.md` 의 표에 있어야 한다.
 # 목록은 이름이다 — 게이트 파일이 새로 서면 여기 더한다(아래 「못 보는 부류」).
 _GATE_FILES = ("tests/test_prose.py", "tests/test_boundary.py", "tests/test_dependencies.py")
 _TEST_NAME = re.compile(r"test_[a-z0-9_]+")
+# 칸 구분자 — 이스케이프한 `\\|` 는 칸 안의 글자다(NC-157)
+_UNESCAPED_BAR = re.compile(r"(?<!\\)\|")
 
 
 def test_every_gate_has_a_record_of_turning_red() -> None:
@@ -726,13 +793,19 @@ def test_every_gate_has_a_record_of_turning_red() -> None:
     **이 게이트가 못 보는 부류**(W-6 ③): 기록이 있으나 **지금도 참인지** — 그 뒤 검사가
     바뀌어 더는 물지 않아도 옛 줄이 통과시킨다(묶음의 커밋이 그것을 되짚는 자리다). 표의
     셋째 칸이 「통과했다」인 줄도 이름만 있으면 센다. 그리고 `_GATE_FILES` 밖의 테스트 —
-    게이트 파일이 새로 서도 이 목록에 들기 전에는 보지 않는다.
+    게이트 파일이 새로 서도 이 목록에 들기 전에는 보지 않는다. 줄 머리의 `def test_` 만
+    세므로 **들여쓴 메서드와 `async def` 검사**도 보지 않는다(오늘 0 건).
+
+    **셋째 칸(「빨개진 검사」)의 이름만 센다**(감사 ㉗ NC-198). 처음에는 표의 모든 칸을
+    셌는데, 그러면 「무엇을 어긋냈나」 칸이나 실측 표에 이름이 든 다른 줄이 기록을 대신
+    채웠다 — 155 의 `chmod -x` 줄을 지워도 초록이었고(㉖ R4), 그 이름을 둘째 칸에 든
+    189 줄이 그 틈을 만들었다(어긋내 확인했다). 셋째 칸이 없는 줄은 세지 않는다.
     """
     recorded = {
         name
-        for line in _MUTATIONS.read_text().splitlines()
-        if line.startswith("|")
-        for name in _TEST_NAME.findall(line)
+        for _, row in _table_rows(_MUTATIONS.read_text())
+        if len(cells := _UNESCAPED_BAR.split(row.strip().removeprefix("|"))) > 2
+        for name in _TEST_NAME.findall(cells[2])
     }
     gates = [
         (path, name)

@@ -192,8 +192,11 @@ def test_the_entrypoint_lists_the_whole_chain() -> None:
     2026-09-30). **순서까지** 본다 — 목록은 head 에서 내려가는 순서로 읽힌다.
 
     **이 검사가 못 보는 부류**(W-6 ③): 각 줄의 **설명**이 그 리비전의 `downgrade()`
-    가 실제로 막는 것과 맞는가 — 뜻이라 사람이 본다. 그리고 사슬에 갈래(merge
-    리비전)가 서는 날 — 그때는 이 검사가 먼저 빨개진다.
+    가 실제로 막는 것과 맞는가 — 뜻이라 사람이 본다. **목록 밖에서 head 나 사슬의
+    길이 · 순서에 기대는 문장**도 보지 않는다 — 그런 뜻은 목록 줄의 표시(`←`)로 옮겨
+    두었다(감사 ㉗ NC-197 — 「사슬은 여덟이고」가 목록 곁에 있었고, head 위에 리비전을
+    더하고 목록만 늘리니 초록이었다). 그리고 사슬에 갈래(merge 리비전)가 서는 날 —
+    그때는 이 검사가 먼저 빨개진다.
     """
     lines = (BACKEND_ROOT / "docker-entrypoint.sh").read_text().splitlines()
     listed = [found.group(1) for line in lines if (found := _ENTRYPOINT_REVISION.match(line))]
