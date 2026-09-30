@@ -534,3 +534,15 @@ Codex 가 게이트 셋의 틈을 짚었다(라운드 점수 5 — 기존 한계
 | 198 | ⑮ 묶음 155 줄의 셋째 칸에서 `test_the_entrypoint_is_executable` 을 뺐다 | `test_every_gate_has_a_record_of_turning_red` |
 | 198 | 거기에 머리가 기록 표가 아닌 표(`가 · 나 · 다`)의 셋째 칸에 그 이름을 두었다 | `test_every_gate_has_a_record_of_turning_red` — 기록 표가 아닌 표는 세지 않는다 |
 | 198 | 대신 인용(`>`) 안의 기록 표에 그 이름을 두었다 | **없다 — 통과했다** (`test_every_gate_has_a_record_of_turning_red`) — 파서가 인용 안의 기록 표도 읽는다 |
+
+## PR #38 Codex 리뷰 2 라운드의 고침 (`08eabbc`)
+
+Codex 가 두 틈을 짚었다(라운드 점수 4 — 기존 한계 · 조용한 통과 2 · 2, 저장소에 그런 입력은 없었다). 고친 커밋
+위에서 하나씩 돌리고 되돌렸다. 고치기 전의 결과는 돌리지 않았다.
+
+| NC | 무엇을 어긋냈나 | 빨개진 검사 |
+|---|---|---|
+| — | 이 파일 끝에 NC `999` 의 초록 줄 하나를 든 기록 표를 인용(`>`) 안에 붙였다 | `test_a_mutation_that_stayed_green_is_closed_later_or_listed` |
+| — | 같은 기록 표를 앞 파이프 없이 붙였다 | `test_a_mutation_that_stayed_green_is_closed_later_or_listed` |
+| — | 초록 줄 뒤에 머리가 기록 표가 아닌 표(`가 · 나 · 다`)를 두고 첫 칸을 `999` 로 했다 | `test_a_mutation_that_stayed_green_is_closed_later_or_listed` — 설명 표의 수 칸은 빨강 줄이 아니다 |
+| — | `ci.yml` 의 `backend` 잡에 `if: false` 를 더했다 | `test_every_check_step_is_still_there_and_can_still_fail` |
