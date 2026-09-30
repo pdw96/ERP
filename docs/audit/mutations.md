@@ -50,6 +50,7 @@
 | `7d45282` | 198 | 인용(`>`) 안의 기록 표에 든 이름도 기록으로 센다 | `audit-quality` | 초록이 맞다 — 파서가 인용 안의 표도 표로 읽는다(「PR #38 Codex 리뷰 1 라운드의 고침」 묶음) |
 | `ae2170f` | — | 대장 NC 줄의 설명 칸에 이스케이프한 `\|\|` 를 넣어도 상태 칸 검사가 통과한다 | `audit-quality` | 초록이 맞다 — 이스케이프한 구분자는 칸을 가르지 않는다(「PR #38 Codex 리뷰 3 라운드의 고침」 묶음) |
 | `356e7e3` | — | 접힌 블록(`run: >`)으로 쓴 명령 · 형제 잡의 `if:` | `audit-quality` | 초록이 맞다 — YAML 이 정한 대로 읽고 `backend` 잡만 본다(「PR #38 Codex 리뷰 4 라운드의 고침」 묶음) |
+| `45d9beb` | — | 접힌 블록(`run: >`)으로 쓴 `린트` 명령 | `audit-quality` | 초록이 맞다 — 접힌 줄도 실행 줄 맨 앞의 명령이다(「PR #38 Codex 리뷰 5 라운드의 고침」 묶음) |
 
 ## ⑧ 의 고침 (`03b6c1f`)
 
@@ -578,3 +579,18 @@ CI 스텝 파싱에 쏠림 신호가 섰다(3 · 4 라운드 지적 일곱 중 �
 | — | `codeql.yml` 의 잡에 `continue-on-error: true` 를 더했다 | `test_every_check_step_is_still_there_and_can_still_fail` |
 | — | `린트` 스텝을 접힌 블록(`run: >` 아래 `ruff check` · `.` 두 줄)으로 썼다(대조군) | **없다 — 통과했다** (`test_every_check_step_is_still_there_and_can_still_fail`) — YAML 이 `ruff check .` 로 접는다 |
 | — | `backend` 앞에 `if:` 가 걸린 배포 잡을 더했다(대조군) | **없다 — 통과했다** (`test_every_check_step_is_still_there_and_can_still_fail`) — 형제 잡의 조건은 보지 않는다 |
+
+## PR #38 Codex 리뷰 5 라운드의 고침 (`45d9beb`)
+
+CI 스텝 게이트에 쏠림 신호가 두 번째로 섰고(4 · 5 라운드), 저장소 소유자가 `docs/리뷰-루프.md` 방안 B 로 정했다 —
+검사 명령은 `run` 의 실행 줄 맨 앞에 선다는 작성 규칙을 두고, `continue-on-error` 는 모든 워크플로를 YAML 로 읽는다.
+하나씩 돌리고 되돌렸다.
+
+| NC | 무엇을 어긋냈나 | 빨개진 검사 |
+|---|---|---|
+| — | `린트` 스텝을 `run: "# ruff check .` + 줄바꿈 + `echo skipped"` 로 바꿨다 | `test_every_check_step_is_still_there_and_can_still_fail` — 주석 줄은 명령이 아니다 |
+| — | `린트` 스텝을 `run: echo ruff check .` 로 바꿨다 | `test_every_check_step_is_still_there_and_can_still_fail` — 명령은 줄 맨 앞에 선다 |
+| — | `codeql.yml` 의 잡에 따옴표 키 `"continue-on-error": true` 를 더했다 | `test_every_check_step_is_still_there_and_can_still_fail` |
+| — | `.github/workflows/extra.yaml`(확장자 `.yaml`)에 `continue-on-error: true` 잡을 두었다 | `test_every_check_step_is_still_there_and_can_still_fail` |
+| — | `린트` 스텝의 `run` 줄을 지웠다 | `test_every_check_step_is_still_there_and_can_still_fail` |
+| — | `린트` 스텝을 접힌 블록(`run: >` 아래 `ruff check` · `.`)으로 썼다(대조군) | **없다 — 통과했다** (`test_every_check_step_is_still_there_and_can_still_fail`) |
