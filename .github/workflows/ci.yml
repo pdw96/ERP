@@ -116,7 +116,7 @@ jobs:
       # 경로를 가려도 **실패하지 않고**, `ENTRYPOINT` 도 실행 비트도 검증하지
       # 않으며, 런타임은 한 줄도 돌지 않는다. 앞의 둘은 `tests/test_boundary.py`
       # 가 저장소 안에서 물고(NC-155), **띄우는 것**은 DB 와 환경변수를 요구해
-      # 여기 없다 — 그 층은 `audit-ops` 의 자리다.
+      # 이 스텝이 아니라 아래 「기동」 스텝이 한다(NC-165 · 감사 ㉖ NC-194).
       - name: 이미지
         run: docker build -t erp-api:ci .
 
