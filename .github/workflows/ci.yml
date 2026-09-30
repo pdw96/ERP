@@ -75,7 +75,8 @@ jobs:
         run: ruff format --check .
 
       - name: 타입체크
-        run: mypy app migrations
+        # 범위는 인자로 적지 않는다 — `backend/pyproject.toml` 의 `[tool.mypy] files` 한 자리가 든다(ADR 0007)
+        run: mypy
 
       - name: 테스트
         env:
