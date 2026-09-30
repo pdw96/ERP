@@ -20,6 +20,8 @@
 import re
 from pathlib import Path
 
+import yaml
+
 BACKEND_ROOT = Path(__file__).resolve().parents[1]
 REPO_ROOT = BACKEND_ROOT.parent
 
@@ -55,41 +57,17 @@ _CI_STEPS = {
 }
 
 
-def _backend_job(ci: str) -> str:
-    """`ci.yml` 의 `jobs.backend` 몸 — 룰셋이 거는 잡이다. 다른 잡의 스텝이 그 자리를 채우지
-    못하게 그 잡만 자른다(PR #38 Codex 리뷰)."""
-    jobs = ci.split("\njobs:\n", 1)[1]
-    found = re.search(r"^  backend:\n(.*?)(?=^  \S|\Z)", jobs, re.M | re.S)
-    assert found, "ci.yml 에 backend 잡이 없다"
-    return found.group(1)
+def _backend_steps(ci: str) -> tuple[dict[str, object], dict[str, dict[str, object]]]:
+    """`ci.yml` 의 `jobs.backend` 와 그 스텝(이름 → 스텝) — **YAML 파서가 읽는다.**
 
-
-def _ci_steps(job: str) -> dict[str, tuple[str, str]]:
-    """잡의 스텝 — 이름 → (스텝의 **주석이 아닌** 줄, 그 스텝의 `run` 값).
-
-    명령은 `run` 값에서만 찾는다 — 스텝 블록 전체에서 찾으면 `env:` 에 옛 명령 글자를 두고
-    `run: echo skipped` 로 바꿔도 통과했다(PR #38 Codex 리뷰). `run` 은 한 줄(`run: …`)이거나
-    블록(`run: |` 아래 더 들여쓴 줄들)이다.
+    룰셋이 거는 잡이 `backend` 라 그 잡만 본다. 처음에는 손으로 줄을 갈랐는데 형제 잡의 스텝이
+    빈자리를 채우고, `env:` 에 남긴 글자가 명령으로 읽히고, 접힌 블록(`run: >`)이 YAML 과 다르게
+    이어지고, 형제 잡의 `if:` 가 거짓 양성을 냈다 — 리뷰 세 라운드가 연달아 틈을 짚었다(PR #38).
+    저장소 소유자가 파서로 바꾸기로 정했다(2026-09-30 — `docs/리뷰-루프.md` 방안 A).
     """
-    steps: dict[str, tuple[str, str]] = {}
-    for block in re.split(r"^      - ", job.split("\n    steps:\n", 1)[1], flags=re.MULTILINE):
-        named = re.match(r"name: (.+)", block)
-        if not named:
-            continue
-        code = [line for line in block.splitlines() if not line.lstrip().startswith("#")]
-        run = ""
-        for index, line in enumerate(code):
-            if (single := re.fullmatch(r"        run: (?![|>])(.+)", line)) is not None:
-                run = single.group(1)
-            elif re.fullmatch(r"        run: [|>]-?", line):
-                body = []
-                for inner in code[index + 1 :]:
-                    if inner.strip() and not inner.startswith("          "):
-                        break
-                    body.append(inner)
-                run = "\n".join(body)
-        steps[named.group(1).strip()] = ("\n".join(code), run)
-    return steps
+    job = yaml.safe_load(ci)["jobs"]["backend"]
+    steps = {step["name"]: step for step in job["steps"] if "name" in step}
+    return job, steps
 
 
 def test_every_check_step_is_still_there_and_can_still_fail() -> None:
@@ -98,36 +76,37 @@ def test_every_check_step_is_still_there_and_can_still_fail() -> None:
     머지를 막는 것은 `backend` 잡의 **이름**이다. 그래서 그 잡 안의 린트 · 타입 · 테스트 ·
     셸 · 이미지 · 기동 스텝을 지우거나 `continue-on-error: true` 를 달아도 잡은 초록이고
     머지가 된다 — 실제로 돌려 확인했다(감사 ㉕ M6-d). 위 검사가 의존성 · 잠금 줄만 물던
-    자리를 스텝 전부로 넓힌다: 스텝마다 **명령 줄이 있고**, 실패를 삼키는 장치
-    (`continue-on-error` · 스텝과 잡의 `if:` · `|| true`)가 **없다.**
+    자리를 스텝 전부로 넓힌다: `backend` 잡의 스텝마다 **`run` 값에 명령이 있고**, 실패를
+    삼키는 장치(잡과 스텝의 `continue-on-error` · `if:`, 명령의 `|| true`)가 **없다.**
 
     **이 검사가 못 보는 부류**(W-6 ③): 명령의 **인자**가 좁아진 것(`pytest tests/test_api.py`
-    처럼 — 명령 줄은 있다), 위 목록에 없는 새 스텝, 셸 안에서 실패를 삼키는 다른 모양
+    처럼 — 명령은 있다), 위 목록에 없는 새 스텝, 셸 안에서 실패를 삼키는 다른 모양
     (`set +e` · `; true`), 그리고 워크플로 밖(룰셋 · 저장소 설정)에서 검사를 끄는 것.
     """
     workflows = REPO_ROOT / ".github" / "workflows"
-    ci = (workflows / "ci.yml").read_text()
-    job = _backend_job(ci)
-    steps = _ci_steps(job)
+    job, steps = _backend_steps((workflows / "ci.yml").read_text())
     assert steps, "backend 잡에서 스텝을 찾지 못했다 — 이 검사가 아무것도 세지 않는다"
 
     missing = [
         name
         for name, command in _CI_STEPS.items()
-        if name not in steps or not re.search(command, steps[name][1])
+        if name not in steps or not re.search(command, str(steps[name].get("run", "")))
     ]
     assert missing == [], f"backend 잡에서 검사 스텝이나 그 run 명령이 사라졌다: {missing}"
 
-    swallowing = [
-        f"{name}: {found.group(0).strip()}"
-        for name, (code, _) in steps.items()
-        if (found := re.search(r"^\s+(?:continue-on-error|if):.*$|\|\|\s*true\b", code, re.M))
-    ]
-    # **잡 자체를 끄는 것도 삼킨다**(PR #38 Codex 리뷰). 룰셋이 거는 것은 `backend` 잡이고, 잡의
-    # `if:` 가 거짓이면 스텝은 한 줄도 돌지 않은 채 건너뛴 잡이 된다 — 스텝의 글자는 그대로다
-    jobs = ci.split("\njobs:\n", 1)[1]
+    # **잡 자체를 끄는 것도 삼킨다**(PR #38 Codex 리뷰). 잡의 `if:` 가 거짓이면 스텝은 한 줄도
+    # 돌지 않은 채 건너뛴 잡이 된다 — 스텝의 글자는 그대로다
+    swallowing = [f"backend 잡의 {key}" for key in ("if", "continue-on-error") if key in job]
     swallowing += [
-        f"잡의 {found.group(0).strip()}" for found in re.finditer(r"^    if:.*$", jobs, re.M)
+        f"{name}: {key}"
+        for name, step in steps.items()
+        for key in ("if", "continue-on-error")
+        if key in step
+    ]
+    swallowing += [
+        f"{name}: || true"
+        for name, step in steps.items()
+        if re.search(r"\|\|\s*true\b", str(step.get("run", "")))
     ]
     swallowing += [
         f"{path.name}: continue-on-error"
