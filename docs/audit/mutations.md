@@ -415,3 +415,13 @@ W 표에서 줄을 지워도 초록**이었다. 「첫 칸이 회차 **이름뿐
 | 190 | 그 줄 앞에 명령(`cd /app`)을 하나 넣었다 | 같은 검사 |
 | 189 | 이 파일의 표에서 `test_the_entrypoint_is_executable` 을 다른 이름으로 바꿨다 | `test_every_gate_has_a_record_of_turning_red` |
 | 189 | `_GATE_FILES` 를 비웠다 | 같은 검사 — 앵커 |
+
+## 감사 ㉖ 가 넘긴 물음 4 — 엔트리포인트 목록 대조 (`b62bb7b`)
+
+| NC | 무엇을 어긋냈나 | 빨개진 검사 |
+|---|---|---|
+| — | `docker-entrypoint.sh` 목록에서 맨 아래 줄(`3c602ffaebc3`)을 지웠다 | `test_the_entrypoint_lists_the_whole_chain` |
+| — | 목록의 첫 두 줄(`b41d7c8e5a92` · `a7c14b3e9052`)의 순서를 바꿨다 | 같은 검사 |
+| — | `migrations/versions/` 에 head 위로 리비전 하나(`ffffffffffff`)를 더하고 목록은 그대로 뒀다 | 같은 검사 — 이 검사가 선 까닭인 모양 |
+| — | `migrations/versions/` 에서 맨 아래 리비전 파일을 뺐다 | 같은 검사 — 사슬을 걷다가 멈춘다 |
+
