@@ -425,3 +425,27 @@ W 표에서 줄을 지워도 초록**이었다. 「첫 칸이 회차 **이름뿐
 | — | `migrations/versions/` 에 head 위로 리비전 하나(`ffffffffffff`)를 더하고 목록은 그대로 뒀다 | 같은 검사 — 이 검사가 선 까닭인 모양 |
 | — | `migrations/versions/` 에서 맨 아래 리비전 파일을 뺐다 | 같은 검사 — 사슬을 걷다가 멈춘다 |
 
+
+## 감사 ㉗ 이 돌린 어긋냄 (`30ef34f`)
+
+감사자 둘(`audit-quality` · `audit-internal`, 읽기 전용)이 「이것을 돌리면 판정이 확정된다」로 적어 넘긴 것을 호출자가
+실제 PostgreSQL 16 위에서 하나씩 돌리고 되돌렸다. 대장 ㉗(`audit-internal`) 절의 표와 같은 것이다. 게이트 실행은
+브리핑 보관본(`.claude/briefs/`)을 잠시 치우고 돌렸다(NC-202).
+
+| NC | 무엇을 어긋냈나 | 빨개진 검사 |
+|---|---|---|
+| 195 | 이 파일 끝에 커밋 없는 `###` 묶음을 붙이되 표를 앞 파이프 없이(`NC \| … \| …`) 썼다 | **없다 — 통과했다** (`test_a_mutation_bundle_says_which_commit_it_was_measured_on`) |
+| 195 | 같은 표를 인용(`> \| … \|`) 안에 썼다 | **없다 — 통과했다** (같은 검사) |
+| 195 | 같은 표를 줄 머리 파이프로 썼다(대조군) | `test_a_mutation_bundle_says_which_commit_it_was_measured_on` |
+| 198 | ⑮ 묶음의 155 줄(`chmod -x`)에서 `test_the_entrypoint_is_executable` 을 다른 이름으로 바꿨다 | **없다 — 통과했다** (`test_every_gate_has_a_record_of_turning_red`) — ㉕ 의 고침 묶음 189 줄이 그 이름을 대신 든다 |
+| 198 | 그 189 줄의 같은 이름도 함께 바꿨다(대조군) | `test_every_gate_has_a_record_of_turning_red` |
+| 196 | `_AWAITING` 에서 「열림」을 뺐다 | **없다 — 통과했다** (`test_an_nc_waiting_for_a_reaudit_has_a_row_that_waits_for_it`) — 대장에 「열림」 줄이 없어 그 갈래를 무는 것이 없었다 |
+| 196 | 대장 NC-192 의 상태를 굵은 「열림 — 저자 판정 대기」로 하고 「아직」 표 ㉖ 행 첫 칸에서 192 를 뺐다 | `test_an_nc_waiting_for_a_reaudit_has_a_row_that_waits_for_it` — 열림 갈래가 문다 |
+| 196 | 같은 것을 굵게 하지 않고 썼다 | **없다 — 통과했다** (같은 검사) |
+| 199 | `requirements-dev.txt` **하나만** `iniconfig` 2.3.0 → 2.0.0 으로, 해시는 실재 해시로 | **없다 — 새 가상환경의 `pip install --require-hashes` · `scripts/lock.sh --check` · `pytest` 전체가 통과했다** |
+| — | `migrations/versions/` 에 `a7c14b3e9052` 를 부모로 하는 리비전 하나를 더해 head 를 둘로 만들었다 | `test_the_entrypoint_lists_the_whole_chain` — 「head 가 하나가 아니다」 |
+| — | 거기에 두 head 를 합치는 merge 리비전(`down_revision` 이 튜플)을 더했다 | `test_the_entrypoint_lists_the_whole_chain` — 「리비전 줄을 읽지 못했다」 |
+| — | 맨 아래 리비전(`3c602ffaebc3`) 파일을 뺐다 | `test_the_entrypoint_lists_the_whole_chain` — 단언이 아니라 `KeyError` |
+| 197 | head 위에 리비전 하나를 더하고 엔트리포인트 목록 맨 위에 그 줄을 넣되 「사슬은 여덟이고」는 그대로 뒀다 | **없다 — 통과했다** (`test_the_entrypoint_lists_the_whole_chain`) |
+
+**통과한 줄은 전부 여전히 초록이다** — 이 회차는 고치지 않았다. 각 줄의 NC 가 열림으로 든다.
