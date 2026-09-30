@@ -94,7 +94,8 @@ jobs:
       # `set -euo pipefail` 이 **사라지는 것**. shellcheck 는 그 줄을 요구하지
       # 않으므로 지워도 통과한다 — 실제로 돌려 확인했다(감사 ⑬ NC-147). 그 줄이
       # 없으면 `alembic upgrade head` 가 실패해도 `exec "$@"` 가 돌아 **반쯤
-      # 마이그레이션된 DB 위에 API 가 뜨는데**, 그것을 무는 것은 여전히 사람이다.
+      # 마이그레이션된 DB 위에 API 가 뜨는데**, 그것은 `tests/test_boundary.py` 가
+      # 문다(감사 ㉕ NC-190).
       # 그리고 이 스텝은 **엔트리포인트를 실행하지 않는다.** 실행 비트는
       # `tests/test_boundary.py` 가 문다(감사 ⑮ NC-155).
       #

@@ -372,3 +372,46 @@ W 표에서 줄을 지워도 초록**이었다. 「첫 칸이 회차 **이름뿐
 
 반대 방향도 쟀다 — 앞의 셋은 **표 쪽**을, 넷째는 **대장 쪽**을 어긋냈다. 게이트가 두 표를
 함께 읽는다는 것이 둘 다 빨개져야 드러난다.
+
+## 감사 ㉕ 가 돌린 어긋냄 (`6402ccb`)
+
+감사자(읽기 전용)가 「이것을 돌리면 판정이 확정된다」로 적어 넘긴 것을 호출자가 돌렸다. 대장 ㉕ 절의
+표와 같은 것이고, **기록의 자리는 여기다**(감사 ㉕ NC-189 — NC-156 의 잔여). 하나씩 돌리고 되돌렸다.
+
+| NC | 무엇을 어긋냈나 | 빨개진 검사 |
+|---|---|---|
+| 186 | `mutations.md` 끝에 커밋 없는 `###` 묶음(표 하나)을 붙였다 | **없다 — 통과했다** (`test_a_mutation_bundle_says_which_commit_it_was_measured_on`). 같은 것을 `## ` 로 쓰면 그 검사가 빨갛다 |
+| 188 | 대장 회차별 W 표의 `⑦-b` 행을 지웠다 | **없다 — 통과했다** (`test_a_round_that_closed_leaves_a_line_in_the_round_table`). ⑦ 번호 대조표의 `⑦` 두 줄까지 지우면 빨갛다 — 가리는 것이 다른 표다 |
+| 187 | 「아직 아무도 보지 않은 것」의 ⑪ 행에서 지운 줄 표시(`~~`)를 벗겼다 | **없다 — 통과했다** (`test_a_row_still_waiting_does_not_wait_on_a_closed_nc`) — 드는 132 · 133 이 둘 다 부분 닫힘이다 |
+| 187 | 바꾸지 않고 돌렸다 — NC-157(고침)을 기다리는 줄이 표에 없다 | **없다 — 통과했다** (같은 검사) |
+| 190 | `docker-entrypoint.sh` 의 `set -euo pipefail` 을 지웠다 | **없다 — 통과했다** — `tests/test_boundary.py` 전부와 `shellcheck` |
+| 191 | 두 잠금의 `idna==3.20` 을 함께 `3.19` 로(해시는 그대로) | **없다 — `scripts/lock.sh --check` 가 exit 0.** 하나만 바꾸면 exit 1. 감사자가 적은 `3.10` 은 의존자의 `idna>=3.18` 을 어겨 둘 다 바꿔도 풀이가 깨졌다 |
+| — | `_CLAUDE_MD_CEILING` 을 100 으로 | `test_claude_md_stays_short` |
+| — | 대장 ㉔ 절의 「감사한 커밋」 줄을 지웠다 | `test_a_round_section_names_the_commit_it_audited` |
+| — | `_NO_COMMIT_LINE` 에서 ⑲ 항목을 지웠다 | `test_a_round_section_names_the_commit_it_audited` |
+| — | 대장 산문 사이에 `> ## 감사 ㉖ — 시험` 한 줄을 넣었다 | `test_a_round_section_names_the_commit_it_audited` — 「감사 머리는 줄 머리의 `## 감사 ` 로 쓴다」 |
+| 157 | `_cells` 의 이스케이프 구분자 처리(`row.replace(...)`)를 뺐다 | `test_a_table_row_does_not_carry_a_cell_the_header_did_not_declare` |
+| — | `ci.yml` 잠금 스텝 끝에 `\|\| true` 를 붙였다 | `test_the_image_and_ci_install_from_the_lock_and_check_it` |
+| — | 잠금 스텝에 `continue-on-error: true` 를 더했다 | **없다 — 통과했다** (같은 검사) — ㉕ OB-2 |
+| 179 | 기다리는 표 게이트가 닫힌 NC 를 넷째 칸으로 읽게 했다(`cells[4]` → `cells[3]`) | `test_a_row_still_waiting_does_not_wait_on_a_closed_nc` — 앵커 |
+| 179 | 같은 게이트의 `_waiting_on` 이 빈 집합을 돌려주게 했다 | 같은 검사 — 다른 앵커 |
+
+**통과한 줄 가운데 186 · 188 · 190 의 줄과 187 의 둘째 줄은 이 회차의 고침이 문다**(아래 묶음).
+나머지는 **여전히 초록이다** — 187 의 첫 줄(부분 닫힘만 드는 줄)은 게이트의 「못 보는 부류」에,
+191 의 줄은 `scripts/lock.sh` 머리의 「못 보는 것」에 적었고, `continue-on-error` 줄은 ㉕ OB-2 로 남았다.
+
+## 감사 ㉕ 의 고침 (`4abd1b6`)
+
+| NC | 무엇을 어긋냈나 | 빨개진 검사 |
+|---|---|---|
+| 186 | `mutations.md` 끝에 커밋 없는 `###` 묶음을 붙였다 | `test_a_mutation_bundle_says_which_commit_it_was_measured_on` — 고치기 전에는 통과했다 |
+| 186 | 파일 머리(제목 앞)에 표를 하나 두었다 | 같은 검사 |
+| 186 | 옛 절(`감사 ㉓ 의 고침`) 밑에 둘째 표를 덧붙였다 | **없다 — 통과했다.** 그 절의 커밋을 빌린다 — 게이트의 「못 보는 부류」에 적었다 |
+| 188 | 회차별 W 표의 `⑦-b` 행을 지웠다 | `test_a_round_that_closed_leaves_a_line_in_the_round_table` — 고치기 전에는 통과했다 |
+| 187 | 「아직 아무도 보지 않은 것」의 ㉕ 행 첫 칸을 `186 ~ 190` 으로(191 이 아무 줄에도 없다) | `test_an_nc_waiting_for_a_reaudit_has_a_row_that_waits_for_it` |
+| 187 | 기다리는 상태를 `("**없음",)` 으로(집합이 빈다) | 같은 검사 — 앵커 |
+| 187 | ⑪ 행에서 지운 줄 표시를 벗겼다 | **없다 — 통과했다** (위 검사와 `test_a_row_still_waiting_does_not_wait_on_a_closed_nc`). 187 (i) — 「못 보는 부류」에 적었다 |
+| 190 | `docker-entrypoint.sh` 의 `set -euo pipefail` 을 지웠다 | `test_the_entrypoint_stops_at_the_first_failure` — 고치기 전에는 통과했다 |
+| 190 | 그 줄 앞에 명령(`cd /app`)을 하나 넣었다 | 같은 검사 |
+| 189 | 이 파일의 표에서 `test_the_entrypoint_is_executable` 을 다른 이름으로 바꿨다 | `test_every_gate_has_a_record_of_turning_red` |
+| 189 | `_GATE_FILES` 를 비웠다 | 같은 검사 — 앵커 |
