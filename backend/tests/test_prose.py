@@ -157,6 +157,17 @@ def test_claude_md_stays_short() -> None:
 
 _MUTATIONS = REPO_ROOT / "docs/audit/mutations.md"
 
+# 아직 초록인 어긋냄을 모으는 절(감사 ㉕ OB-1). 묶음이 아니라 **묶음을 가리키는 색인**이라
+# 잰 커밋이 없고, 셋째 칸도 「빨개진 검사」가 아니다 — 묶음을 훑는 게이트는 이 절을 뺀다
+_STILL_GREEN = "아직 초록인 어긋냄"
+
+
+def _mutation_bundles() -> str:
+    """`mutations.md` 에서 「아직 초록인 어긋냄」 절을 뺀 것 — 어긋냄 묶음만 남는다."""
+    text = _MUTATIONS.read_text()
+    return text.replace(_section(text, _STILL_GREEN), "\n")
+
+
 # 묶음 제목이 드는 커밋. 이 파일의 관용구가 백틱이라 백틱까지 본다 — 맨 글자만
 # 세면 산문 속의 우연한 16진 토막이 통과시킨다.
 _COMMIT = re.compile(r"`[0-9a-f]{7,40}`")
@@ -226,7 +237,7 @@ def test_a_mutation_bundle_says_which_commit_it_was_measured_on() -> None:
     """
     assert _MUTATIONS.exists(), f"{_MUTATIONS} 가 없다 — 어긋냄의 기록이 사는 자리다"
 
-    bundles = _bundles_with_a_table(_MUTATIONS.read_text())
+    bundles = _bundles_with_a_table(_mutation_bundles())
     assert bundles, "표를 든 묶음이 하나도 없다 — 이 게이트가 아무것도 세지 않는다"
 
     anchorless = [
@@ -803,7 +814,7 @@ def test_every_gate_has_a_record_of_turning_red() -> None:
     """
     recorded = {
         name
-        for _, row in _table_rows(_MUTATIONS.read_text())
+        for _, row in _table_rows(_mutation_bundles())
         if len(cells := _UNESCAPED_BAR.split(row.strip().removeprefix("|"))) > 2
         for name in _TEST_NAME.findall(cells[2])
     }
@@ -818,4 +829,68 @@ def test_every_gate_has_a_record_of_turning_red() -> None:
     assert unrecorded == [], (
         "어긋내 빨개지는 것을 본 기록이 docs/audit/mutations.md 의 표에 없다:\n"
         + "\n".join(unrecorded)
+    )
+
+
+def _green_and_later_red() -> tuple[list[tuple[str, str, int]], dict[str, int]]:
+    """묶음의 초록 줄 (커밋, NC, 줄 번호) 과, NC 마다 **마지막** 빨강 줄의 번호.
+
+    초록 줄은 셋째 칸을 `**없다` 로 연 줄이다(이 파일의 규칙). 커밋은 그 줄 위의 가장 가까운
+    제목에서 읽는다 — 이 파일의 묶음은 줄 머리의 `#` 제목으로 연다.
+    """
+    green: list[tuple[str, str, int]] = []
+    last_red: dict[str, int] = {}
+    commit = ""
+    for number, line in enumerate(_mutation_bundles().splitlines(), start=1):
+        if _ANY_HEADING.match(line):
+            found = _COMMIT.search(line)
+            commit = found.group(0).strip("`") if found else ""
+            continue
+        stripped = line.strip()
+        if not stripped.startswith("|") or set(stripped) <= set("|-: "):
+            continue
+        cells = [cell.strip() for cell in _UNESCAPED_BAR.split(stripped.removeprefix("|"))]
+        if len(cells) < 3 or cells[0] == "NC":
+            continue
+        if cells[2].startswith("**없다"):
+            green.append((commit, cells[0], number))
+        elif cells[0].isdigit():
+            last_red[cells[0]] = number
+    return green, last_red
+
+
+def test_a_mutation_that_stayed_green_is_closed_later_or_listed() -> None:
+    """**초록으로 남은 어긋냄은 뒤의 빨강으로 잇거나 「아직 초록인 어긋냄」에 든다** (㉕ OB-1).
+
+    통과한 줄은 값이 크다 — 검사가 그 자리를 지키지 않는다는 뜻이다(이 파일의 규칙). 그런데
+    **뒤에 게이트가 생겨 이제 무는 줄과 여전히 초록인 줄이 같은 모양으로 섞여** 알려진 사각을
+    뽑을 자리가 없었다 — ⑪ ③ · ⑮ OB-1 · ㉕ OB-1 에 이어 ㉗ 에서 넷째가 났다. 저장소 소유자가
+    자리와 검사를 함께 세우기로 정했다(2026-09-30).
+
+    초록 줄마다 둘 중 하나다 — 같은 NC 의 빨강 줄이 **그 뒤에** 있거나(고쳐서 문다), 초록 절에
+    그 묶음의 커밋과 NC 로 든다(닫는 조건과 지금이 함께 적힌다). 절의 줄은 닫혀도 지우지 않고
+    「지금」 칸을 고친다 — 그 사각이 언제 어떻게 닫혔는지가 남는다.
+
+    **이 게이트가 못 보는 부류**(W-6 ③): 셋째 칸을 `**없다` 로 열지 않은 옛 줄(⑧ 의 79 따위 —
+    그 규칙 전의 기록이라 고치지 않는다), 뒤의 빨강 줄이 **다른 어긋냄**을 문 것(NC 만 견준다),
+    NC 가 `—` 인 초록 줄이 한 묶음에 둘 이상일 때 어느 것인지, 그리고 절의 「지금」 칸이 참인지.
+    """
+    green, last_red = _green_and_later_red()
+    assert green, "초록 줄을 찾지 못했다 — 이 게이트가 아무것도 세지 않는다"
+
+    listed = set()
+    for _, row in _table_rows(_section(_MUTATIONS.read_text(), _STILL_GREEN)):
+        cells = _row_cells(row)
+        if cells[0] != "기록":
+            listed.update((found.strip("`"), cells[1]) for found in _COMMIT.findall(cells[0]))
+    assert listed, "「아직 초록인 어긋냄」 절에 줄이 없다 — 이 게이트가 아무것도 견주지 않는다"
+
+    loose = [
+        f"  mutations.md 의 묶음 `{commit}` · NC {nc}"
+        for commit, nc, number in green
+        if not (nc in last_red and last_red[nc] > number) and (commit, nc) not in listed
+    ]
+    assert loose == [], (
+        "초록으로 남은 어긋냄이 뒤의 빨강으로도 이어지지 않고 「아직 초록인 어긋냄」에도 "
+        "없다 — 그 절에 커밋과 NC 로 적고 닫는 조건을 적는다:\n" + "\n".join(loose)
     )
