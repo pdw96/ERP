@@ -44,6 +44,8 @@ def test_the_image_and_ci_install_from_the_lock_and_check_it() -> None:
 # **CI 의 검사 스텝과 그 스텝이 부르는 명령**(감사 ㉕ OB-2 — 저장소 소유자가 넓히기로 정했다,
 # 2026-09-30). 룰셋은 잡 이름(`backend`)만 걸므로 이 목록이 스텝의 존재를 무는 유일한 자리다.
 # 스텝을 더하면 여기도 더한다 — 빠진 스텝은 이 검사가 보지 않는다(아래 「못 보는 부류」).
+# **명령은 `run` 안에서 실행 줄의 맨 앞에 선다** — 주석(`#`)이나 `echo` 뒤에 선 글자는 명령이
+# 아니다(저장소 소유자가 정한 작성 규칙, 2026-09-30 — `docs/리뷰-루프.md` 방안 B).
 _CI_STEPS = {
     "의존성": r"pip install --require-hashes -r requirements-dev\.txt",
     "잠금": r"scripts/lock\.sh --check",
@@ -51,7 +53,7 @@ _CI_STEPS = {
     "포맷": r"ruff format --check \.",
     "타입체크": r"mypy app migrations",
     "테스트": r"pytest",
-    "셸": r"shellcheck",
+    "셸": r"git ls-files .*\| xargs .*shellcheck",
     "이미지": r"docker build ",
     "기동": r"curl -fsS -o /dev/null -X POST ",
 }
@@ -70,6 +72,33 @@ def _backend_steps(ci: str) -> tuple[dict[str, object], dict[str, dict[str, obje
     return job, steps
 
 
+def _executable_lines(step: dict[str, object]) -> list[str]:
+    """스텝의 `run` 에서 **실행되는 줄** — 앞뒤 공백을 벗기고, 빈 줄과 주석 줄은 뺀다."""
+    return [
+        line.strip()
+        for line in str(step.get("run", "")).splitlines()
+        if line.strip() and not line.strip().startswith("#")
+    ]
+
+
+def _swallowing_jobs(workflows: Path) -> list[str]:
+    """모든 워크플로(`.yml` · `.yaml`)의 잡과 스텝에 걸린 `continue-on-error` — YAML 로 읽는다.
+
+    줄 검색으로 찾으면 키에 따옴표를 붙인 `"continue-on-error"` 가 빠졌다(PR #38 Codex 리뷰).
+    """
+    found: list[str] = []
+    for path in sorted([*workflows.glob("*.yml"), *workflows.glob("*.yaml")]):
+        for name, job in (yaml.safe_load(path.read_text()).get("jobs") or {}).items():
+            if "continue-on-error" in job:
+                found.append(f"{path.name}: {name} 잡의 continue-on-error")
+            found += [
+                f"{path.name}: {name} 잡의 스텝 {step.get('name', '?')} 의 continue-on-error"
+                for step in job.get("steps") or []
+                if "continue-on-error" in step
+            ]
+    return found
+
+
 def test_every_check_step_is_still_there_and_can_still_fail() -> None:
     """**CI 의 검사 스텝이 서 있고, 떨어질 수 있다** (감사 ㉕ OB-2).
 
@@ -79,9 +108,15 @@ def test_every_check_step_is_still_there_and_can_still_fail() -> None:
     자리를 스텝 전부로 넓힌다: `backend` 잡의 스텝마다 **`run` 값에 명령이 있고**, 실패를
     삼키는 장치(잡과 스텝의 `continue-on-error` · `if:`, 명령의 `|| true`)가 **없다.**
 
+    명령은 `run` 의 **실행 줄 맨 앞**에서 찾는다 — 주석으로 막거나 `echo` 로 찍기만 한 명령은
+    명령이 아니다(PR #38 Codex 리뷰 · 저장소 소유자가 정한 작성 규칙 — `docs/리뷰-루프.md`
+    방안 B).
+
     **이 검사가 못 보는 부류**(W-6 ③): 명령의 **인자**가 좁아진 것(`pytest tests/test_api.py`
     처럼 — 명령은 있다), 위 목록에 없는 새 스텝, 셸 안에서 실패를 삼키는 다른 모양
-    (`set +e` · `; true`), 그리고 워크플로 밖(룰셋 · 저장소 설정)에서 검사를 끄는 것.
+    (`set +e` · `; true` · `if false; then …`), 그리고 워크플로 밖(룰셋 · 저장소 설정)에서
+    검사를 끄는 것. **이 검사는 실수로 지우거나 끄는 것을 막는다 — 일부러 속이려는 편집은 막지
+    않는다.** 셸은 튜링 완전해서 글자로는 끝까지 가를 수 없고, 그 자리는 diff 를 보는 사람이다.
     """
     workflows = REPO_ROOT / ".github" / "workflows"
     job, steps = _backend_steps((workflows / "ci.yml").read_text())
@@ -90,7 +125,8 @@ def test_every_check_step_is_still_there_and_can_still_fail() -> None:
     missing = [
         name
         for name, command in _CI_STEPS.items()
-        if name not in steps or not re.search(command, str(steps[name].get("run", "")))
+        if name not in steps
+        or not any(re.match(command, line) for line in _executable_lines(steps[name]))
     ]
     assert missing == [], f"backend 잡에서 검사 스텝이나 그 run 명령이 사라졌다: {missing}"
 
@@ -108,9 +144,5 @@ def test_every_check_step_is_still_there_and_can_still_fail() -> None:
         for name, step in steps.items()
         if re.search(r"\|\|\s*true\b", str(step.get("run", "")))
     ]
-    swallowing += [
-        f"{path.name}: continue-on-error"
-        for path in sorted(workflows.glob("*.yml"))
-        if re.search(r"^\s*continue-on-error:", path.read_text(), re.M)
-    ]
+    swallowing += _swallowing_jobs(workflows)
     assert swallowing == [], "CI 가 실패를 삼키는 자리가 있다:\n" + "\n".join(swallowing)
