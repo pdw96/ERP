@@ -801,22 +801,37 @@ _UNESCAPED_BAR = re.compile(r"(?<!\\)\|")
 _RECORD_HEAD = ["NC", "무엇을 어긋냈나", "빨개진 검사"]
 
 
-def _mutation_record_rows() -> list[list[str]]:
-    """어긋냄 묶음의 **기록 표** 본문 줄 — 칸마다 렌더된 글자. 표는 cmark-gfm 이 가른다."""
-    html = cmarkgfm.github_flavored_markdown_to_html(_mutation_bundles())
+def _mutation_record_rows() -> list[tuple[str, list[str], list[str]]]:
+    """어긋냄 묶음의 **기록 표** 본문 줄 — (잰 커밋, 칸의 글자, 칸의 HTML), 문서 순서대로.
 
-    def text(cell: str) -> str:
+    표와 제목은 cmark-gfm 이 가른다(`_bundles_with_a_table` 과 같다). 머리가 기록 표인 표만
+    든다 — 설명 · 실측 표의 줄은 기록이 아니다(PR #38 Codex 리뷰). 커밋은 그 표 바로 위의
+    가장 가까운 제목에서 읽는다.
+    """
+    text = _mutation_bundles()
+    html = cmarkgfm.github_flavored_markdown_to_html(text, options=Options.CMARK_OPT_SOURCEPOS)
+    lines = re.split(r"\r\n|\r|\n", text)
+
+    def plain(cell: str) -> str:
         return re.sub(r"<[^>]+>", "", cell).strip()
 
-    rows: list[list[str]] = []
-    for table in re.finditer(r"<table>(.*?)</table>", html, re.S):
-        head, _, body = table.group(1).partition("</thead>")
+    headings = {
+        int(found.group(1)): lines[int(found.group(1)) - 1]
+        for found in re.finditer(r'<h[1-6] data-sourcepos="(\d+):', html)
+    }
+    rows: list[tuple[str, list[str], list[str]]] = []
+    for table in re.finditer(r'<table data-sourcepos="(\d+):[^"]*">(.*?)</table>', html, re.S):
+        above = [number for number in headings if number < int(table.group(1))]
+        found = _COMMIT.search(headings[max(above)]) if above else None
+        commit = found.group(0).strip("`") if found else ""
+        head, _, body = table.group(2).partition("</thead>")
         if [
-            text(cell) for cell in re.findall(r"<th[^>]*>(.*?)</th>", head, re.S)
+            plain(cell) for cell in re.findall(r"<th[^>]*>(.*?)</th>", head, re.S)
         ] != _RECORD_HEAD:
             continue
-        for row in re.findall(r"<tr>(.*?)</tr>", body, re.S):
-            rows.append([text(cell) for cell in re.findall(r"<td[^>]*>(.*?)</td>", row, re.S)])
+        for row in re.findall(r"<tr[^>]*>(.*?)</tr>", body, re.S):
+            cells = [cell.strip() for cell in re.findall(r"<td[^>]*>(.*?)</td>", row, re.S)]
+            rows.append((commit, [plain(cell) for cell in cells], cells))
     return rows
 
 
@@ -843,7 +858,7 @@ def test_every_gate_has_a_record_of_turning_red() -> None:
     없는 표는 보이지 않았다.
     """
     recorded = {
-        name for cells in _mutation_record_rows() for name in _TEST_NAME.findall(cells[2])
+        name for _, cells, _ in _mutation_record_rows() for name in _TEST_NAME.findall(cells[2])
     }
     gates = [
         (path, name)
@@ -860,29 +875,19 @@ def test_every_gate_has_a_record_of_turning_red() -> None:
 
 
 def _green_and_later_red() -> tuple[list[tuple[str, str, int]], dict[str, int]]:
-    """묶음의 초록 줄 (커밋, NC, 줄 번호) 과, NC 마다 **마지막** 빨강 줄의 번호.
+    """기록 표의 초록 줄 (커밋, NC, 순번) 과, NC 마다 **마지막** 빨강 줄의 순번.
 
-    초록 줄은 셋째 칸을 `**없다` 로 연 줄이다(이 파일의 규칙). 커밋은 그 줄 위의 가장 가까운
-    제목에서 읽는다 — 이 파일의 묶음은 줄 머리의 `#` 제목으로 연다.
+    초록 줄은 셋째 칸을 굵은 `**없다` 로 연 줄이다(이 파일의 규칙). 초록과 빨강을 **같은 기록 표
+    집합**에서 읽는다 — 줄 머리 파이프로 손으로 가르면 인용 안 · 앞 파이프 없는 기록 표의 초록
+    줄이 빠지고, 설명 표의 수 칸이 빨강으로 읽혔다(PR #38 Codex 리뷰).
     """
     green: list[tuple[str, str, int]] = []
     last_red: dict[str, int] = {}
-    commit = ""
-    for number, line in enumerate(_mutation_bundles().splitlines(), start=1):
-        if _ANY_HEADING.match(line):
-            found = _COMMIT.search(line)
-            commit = found.group(0).strip("`") if found else ""
-            continue
-        stripped = line.strip()
-        if not stripped.startswith("|") or set(stripped) <= set("|-: "):
-            continue
-        cells = [cell.strip() for cell in _UNESCAPED_BAR.split(stripped.removeprefix("|"))]
-        if len(cells) < 3 or cells[0] == "NC":
-            continue
-        if cells[2].startswith("**없다"):
-            green.append((commit, cells[0], number))
+    for order, (commit, cells, html) in enumerate(_mutation_record_rows()):
+        if html[2].startswith("<strong>없다"):
+            green.append((commit, cells[0], order))
         elif cells[0].isdigit():
-            last_red[cells[0]] = number
+            last_red[cells[0]] = order
     return green, last_red
 
 
@@ -914,8 +919,8 @@ def test_a_mutation_that_stayed_green_is_closed_later_or_listed() -> None:
 
     loose = [
         f"  mutations.md 의 묶음 `{commit}` · NC {nc}"
-        for commit, nc, number in green
-        if not (nc in last_red and last_red[nc] > number) and (commit, nc) not in listed
+        for commit, nc, order in green
+        if not (nc in last_red and last_red[nc] > order) and (commit, nc) not in listed
     ]
     assert loose == [], (
         "초록으로 남은 어긋냄이 뒤의 빨강으로도 이어지지 않고 「아직 초록인 어긋냄」에도 "

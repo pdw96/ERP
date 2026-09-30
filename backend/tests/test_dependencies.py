@@ -74,7 +74,7 @@ def test_every_check_step_is_still_there_and_can_still_fail() -> None:
     셸 · 이미지 · 기동 스텝을 지우거나 `continue-on-error: true` 를 달아도 잡은 초록이고
     머지가 된다 — 실제로 돌려 확인했다(감사 ㉕ M6-d). 위 검사가 의존성 · 잠금 줄만 물던
     자리를 스텝 전부로 넓힌다: 스텝마다 **명령 줄이 있고**, 실패를 삼키는 장치
-    (`continue-on-error` · 스텝의 `if:` · `|| true`)가 **없다.**
+    (`continue-on-error` · 스텝과 잡의 `if:` · `|| true`)가 **없다.**
 
     **이 검사가 못 보는 부류**(W-6 ③): 명령의 **인자**가 좁아진 것(`pytest tests/test_api.py`
     처럼 — 명령 줄은 있다), 위 목록에 없는 새 스텝, 셸 안에서 실패를 삼키는 다른 모양
@@ -96,6 +96,12 @@ def test_every_check_step_is_still_there_and_can_still_fail() -> None:
         f"{name}: {found.group(0).strip()}"
         for name, code in steps.items()
         if (found := re.search(r"^\s+(?:continue-on-error|if):.*$|\|\|\s*true\b", code, re.M))
+    ]
+    # **잡 자체를 끄는 것도 삼킨다**(PR #38 Codex 리뷰). 룰셋이 거는 것은 `backend` 잡이고, 잡의
+    # `if:` 가 거짓이면 스텝은 한 줄도 돌지 않은 채 건너뛴 잡이 된다 — 스텝의 글자는 그대로다
+    jobs = ci.split("\njobs:\n", 1)[1]
+    swallowing += [
+        f"잡의 {found.group(0).strip()}" for found in re.finditer(r"^    if:.*$", jobs, re.M)
     ]
     swallowing += [
         f"{path.name}: continue-on-error"
