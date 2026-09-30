@@ -48,6 +48,7 @@
 | `0a92e57` | 195 | 커밋을 적은 Setext 제목 아래의 표 | `audit-quality` | 초록이 맞다 — 대조군 |
 | `bbfb6e8` | — | `테스트` 스텝의 명령을 `pytest tests/test_api.py` 로 좁혀도 스텝 검사가 통과한다 | `audit-quality` | 초록 — 스텝 검사의 「못 보는 부류」(명령의 인자). 인자까지 무는 날 닫힌다 |
 | `7d45282` | 198 | 인용(`>`) 안의 기록 표에 든 이름도 기록으로 센다 | `audit-quality` | 초록이 맞다 — 파서가 인용 안의 표도 표로 읽는다(「PR #38 Codex 리뷰 1 라운드의 고침」 묶음) |
+| `ae2170f` | — | 대장 NC 줄의 설명 칸에 이스케이프한 `\|\|` 를 넣어도 상태 칸 검사가 통과한다 | `audit-quality` | 초록이 맞다 — 이스케이프한 구분자는 칸을 가르지 않는다(「PR #38 Codex 리뷰 3 라운드의 고침」 묶음) |
 
 ## ⑧ 의 고침 (`03b6c1f`)
 
@@ -546,3 +547,15 @@ Codex 가 두 틈을 짚었다(라운드 점수 4 — 기존 한계 · 조용한
 | — | 같은 기록 표를 앞 파이프 없이 붙였다 | `test_a_mutation_that_stayed_green_is_closed_later_or_listed` |
 | — | 초록 줄 뒤에 머리가 기록 표가 아닌 표(`가 · 나 · 다`)를 두고 첫 칸을 `999` 로 했다 | `test_a_mutation_that_stayed_green_is_closed_later_or_listed` — 설명 표의 수 칸은 빨강 줄이 아니다 |
 | — | `ci.yml` 의 `backend` 잡에 `if: false` 를 더했다 | `test_every_check_step_is_still_there_and_can_still_fail` |
+
+## PR #38 Codex 리뷰 3 라운드의 고침 (`ae2170f`)
+
+Codex 가 넷을 짚었다(라운드 점수 7 — 기존 한계 · 조용한 통과 2 · 2 · 2, 시끄러운 실패 1). 고친 커밋 위에서 하나씩
+돌리고 되돌렸다. 고치기 전의 결과는 돌리지 않았다.
+
+| NC | 무엇을 어긋냈나 | 빨개진 검사 |
+|---|---|---|
+| — | `ci.yml` 의 `backend` 앞에 `린트` 스텝(`ruff check .`)을 든 잡을 더하고, `backend` 의 `린트` 스텝은 지웠다 | `test_every_check_step_is_still_there_and_can_still_fail` — 다른 잡의 스텝은 채우지 못한다 |
+| — | `린트` 스텝을 `env: {OLD_COMMAND: "ruff check ."}` 과 `run: echo skipped` 로 바꿨다 | `test_every_check_step_is_still_there_and_can_still_fail` — 명령은 `run` 값에서만 찾는다 |
+| — | 이 파일 끝에 셋째 칸이 `통과했다`(굵게도 검사 이름도 없이)인 기록 줄을 붙였다 | `test_a_mutation_that_stayed_green_is_closed_later_or_listed` — 빨강도 초록도 아닌 줄은 거절한다 |
+| — | 대장 NC-1 줄의 「무엇」 칸에 `a \|\| b` 를 넣었다 | **없다 — 통과했다** (`test_every_nc_status_opens_with_a_word_the_ledger_defined`) — 상태 칸이 밀리지 않는다 |
