@@ -47,6 +47,7 @@
 | `30ef34f` | 197 | head 위에 리비전을 더하고 목록만 늘리면 목록 곁의 「여덟」 문장이 낡아도 통과한다 | `audit-quality` | 초록 — 게이트의 「못 보는 부류」. 기대던 문장은 ㉗ 의 고침이 뺐다 |
 | `0a92e57` | 195 | 커밋을 적은 Setext 제목 아래의 표 | `audit-quality` | 초록이 맞다 — 대조군 |
 | `bbfb6e8` | — | `테스트` 스텝의 명령을 `pytest tests/test_api.py` 로 좁혀도 스텝 검사가 통과한다 | `audit-quality` | 초록 — 스텝 검사의 「못 보는 부류」(명령의 인자). 인자까지 무는 날 닫힌다 |
+| `7d45282` | 198 | 인용(`>`) 안의 기록 표에 든 이름도 기록으로 센다 | `audit-quality` | 초록이 맞다 — 파서가 인용 안의 표도 표로 읽는다(「PR #38 Codex 리뷰 1 라운드의 고침」 묶음) |
 
 ## ⑧ 의 고침 (`03b6c1f`)
 
@@ -519,3 +520,17 @@ W 표에서 줄을 지워도 초록**이었다. 「첫 칸이 회차 **이름뿐
 | — | 「아직 초록인 어긋냄」에서 `1e0a336` · 160 줄을 지웠다 | `test_a_mutation_that_stayed_green_is_closed_later_or_listed` |
 | — | 초록 줄을 하나도 고르지 못하게(`**없다` → `**없xx`) | `test_a_mutation_that_stayed_green_is_closed_later_or_listed` — 앵커 |
 | — | 초록 절의 줄을 하나도 읽지 못하게 | `test_a_mutation_that_stayed_green_is_closed_later_or_listed` — 앵커 |
+
+## PR #38 Codex 리뷰 1 라운드의 고침 (`7d45282`)
+
+Codex 가 게이트 셋의 틈을 짚었다(라운드 점수 5 — 기존 한계 · 시끄러운 실패 1, 기존 한계 · 조용한 통과 2 · 2).
+고친 커밋 위에서 하나씩 돌리고 되돌렸다. 고치기 전의 결과는 돌리지 않았다.
+
+| NC | 무엇을 어긋냈나 | 빨개진 검사 |
+|---|---|---|
+| 202 | 무시된 `.claude/worktrees/x/docs/` 에 `PRD-2단계.md` 를 두었다 | **없다 — 통과했다** (`test_a_stage_that_closed_is_not_written_as_if_it_were_now`) — 무시된 파일로 단계를 닫지 않는다 |
+| 202 | 같은 파일을 `docs/PRD-2단계.md` 로 추적 안 된 채 두었다(대조군) | `test_a_stage_that_closed_is_not_written_as_if_it_were_now` — 2단계가 닫힌 것으로 읽혀 추적하는 산문이 걸린다 |
+| 196 | 대장 NC-192 의 상태 칸을 닫지 않은 굵게(`**닫힘`)로 | `test_every_nc_status_opens_with_a_word_the_ledger_defined` |
+| 198 | ⑮ 묶음 155 줄의 셋째 칸에서 `test_the_entrypoint_is_executable` 을 뺐다 | `test_every_gate_has_a_record_of_turning_red` |
+| 198 | 거기에 머리가 기록 표가 아닌 표(`가 · 나 · 다`)의 셋째 칸에 그 이름을 두었다 | `test_every_gate_has_a_record_of_turning_red` — 기록 표가 아닌 표는 세지 않는다 |
+| 198 | 대신 인용(`>`) 안의 기록 표에 그 이름을 두었다 | **없다 — 통과했다** (`test_every_gate_has_a_record_of_turning_red`) — 파서가 인용 안의 기록 표도 읽는다 |
