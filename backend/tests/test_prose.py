@@ -286,7 +286,8 @@ def test_a_table_row_does_not_carry_a_cell_the_header_did_not_declare() -> None:
 
 _LEDGER = REPO_ROOT / "docs" / "audit" / "README.md"
 
-# 회차 기호. 대장이 ① ~ ⑳ 을 쓰고, 「⑦-b」처럼 꼬리가 붙는 회차가 있다.
+# 회차 기호. 범위를 적지 않는다 — 대장은 ⑳ 을 넘었고 기호는 유니코드에서 두 자리에
+# 나뉘어 있다(아래 `_RUN_HEAD` 가 그 이유를 든다). 「⑦-b」처럼 꼬리가 붙는 회차가 있다.
 _ROUND = re.compile(r"[①-⑳㉑-㉟㊱-㊿]")
 
 
@@ -361,7 +362,7 @@ def test_a_round_that_closed_leaves_a_line_in_the_round_table() -> None:
     견준다 — 회차가 하나 늘어도 이 검사는 낡지 않는다(NC-86).
 
     **이 게이트가 못 보는 부류**(W-6 ③): 줄은 있는데 **내용이 틀린** 것
-    (「⑨ 둘」 행이 여덟을 아홉으로 적었던 자리가 그 부류다), 꼬리로만 갈리는
+    (⑦-b 행이 아홉을 여덟으로 적었던 자리 — NC-93 — 가 그 부류다), 꼬리로만 갈리는
     회차(`⑦` 과 `⑦-b` 는 같은 기호라 한 줄로 센다), 그리고 **절도 줄도 없이
     지나간** 회차 — 그것은 이 파일이 아니라 대장 자신이 모르는 회차다.
     """
@@ -539,4 +540,76 @@ def test_a_round_section_names_the_commit_it_audited() -> None:
     assert stale == [], (
         "예외 목록의 절이 사라졌거나, 둘이 되었거나, 이제 감사한 커밋으로 연다:\n"
         + "\n".join(f"  {head}" for head in stale)
+    )
+
+
+# 「아직 아무도 보지 않은 것」 표가 기다리는 NC 를 드는 꼴 — `⑱ 이 고친 자리(142 · 166 ~ 171)`
+_WAITING = re.compile(r"(?:고친|낸) 자리\(([^)]*)\)|NC-(\d+)")
+_NC_SPAN = re.compile(r"(\d+)(?:\s*~\s*(\d+))?")
+
+
+def _section(text: str, head: str) -> str:
+    """`## <head>` 절의 몸 — 다음 `## ` 머리 앞까지."""
+    start = text.index(f"\n## {head}\n")
+    end = text.find("\n## ", start + 1)
+    return text[start : end if end != -1 else len(text)]
+
+
+def _row_cells(row: str) -> list[str]:
+    return [cell.strip() for cell in row.strip().removeprefix("|").removesuffix("|").split("|")]
+
+
+def _closed_ncs(text: str) -> set[int]:
+    closed: set[int] = set()
+    for _, row in _table_rows(_section(text, "부적합 대장")):
+        cells = _row_cells(row)
+        if cells[0].isdigit() and cells[4].startswith("**닫힘"):
+            closed.add(int(cells[0]))
+    return closed
+
+
+def _waiting_on(cell: str) -> set[int]:
+    named: set[int] = set()
+    for group, single in _WAITING.findall(cell):
+        for low, high in _NC_SPAN.findall(group or single):
+            named.update(range(int(low), int(high or low) + 1))
+    return named
+
+
+def test_a_row_still_waiting_does_not_wait_on_a_closed_nc() -> None:
+    """**「아직 아무도 보지 않은 것」 표가 이미 닫힌 NC 를 기다리지 않는다** (감사 ㉓ — NC-179).
+
+    NC-142 는 「**두 표**가 지나간 회차를 모른다」였는데 게이트는 회차별 W 표 하나에만
+    섰고, 그 뒤 이 표가 ⑫ · ⑲ 가 닫은 줄을 「아직 기다린다」로 든 채 남았다 — 같은
+    자리의 여섯째다. 사람이 적는 쪽이 또 멈췄으므로 이쪽도 기계가 센다.
+
+    **닫는 것은 재감사다**(대장 「닫는 규칙」). 그러니 첫 칸이 드는 NC 가운데 하나라도
+    닫혔으면 그 재감사는 **이미 돌았고**, 줄은 지운 줄(`~~…~~`)이 되어 결과를 적어야
+    한다. 수를 세지 않고 번호의 **집합**을 견준다 — 대장이 자라도 낡지 않는다(NC-86).
+
+    **이 게이트가 못 보는 부류**(W-6 ③): 첫 칸이 「…이 고친 자리(…)」 · 「…이 낸
+    자리(…)」 · `NC-N` 꼴이 아닌 줄, **셋째 칸의 산문**이 든 번호(「… 는 아직 기다린다」),
+    이미 지운 줄의 낡은 문장, 그리고 재감사 없이 닫히는 「갈래 추가」(대장 머리) — 그
+    번호가 닫혔어도 재감사는 돌지 않았으므로 이 게이트는 거짓 양성을 낸다. 그때는 줄을
+    지우지 말고 그 번호를 첫 칸에서 뺀다.
+    """
+    ledger = _LEDGER.read_text()
+    closed = _closed_ncs(ledger)
+    assert closed, "부적합 대장에서 닫힌 줄을 찾지 못했다 — 이 게이트가 아무것도 견주지 않는다"
+
+    waiting = _section(ledger, "아직 아무도 보지 않은 것")
+    rows = [_row_cells(row) for _, row in _table_rows(waiting)]
+    live = [cells[0] for cells in rows[1:] if not cells[0].startswith("~~")]
+    assert any(_waiting_on(first) for first in live), (
+        "기다리는 NC 를 드는 줄을 찾지 못했다 — 이 게이트가 아무것도 견주지 않는다"
+    )
+
+    stale = [
+        f"  {first[:60]} … — 닫힌 NC {sorted(_waiting_on(first) & closed)}"
+        for first in live
+        if _waiting_on(first) & closed
+    ]
+    assert stale == [], (
+        "「아직 아무도 보지 않은 것」의 살아 있는 줄이 이미 닫힌 NC 를 기다린다 — "
+        "재감사가 돌았으면 줄을 지우고 결과를 적는다:\n" + "\n".join(stale)
     )

@@ -32,10 +32,21 @@
 은 줄을 하나도 만들지 않는다.
 
 **`inspections.material_group` 은 다르다 — 조용히 내려간다.** 그 칸의 값은 사람의
-것이 아니라 품목에서 끌어온 파생이고, **다시 만들 수 있다는 주장의 근거를 이름으로
-적는다**: `fk_inspection_item`(품목이 실재한다) · `ck_inspection_item_is_raw_material`
-(원자재다) · `ck_item_material_group_matches_type`(원자재면 자재군이 있다). 셋 중
-하나가 느슨해지는 날 이 주장은 **조용히 거짓이 된다** — 그래서 근거를 적는다.
+것이 아니라 품목에서 끌어온 파생이고, **다시 만들 수 있다는 주장은 두 겹으로
+선다.** 겹마다 근거를 이름으로 적는다.
+
+- **다시 만든 값이 사라진 값과 같다** — `fk_inspection_material_group` 이
+  `(item_id, material_group)` 을 품목의 같은 쌍에 묶는다. **두 칸 모두 `NOT NULL`**
+  이라 이 외래키가 건너뛰어지는 줄이 없다(복합 외래키는 한 칸이라도 `NULL` 이면
+  통째로 빠져나간다). 그래서 내려가는 순간의 값은 품목의 자재군과 같고, 채우는
+  `UPDATE` 가 끌어오는 것이 바로 그 값이다
+- **다시 올릴 때 채우기가 비지 않는다** — `fk_inspection_item`(품목이 실재한다) ·
+  `ck_inspection_item_is_raw_material`(원자재다) ·
+  `ck_item_material_group_matches_type`(원자재면 자재군이 있다). 이 셋도
+  `inspections.item_type` 이 `NOT NULL` 이라는 전제 위에 선다 — 비면 외래키가
+  건너뛰어지고 CHECK 가 통과한다
+
+어느 고리든 느슨해지는 날 이 주장은 **조용히 거짓이 된다** — 그래서 근거를 적는다.
 
 **올릴 때 잠근다.**
 
@@ -45,7 +56,7 @@
 - 외래키는 **가리키는 표와 가리켜지는 표 양쪽을 잡는다.** 이 리비전의 외래키가
   가리키는 표는 전부 함께 잠겨 그동안 쓰기가 멈춘다 — 목록을 세지 않는다. 세면
   갈리고, 실제로 갈려서 `process_inspection_standards` 가 빠져 있었다
-- `ADD COLUMN` 은 기본값이 없어 표를 다시 쓰지 않는다(PostgreSQL 11 이후)
+- `ADD COLUMN` 은 기본값이 아예 없어 표를 다시 쓰지 않는다
 
 `migrations/env.py` 가 전체를 트랜잭션 하나로 감싸므로 첫 `ALTER` 가 잡은 잠금이
 **커밋까지** 유지된다. 오늘은 운영 데이터도 배포처도 없지만, **적혀 있지 않으면

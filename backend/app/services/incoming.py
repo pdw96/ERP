@@ -41,10 +41,9 @@ class RefusedInspection(Exception):
 
     **다만 어떤 갈래는 여기서만 막힌다.** 「그 무리에 기준이 한 줄이라도 있는가」
     같은 조건은 **줄 하나의 제약이 아니라 개수의 규칙**이라 CHECK 로 서지 않고,
-    「계산이 이미 이탈을 잡았는가」는 DB 에 대응물이 없다. 미래 입고일은 합격일
-    때만 CHECK 에 닿는다 — **불합격은 로트를 만들지 않아 그 자리를 지나간다.**
-    그러므로 이 가드들을 「DB 가 어차피 막는다」로 읽고 지우면 **아무것도 재지
-    않은 합격**이 다시 선다(NC-68 이 연 자리다).
+    「계산이 이미 이탈을 잡았는가」는 DB 에 대응물이 없다. 그러므로 이 가드들을
+    「DB 가 어차피 막는다」로 읽고 지우면 **아무것도 재지 않은 합격**이 다시
+    선다(NC-68 이 연 자리다).
 
     **사람에게 하는 말과 기계에게 하는 말을 함께 든다.** 메시지는 한국어 산문이라
     오타를 고칠 수 있어야 하는데, 부르는 쪽이 그 문자열을 보고 갈라지면 **오타를
@@ -363,11 +362,12 @@ def receive(session: Session, request: IncomingInspection) -> Judged:
     assert item.material_group is not None  # 원자재는 자재군을 갖는다 (CHECK)
 
     if request.received_date > date.today():
-        # **아직 오지 않은 물건은 검사하지 못한다.** 막지 않으면 합격일(오늘)이
-        # 입고일보다 앞서 `ck_lot_passed_after_arrival` 이 물고, 검사원은 제약
-        # 이름이 담긴 **500** 을 본다 — 잘 만들어진 요청 하나가 실마리 없는
-        # 실패로 나가는 자리였다. **같은 값이 불합격이면 201 로 지나갔다**:
-        # 불합격은 로트를 만들지 않아 그 CHECK 에 닿지 않기 때문이다.
+        # **아직 오지 않은 물건은 검사하지 못한다.** 막지 않으면 판정일(오늘)이
+        # 입고일보다 앞서 `ck_inspection_judged_after_arrival` 이 **결과와 무관하게**
+        # 물고, 검사원은 제약 이름이 담긴 **500** 을 본다 — 잘 만들어진 요청
+        # 하나가 실마리 없는 실패로 나가는 자리다. 검사 표에 도착일이 서기 전에는
+        # 로트의 `ck_lot_passed_after_arrival` 만 물어 **불합격은 201 로
+        # 지나갔다**(NC-77 · 109).
         raise RefusedInspection(
             Refusal.RECEIVED_DATE_IS_IN_THE_FUTURE,
             f"아직 오지 않은 날짜다: {request.received_date} — 받지 않은 물건은 검사할 수 없다",
