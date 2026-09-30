@@ -40,12 +40,13 @@
 | `0d9a96d` | 147 | 엔트리포인트의 `set -euo pipefail` 을 지워도 `shellcheck` 가 통과한다 | `audit-quality` | **닫혔다** — 엔트리포인트의 첫 실행 줄을 보는 검사가 문다(감사 ㉕ NC-190, `4abd1b6` 묶음의 190 줄) |
 | `1e0a336` | 160 | 스펙의 열거 이름을 더하거나 바꿔도 대조가 통과한다 — 양변이 같은 원천이다 | `audit-contract` | 초록 — 찍어 둔 스펙과 견주는 검사가 서는 날(⑯ OB-1) |
 | `6402ccb` | 191 | 두 잠금의 같은 하위 의존성을 함께 다른 실재 판으로 바꿔도 `lock.sh --check` 가 통과한다 | `audit-quality` | 초록 — 의도한 경계. 사람의 diff 검토가 그 자리다(`CHECKLIST.md` 「항상」 · ADR 0004) |
-| `6402ccb` | — | 잠금 스텝에 `continue-on-error: true` 를 달아도 통과한다(㉕ OB-2) | `audit-quality` | **닫혔다** — CI 의 검사 스텝마다 명령과 실패를 삼키는 장치를 보는 검사가 문다(아래 「감사 ㉕ OB-1 · OB-2 의 고침」 묶음) |
+| `6402ccb` | — | 잠금 스텝에 `continue-on-error: true` 를 달아도 통과한다(㉕ OB-2) | `audit-quality` | **닫혔다** — CI 의 검사 스텝마다 명령과 실패를 삼키는 장치를 보는 검사가 문다(`bbfb6e8` — 「감사 ㉕ OB-1 · OB-2 의 고침」 묶음) |
 | `4abd1b6` | 186 | 옛 절 밑에 덧붙인 둘째 표가 그 절 제목의 커밋을 빌린다 | `audit-quality` | 초록 — 묶음 게이트의 「못 보는 부류」. 새로 잰 것을 새 제목 아래 두는 규칙이 그 자리다 |
 | `4abd1b6` | 187 | 부분 닫힘만 드는 「아직」 표 줄에서 지운 줄 표시를 벗겨도 통과한다 | `audit-quality` | 초록 — 번호의 상태로는 재감사가 돌았는지 가를 수 없다(기다리는 표 게이트의 「못 보는 부류」) |
 | `30ef34f` | 199 | 개발 잠금 **하나만** 실재 해시로 판을 내려도 설치 · `lock.sh --check` · `pytest` 가 통과한다 | `audit-quality` | 초록 — 의도한 경계. 191 과 같은 자리다 |
 | `30ef34f` | 197 | head 위에 리비전을 더하고 목록만 늘리면 목록 곁의 「여덟」 문장이 낡아도 통과한다 | `audit-quality` | 초록 — 게이트의 「못 보는 부류」. 기대던 문장은 ㉗ 의 고침이 뺐다 |
 | `0a92e57` | 195 | 커밋을 적은 Setext 제목 아래의 표 | `audit-quality` | 초록이 맞다 — 대조군 |
+| `bbfb6e8` | — | `테스트` 스텝의 명령을 `pytest tests/test_api.py` 로 좁혀도 스텝 검사가 통과한다 | `audit-quality` | 초록 — 스텝 검사의 「못 보는 부류」(명령의 인자). 인자까지 무는 날 닫힌다 |
 
 ## ⑧ 의 고침 (`03b6c1f`)
 
@@ -498,3 +499,23 @@ W 표에서 줄을 지워도 초록**이었다. 「첫 칸이 회차 **이름뿐
 
 **통과한 줄은 전부 의도한 초록이다** — Setext 대조군과 무시된 파일 둘. 197 · 199 · 200 은 주석만 고쳐 어긋낼 검사가 없고,
 201 은 규칙 절의 문장이다.
+
+## 감사 ㉕ OB-1 · OB-2 의 고침 (`bbfb6e8`)
+
+저장소 소유자가 둘 다 세우기로 정했다(2026-09-30). 세운 커밋 위에서 하나씩 돌리고 되돌렸다. OB 는 NC 가 아니라
+첫 칸을 `—` 로 둔다.
+
+| NC | 무엇을 어긋냈나 | 빨개진 검사 |
+|---|---|---|
+| — | `ci.yml` 의 `린트` 스텝에서 `run: ruff check .` 줄을 지웠다 | `test_every_check_step_is_still_there_and_can_still_fail` |
+| — | `테스트` 스텝에 `continue-on-error: true` 를 더했다 | `test_every_check_step_is_still_there_and_can_still_fail` — ㉕ M6-d 에서는 통과했다 |
+| — | `셸` 스텝에 `if: false` 를 더했다 | `test_every_check_step_is_still_there_and_can_still_fail` |
+| — | `이미지` 스텝의 명령 끝에 `\|\| true` 를 붙였다 | `test_every_check_step_is_still_there_and_can_still_fail` |
+| — | `codeql.yml` 의 잡에 `continue-on-error: true` 를 더했다 | `test_every_check_step_is_still_there_and_can_still_fail` |
+| — | `_ci_steps` 가 스텝 이름을 읽지 못하게(`name:` → `nameX:`) | `test_every_check_step_is_still_there_and_can_still_fail` — 앵커 |
+| — | `테스트` 스텝의 명령을 `pytest tests/test_api.py` 로 좁혔다 | **없다 — 통과했다** (`test_every_check_step_is_still_there_and_can_still_fail`) — 명령의 인자는 보지 않는다. 「아직 초록인 어긋냄」에 들었다 |
+| — | 이 파일 끝에 NC `999` 의 초록 줄 하나를 든 묶음을 붙였다 | `test_a_mutation_that_stayed_green_is_closed_later_or_listed` |
+| — | 거기에 같은 NC 의 빨강 줄을 뒤에 더했다(대조군) | **없다 — 통과했다** (`test_a_mutation_that_stayed_green_is_closed_later_or_listed`) — 뒤의 빨강으로 이어진다 |
+| — | 「아직 초록인 어긋냄」에서 `1e0a336` · 160 줄을 지웠다 | `test_a_mutation_that_stayed_green_is_closed_later_or_listed` |
+| — | 초록 줄을 하나도 고르지 못하게(`**없다` → `**없xx`) | `test_a_mutation_that_stayed_green_is_closed_later_or_listed` — 앵커 |
+| — | 초록 절의 줄을 하나도 읽지 못하게 | `test_a_mutation_that_stayed_green_is_closed_later_or_listed` — 앵커 |
