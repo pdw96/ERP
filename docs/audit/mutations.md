@@ -26,6 +26,10 @@
   빨강 줄이 **뒤에** 서거나(고쳐서 문다), 아래 「아직 초록인 어긋냄」에 묶음의 커밋과 NC 로
   든다 — `backend/tests/test_prose.py` 가 문다(감사 ㉕ OB-1, 저장소 소유자가 정했다 2026-09-30).
   이 규칙 전의 옛 줄 가운데 다른 말로 연 것은 고치지 않는다
+- **빨개진 줄은 셋째 칸을 검사 이름(`` `test_…` ``)이나 「같은 검사」로 연다.** 고치기 전과 뒤를 한 칸에 적지
+  않고 초록 줄과 빨강 줄 둘로 나눈다 — 검사 이름이 칸 **어디에** 들어도 빨강으로 세던 때는 `**` 만 빠뜨린
+  초록 줄이 빨강으로 읽혀 색인 없이 지났다(감사 ㉘ NC-203, 저장소 소유자가 정했다 2026-09-30). 이 규칙
+  전에 한 칸에 적은 옛 줄은 `backend/tests/test_prose.py` 의 `_BEFORE_AND_AFTER` 가 이름으로 들고 고치지 않는다
 
 ## 아직 초록인 어긋냄
 
@@ -41,6 +45,7 @@
 | `1e0a336` | 160 | 스펙의 열거 이름을 더하거나 바꿔도 대조가 통과한다 — 양변이 같은 원천이다 | `audit-contract` | 초록 — 찍어 둔 스펙과 견주는 검사가 서는 날(⑯ OB-1) |
 | `6402ccb` | 191 | 두 잠금의 같은 하위 의존성을 함께 다른 실재 판으로 바꿔도 `lock.sh --check` 가 통과한다 | `audit-quality` | 초록 — 의도한 경계. 사람의 diff 검토가 그 자리다(`CHECKLIST.md` 「항상」 · ADR 0004) |
 | `6402ccb` | — | 잠금 스텝에 `continue-on-error: true` 를 달아도 통과한다(㉕ OB-2) | `audit-quality` | **닫혔다** — CI 의 검사 스텝마다 명령과 실패를 삼키는 장치를 보는 검사가 문다(`bbfb6e8` — 「감사 ㉕ OB-1 · OB-2 의 고침」 묶음) |
+| `30ef34f` | 196 | `_AWAITING` 에서 「열림」을 빼도 통과한다 — 뒤의 `0a92e57` 묶음 196 빨강 줄은 **다른** 어긋냄(상태 어휘)을 물어 이 초록을 닫지 않는다 | `audit-quality` | 초록 — 대장에 굵은 「열림」 줄이 서는 회차에 다시 잰다(감사 ㉘ NC-204 가 빠진 이 줄을 더했다) |
 | `4abd1b6` | 186 | 옛 절 밑에 덧붙인 둘째 표가 그 절 제목의 커밋을 빌린다 | `audit-quality` | 초록 — 묶음 게이트의 「못 보는 부류」. 새로 잰 것을 새 제목 아래 두는 규칙이 그 자리다 |
 | `4abd1b6` | 187 | 부분 닫힘만 드는 「아직」 표 줄에서 지운 줄 표시를 벗겨도 통과한다 | `audit-quality` | 초록 — 번호의 상태로는 재감사가 돌았는지 가를 수 없다(기다리는 표 게이트의 「못 보는 부류」) |
 | `30ef34f` | 199 | 개발 잠금 **하나만** 실재 해시로 판을 내려도 설치 · `lock.sh --check` · `pytest` 가 통과한다 | `audit-quality` | 초록 — 의도한 경계. 191 과 같은 자리다 |
@@ -51,6 +56,21 @@
 | `ae2170f` | — | 대장 NC 줄의 설명 칸에 이스케이프한 `\|\|` 를 넣어도 상태 칸 검사가 통과한다 | `audit-quality` | 초록이 맞다 — 이스케이프한 구분자는 칸을 가르지 않는다(「PR #38 Codex 리뷰 3 라운드의 고침」 묶음) |
 | `356e7e3` | — | 접힌 블록(`run: >`)으로 쓴 명령 · 형제 잡의 `if:` | `audit-quality` | 초록이 맞다 — YAML 이 정한 대로 읽고 `backend` 잡만 본다(「PR #38 Codex 리뷰 4 라운드의 고침」 묶음) |
 | `45d9beb` | — | 접힌 블록(`run: >`)으로 쓴 `린트` 명령 | `audit-quality` | 초록이 맞다 — 접힌 줄도 실행 줄 맨 앞의 명령이다(「PR #38 Codex 리뷰 5 라운드의 고침」 묶음) |
+| `a35dd14` | 203 | 굵게 하지 않은 초록 줄(`없다 — 통과했다 (…)`)이 초록 검사를 지나고, 같은 NC 의 앞 초록을 닫으며, 기록 검사의 기록을 채운다 | `audit-quality` | **닫혔다** — 빨강을 셋째 칸이 여는 모양으로 가른다(「감사 ㉘ 의 고침」 묶음의 203 줄) |
+| `a35dd14` | 204 | `_AWAITING` 에서 「열림」을 빼도 통과한다 — ㉗ Q-R3a 가 그대로이고, 다른 어긋냄을 문 196 빨강 줄이 그것을 닫은 것으로 읽혔다 | `audit-quality` | 초록 — 대장에 굵은 「열림」 줄이 서는 회차에 다시 잰다(㉘ NC-204) |
+| `a35dd14` | 205 | 머리의 셋째 칸이 「결과」인 표의 굵은 초록 줄, 초록 절 안에 둔 커밋 없는 묶음 | `audit-quality` | **닫혔다** — 기록 표가 아닌 표의 `**없다` 칸이 빨갛고, 초록 절은 색인 표만 뺀다(「감사 ㉘ 의 고침」 묶음의 205 줄) |
+| `a35dd14` | 206 | 제3 문서의 주석을 「표 18 이 설 때는」으로 되돌려도 통과한다 | `audit-quality` | **닫혔다** — 표 번호 게이트가 문다(「감사 ㉘ 의 고침」 묶음의 206 줄) |
+| `a35dd14` | 210 | `린트` 를 `echo \` 다음 줄 `ruff check .` 로 써도 스텝 검사가 통과한다 — 물리적 줄을 실행 줄로 읽는다 | `audit-internal` | 초록 — 의도한 경계. 저장소 소유자가 막지 않고 「못 보는 부류」에 두기로 정했다(㉘ NC-210). 고친 뒤에도 초록(`8154399`) |
+| `a35dd14` | — | 원시 HTML `<table>` 로 쓴 묶음을 세 게이트가 모두 보지 않는다 | `audit-quality` | 초록 — ㉘(`audit-quality`) OB-3. 오늘 0 건 |
+| `a35dd14` | — | `--exit-zero` · `working-directory` · `\|\|` 뒤의 해시 없는 설치 · CodeQL 잡의 `if: false` 에 스텝 검사가 통과한다 | `audit-quality` | 초록 — ㉘(`audit-quality`) OB-4. `--exit-zero` 를 삼킴 목록에 더하는 날 그 줄이 닫힌다 |
+| `a35dd14` | — | NC 칸을 `**196**` 로 쓴 줄이 대장 게이트 셋을 모두 빠져나간다 | `audit-quality` | 초록 — ㉘(`audit-quality`) OB-5. 오늘 0 건 |
+| `a35dd14` | — | 기록 표의 검사 이름 뒤에 대문자(`X`)를 붙여도 기록 검사가 원래 이름으로 읽는다 | `audit-quality` | 초록이 맞다 — 검사 이름은 소문자라 어긋냄 쪽의 잘못이다. 다시 잴 때 소문자 꼬리를 쓴다(㉘ 묶음) |
+| `8154399` | 204 | `_AWAITING` 에서 「열림」을 빼도 통과한다 — 고친 뒤에도 같다 | `audit-quality` | 초록 — 게이트는 고치지 않았다. `30ef34f` 196 줄과 같은 자리다 |
+| `8154399` | 206 | 표 번호가 든 줄에 문서 이름을 같은 줄에 적은 것 | `audit-quality` | 초록이 맞다 — 대조군 |
+| `8154399` | 210 | `echo \` 다음 줄의 명령 — 고친 뒤에도 같다 | `audit-internal` | 초록 — 의도한 경계(㉘ NC-210). `a35dd14` 210 줄과 같은 자리다 |
+| `143a527` | — | 옛 전 · 후 줄과 같은 (커밋, NC) 의 다른 줄에서 검사 이름을 빼도 초록 검사가 통과한다 | `audit-quality` | **닫혔다** — 예외가 셋째 칸의 여는 글자까지 든다(「PR #39 Codex 리뷰 1 라운드의 고침」 묶음) |
+| `143a527` | — | 진짜 `린트` 앞에 `echo` 만 하는 같은 이름의 `린트` 스텝을 두어도 스텝 검사가 통과한다 | `audit-quality` | **닫혔다** — `run` 스텝의 이름이 겹치면 빨갛다(같은 묶음) |
+| `5d579d9` | — | 「대표 1명을 지정한다」 줄 | `audit-quality` | 초록이 맞다 — 다른 낱말의 끝인 「표」는 표 번호가 아니다(대조군) |
 
 ## ⑧ 의 고침 (`03b6c1f`)
 
@@ -594,3 +614,92 @@ CI 스텝 게이트에 쏠림 신호가 두 번째로 섰고(4 · 5 라운드), 
 | — | `.github/workflows/extra.yaml`(확장자 `.yaml`)에 `continue-on-error: true` 잡을 두었다 | `test_every_check_step_is_still_there_and_can_still_fail` |
 | — | `린트` 스텝의 `run` 줄을 지웠다 | `test_every_check_step_is_still_there_and_can_still_fail` |
 | — | `린트` 스텝을 접힌 블록(`run: >` 아래 `ruff check` · `.`)으로 썼다(대조군) | **없다 — 통과했다** (`test_every_check_step_is_still_there_and_can_still_fail`) |
+
+## 감사 ㉘ 이 돌린 어긋냄 (`a35dd14`)
+
+감사자 둘(`audit-quality` · `audit-internal`, 읽기 전용)이 「이것을 돌리면 판정이 확정된다」로 적어 넘긴 것을 호출자가
+실제 PostgreSQL 16 위에서 하나씩 돌리고 되돌렸다. 매번 `pytest` 전체이고 기준선은 387 passed 다 — 브리핑 보관본을
+`.claude/briefs/` 에 둔 채 돌렸다(NC-202 가 닫혔다). 대장 ㉘(`audit-internal`) 절의 표와 같은 것이다.
+
+| NC | 무엇을 어긋냈나 | 빨개진 검사 |
+|---|---|---|
+| — | ⑮ 묶음 155 줄 셋째 칸의 `test_the_entrypoint_is_executable` 뒤에 대문자 `X` 를 붙였다 | **없다 — 통과했다** (`test_every_gate_has_a_record_of_turning_red`) — 이름을 읽는 정규식이 대문자 앞에서 끊어 원래 이름으로 읽었다. 어긋냄이 아무것도 바꾸지 못했다 |
+| — | ㉕ 가 돌린 묶음의 `test_claude_md_stays_short` 뒤에 대문자 `X` 를 붙였다 | **없다 — 통과했다** (같은 검사) — 같은 까닭 |
+| 198 | ⑮ 묶음 155 줄 셋째 칸의 `test_the_entrypoint_is_executable` 을 `…_x` 로 바꿨다 | `test_every_gate_has_a_record_of_turning_red` |
+| 203 | 파일 끝에 커밋 있는 `##` 묶음을 붙이고 기록 표 줄의 셋째 칸을 굵게 없이 「없다 — 통과했다 (`test_claude_md_stays_short`)」로 썼다 | **없다 — 통과했다** (`test_a_mutation_that_stayed_green_is_closed_later_or_listed`) |
+| 203 | 같은 줄을 굵게(`**없다 — 통과했다**`) 썼다(대조군) | `test_a_mutation_that_stayed_green_is_closed_later_or_listed` |
+| 203 | 그 굵은 줄 **뒤에** 같은 NC 의 굵게 없는 초록 줄을 더했다 | **없다 — 통과했다** (같은 검사) — 뒤의 줄이 앞의 초록을 닫은 것으로 읽혔다 |
+| — | ㉕ 가 돌린 묶음의 `test_claude_md_stays_short` 를 `…_x` 로 바꿨다(대조군) | `test_every_gate_has_a_record_of_turning_red` |
+| 203 | 거기에 굵게 없는 초록 줄의 묶음(셋째 칸에 `test_claude_md_stays_short`)을 더했다 | **없다 — 통과했다** (`test_every_gate_has_a_record_of_turning_red`) — 초록 줄이 기록을 채웠다 |
+| 204 | `_AWAITING` 에서 「열림」을 뺐다 | **없다 — 통과했다** (`test_an_nc_waiting_for_a_reaudit_has_a_row_that_waits_for_it`) — ㉗ 과 같다 |
+| 205 | 굵은 초록 줄의 묶음을 붙이되 표 머리 셋째 칸을 「결과」로 썼다 | **없다 — 통과했다** (`test_a_mutation_that_stayed_green_is_closed_later_or_listed`) |
+| 205 | 「아직 초록인 어긋냄」 절과 `## ⑧` 사이에 커밋 없는 `###` 묶음(굵은 초록 줄)을 넣었다 | **없다 — 통과했다** (`test_a_mutation_bundle_says_which_commit_it_was_measured_on`) |
+| 205 | 같은 블록을 파일 끝에 붙였다(대조군) | `test_a_mutation_bundle_says_which_commit_it_was_measured_on` · `test_a_mutation_that_stayed_green_is_closed_later_or_listed` |
+| — | 파일 끝에 원시 HTML `<table>` 로 쓴 묶음(셋째 칸 `<strong>없다</strong>`, 커밋 없음)을 붙였다 | **없다 — 통과했다** (`test_a_mutation_bundle_says_which_commit_it_was_measured_on`) |
+| — | `린트` 스텝을 `ruff check . --exit-zero` 로 | **없다 — 통과했다** (`test_every_check_step_is_still_there_and_can_still_fail`) |
+| — | `린트` 스텝에 `working-directory: ../docs` 를 더했다 | **없다 — 통과했다** (같은 검사) |
+| — | `의존성` 스텝 끝에 `\|\| pip install -r requirements-dev.in` 을 붙였다 | **없다 — 통과했다** (같은 검사) |
+| — | `codeql.yml` 의 `analyze` 잡에 `if: false` 를 더했다 | **없다 — 통과했다** (같은 검사) |
+| — | 대장 NC-196 행의 첫 칸을 `**196**` 로, 상태 칸을 `판정 대기` 로 바꿨다 | **없다 — 통과했다** (`test_every_nc_status_opens_with_a_word_the_ledger_defined`) |
+| 206 | `test_write_path.py` 의 주석 「수불 원장(`stock_ledger_entries`)이 설 때는」을 「표 18 이 설 때는」으로 되돌렸다 | **없다 — 통과했다** (`pytest` 전체) |
+| — | 스텝 검사의 `if "name" in step` 을 `"nameX"` 로 바꿨다 | `test_every_check_step_is_still_there_and_can_still_fail` — 「backend 잡에서 스텝을 찾지 못했다」. `bbfb6e8` 묶음의 앵커를 YAML 구현에서 다시 쟀다 |
+| 210 | `린트` 스텝을 `run: \|` 아래 `echo \` 와 다음 줄 `ruff check .` 로 썼다 | **없다 — 통과했다** (`test_every_check_step_is_still_there_and_can_still_fail`) — 셸은 `echo` 만 돌린다 |
+
+**통과한 줄은 전부 여전히 초록이다** — 이 회차는 고치지 않았다. 전부 「아직 초록인 어긋냄」에 든다 — 203 의 두 줄과 204 는 뒤에
+같은 NC 의 빨강이 있거나 있는 것처럼 읽히지만, 그것이 곧 203 · 204 가 말하는 틈이라 색인에 따로 적었다.
+
+## 감사 ㉘ 의 고침 (`8154399`)
+
+저장소 소유자의 가름대로 고친 트리(`8154399`)에서 하나씩 돌리고 되돌렸다. 실제 PostgreSQL 16, 매번 `pytest` 전체. 그
+트리에는 이 묶음이 아직 없어 기록 게이트가 새 게이트의 기록을 찾지 못해 빨갰다 — 아래 「빨개진 검사」는 **그 하나를 뺀**
+빨강이다. 같은 어긋냄을 고치기 전(`a35dd14`)에 돌린 결과는 「감사 ㉘ 이 돌린 어긋냄」 묶음이다.
+
+| NC | 무엇을 어긋냈나 | 빨개진 검사 |
+|---|---|---|
+| 203 | 파일 끝에 커밋 있는 묶음을 붙이고 셋째 칸을 굵게 없이 「없다 — 통과했다 (`test_claude_md_stays_short`)」로 썼다 | `test_a_mutation_that_stayed_green_is_closed_later_or_listed` — 빨강도 초록도 아닌 줄 |
+| 203 | 굵은 초록 줄 **뒤에** 같은 NC 의 굵게 없는 초록 줄을 더했다 | 같은 검사 — 뒤 줄이 앞 초록을 닫지 못한다 |
+| 203 | ㉕ 가 돌린 묶음의 `test_claude_md_stays_short` 를 `…_x` 로 바꾸고 굵게 없는 초록 줄의 묶음을 더했다 | 같은 검사 |
+| 205 | 굵은 초록 줄의 묶음을 붙이되 표 머리 셋째 칸을 「결과」로 썼다 | `test_a_mutation_that_stayed_green_is_closed_later_or_listed` — 기록 표가 아닌 표의 초록 줄 |
+| 205 | 「아직 초록인 어긋냄」 절과 `## ⑧` 사이에 커밋 없는 `###` 묶음(굵은 초록 줄)을 넣었다 | `test_a_mutation_bundle_says_which_commit_it_was_measured_on` · `test_a_mutation_that_stayed_green_is_closed_later_or_listed` |
+| 206 | `test_write_path.py` 의 주석 「수불 원장(`stock_ledger_entries`)이 설 때는」을 「표 18 이 설 때는」으로 되돌렸다 | `test_a_third_document_names_the_schema_document_with_a_table_number` |
+| 206 | 같은 줄을 「`docs/schema-2단계.md` 의 표 18 이 설 때는」으로 썼다(대조군) | **없다 — 통과했다** (`test_a_third_document_names_the_schema_document_with_a_table_number`) — 같은 줄에 문서 이름이 있다 |
+| 211 | `backend` 잡의 `린트` 앞에 이름 붙은 `run` 스텝(`새 검사`)을 더했다 | `test_every_check_step_is_still_there_and_can_still_fail` — 목록에 없다 |
+| 211 | 같은 자리에 이름 없는 `run` 스텝을 더했다 | 같은 검사 |
+| 203 | `_BEFORE_AND_AFTER` 에서 `("5472330", "164")` 를 뺐다 | `test_a_mutation_that_stayed_green_is_closed_later_or_listed` — 그 옛 줄이 빨강도 초록도 아닌 줄이 된다 |
+| 204 | `_AWAITING` 에서 「열림」을 뺐다 | **없다 — 통과했다** (`test_an_nc_waiting_for_a_reaudit_has_a_row_that_waits_for_it`) — 게이트는 고치지 않았다. 색인의 `30ef34f` 196 줄이 든다 |
+| 210 | `린트` 스텝을 `run: \|` 아래 `echo \` 와 다음 줄 `ruff check .` 로 썼다 | **없다 — 통과했다** (`test_every_check_step_is_still_there_and_can_still_fail`) — 의도한 경계다. 독스트링의 「못 보는 부류」에 들었다 |
+
+**통과한 줄은 닫을 것이 아니다** — 206 은 대조군이고, 204 · 210 은 의도한 경계다. 셋 다 색인이 든다.
+
+## 감사 ㉘ 의 고침 — 기록 게이트 (`e0159e2`)
+
+「감사 ㉘ 의 고침」 묶음의 트리(`8154399`)에서는 기록 게이트가 이미 빨개 이 한 줄을 가를 수 없었다. 기록을 더한 트리에서
+다시 쟀다. 실제 PostgreSQL 16, `pytest` 전체 — 기준선 388 passed.
+
+| NC | 무엇을 어긋냈나 | 빨개진 검사 |
+|---|---|---|
+| 203 | ㉕ 가 돌린 묶음의 `test_claude_md_stays_short` 를 `…_x` 로 바꾸고, 그 이름을 든 **굵은** 초록 줄의 묶음을 더했다 | `test_every_gate_has_a_record_of_turning_red` — 초록 줄의 이름은 기록이 아니다(고치기 전에는 세었다 — ㉘(`audit-quality`) OB-2) |
+
+## PR #39 Codex 리뷰 1 라운드 — 고치기 전 (`143a527`)
+
+Codex 의 지적 셋을 저장소의 실제 파일에 넣어 재현했다(`docs/리뷰-루프.md`). 같은 입력을 `main`(`a35dd14`)에도 넣어
+견줬다 — 첫째 · 셋째는 `main` 이 맞고 이 PR 이 틀린 **회귀**(5 · 5), 둘째는 `main` 도 똑같이 놓치는 **기존 한계 · 조용한
+통과**(2)다. 라운드 점수 12. `test_prose.py` · `test_dependencies.py` 만 돌렸다.
+
+| NC | 무엇을 어긋냈나 | 빨개진 검사 |
+|---|---|---|
+| — | `b701a19` 묶음 142 의 「같은 검사」 줄 하나를 「지웠다」로 바꿨다 — 같은 (커밋, NC) 의 옛 전 · 후 줄 곁 | **없다 — 통과했다** (`test_a_mutation_that_stayed_green_is_closed_later_or_listed`) — `main` 에서는 빨강 |
+| — | `backend` 잡의 `린트` 앞에 `run: echo skipped` 인 `린트` 스텝을 하나 더 뒀다 | **없다 — 통과했다** (`test_every_check_step_is_still_there_and_can_still_fail`) — `main` 도 초록 |
+| — | `docs/지나온-길.md` 에 「대표 1명을 지정한다.」 줄을 더했다 | `test_a_third_document_names_the_schema_document_with_a_table_number` — **거짓 양성**이다. `main` 에는 이 게이트가 없다 |
+
+## PR #39 Codex 리뷰 1 라운드의 고침 (`5d579d9`)
+
+같은 셋과 대조군 둘. 셋은 `test_prose.py` · `test_dependencies.py` 만, 대조군은 `pytest` 전체(실제 PostgreSQL 16)를 돌렸다.
+
+| NC | 무엇을 어긋냈나 | 빨개진 검사 |
+|---|---|---|
+| — | `b701a19` 묶음 142 의 「같은 검사」 줄 하나를 「지웠다」로 바꿨다 | `test_a_mutation_that_stayed_green_is_closed_later_or_listed` — 빨강도 초록도 아닌 줄 |
+| — | `린트` 앞에 `run: echo skipped` 인 `린트` 스텝을 하나 더 뒀다 | `test_every_check_step_is_still_there_and_can_still_fail` — 이름이 겹친다 |
+| — | 「대표 1명을 지정한다.」 줄을 더했다 | **없다 — 통과했다** (`test_a_third_document_names_the_schema_document_with_a_table_number`) — 고친 대로다 |
+| 206 | `test_write_path.py` 의 주석을 「표 18 이 설 때는」으로 되돌렸다(대조군 — 게이트가 느슨해지지 않았다) | `test_a_third_document_names_the_schema_document_with_a_table_number` |
+| 203 | `_BEFORE_AND_AFTER` 에서 `("5472330", "164")` 를 뺐다(대조군) | `test_a_mutation_that_stayed_green_is_closed_later_or_listed` |

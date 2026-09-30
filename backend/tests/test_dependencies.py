@@ -42,10 +42,13 @@ def test_the_image_and_ci_install_from_the_lock_and_check_it() -> None:
 
 
 # **CI 의 검사 스텝과 그 스텝이 부르는 명령**(감사 ㉕ OB-2 — 저장소 소유자가 넓히기로 정했다,
-# 2026-09-30). 룰셋은 잡 이름(`backend`)만 걸므로 이 목록이 스텝의 존재를 무는 유일한 자리다.
-# 스텝을 더하면 여기도 더한다 — 빠진 스텝은 이 검사가 보지 않는다(아래 「못 보는 부류」).
-# **명령은 `run` 안에서 실행 줄의 맨 앞에 선다** — 주석(`#`)이나 `echo` 뒤에 선 글자는 명령이
-# 아니다(저장소 소유자가 정한 작성 규칙, 2026-09-30 — `docs/리뷰-루프.md` 방안 B).
+# 2026-09-30). 룰셋이 CI 에서 거는 상태 체크는 잡 이름(`backend`)이라 — 스텝 하나하나는 룰셋이
+# 모른다 — 이 목록이 스텝의 존재를 무는 유일한 자리다. CodeQL 결과도 머지를 막지만(ADR 0005)
+# 그것은 따로 선 워크플로의 결과다. **목록은 `ci.yml` 의 사본이라 두 방향으로 견준다**(감사 ㉘
+# NC-211) — `run` 스텝을 더하고 여기 더하지 않으면 아래 검사가 빨개진다.
+# **명령은 `run` 안에서 줄의 맨 앞에 선다** — 주석(`#`)이나 `echo` 뒤에 선 글자는 명령이
+# 아니다(저장소 소유자가 정한 작성 규칙, 2026-09-30 — `docs/리뷰-루프.md` 방안 B). 「줄」은
+# **물리적 줄**이다(아래 `_executable_lines`).
 _CI_STEPS = {
     "의존성": r"pip install --require-hashes -r requirements-dev\.txt",
     "잠금": r"scripts/lock\.sh --check",
@@ -62,7 +65,8 @@ _CI_STEPS = {
 def _backend_steps(ci: str) -> tuple[dict[str, object], dict[str, dict[str, object]]]:
     """`ci.yml` 의 `jobs.backend` 와 그 스텝(이름 → 스텝) — **YAML 파서가 읽는다.**
 
-    룰셋이 거는 잡이 `backend` 라 그 잡만 본다. 처음에는 손으로 줄을 갈랐는데 형제 잡의 스텝이
+    룰셋이 CI 에서 거는 상태 체크가 `backend` 잡이라 그 잡만 본다(CodeQL 은 따로 선
+    워크플로다). 처음에는 손으로 줄을 갈랐는데 형제 잡의 스텝이
     빈자리를 채우고, `env:` 에 남긴 글자가 명령으로 읽히고, 접힌 블록(`run: >`)이 YAML 과 다르게
     이어지고, 형제 잡의 `if:` 가 거짓 양성을 냈다 — 리뷰 세 라운드가 연달아 틈을 짚었다(PR #38).
     저장소 소유자가 파서로 바꾸기로 정했다(2026-09-30 — `docs/리뷰-루프.md` 방안 A).
@@ -73,7 +77,13 @@ def _backend_steps(ci: str) -> tuple[dict[str, object], dict[str, dict[str, obje
 
 
 def _executable_lines(step: dict[str, object]) -> list[str]:
-    """스텝의 `run` 에서 **실행되는 줄** — 앞뒤 공백을 벗기고, 빈 줄과 주석 줄은 뺀다."""
+    """스텝의 `run` 을 **물리적 줄**로 나눈 것 — 앞뒤 공백을 벗기고, 빈 줄과 주석 줄은 뺀다.
+
+    셸이 실제로 실행하는 단위가 아니다(감사 ㉘ NC-210). 줄 끝의 `\\` 로 이어진 줄과 따옴표 안의
+    줄도 저마다 한 줄이다 — 잠금 스텝의 `scripts/lock.sh --check` 도 앞 줄에서 이어진 둘째 줄로
+    읽혀 통과한다. 그래서 `echo \\` 다음 줄에 명령을 두면 셸은 `echo` 만 돌리는데 이 검사는
+    명령이 있다고 읽는다(아래 검사의 「못 보는 부류」).
+    """
     return [
         line.strip()
         for line in str(step.get("run", "")).splitlines()
@@ -102,19 +112,23 @@ def _swallowing_jobs(workflows: Path) -> list[str]:
 def test_every_check_step_is_still_there_and_can_still_fail() -> None:
     """**CI 의 검사 스텝이 서 있고, 떨어질 수 있다** (감사 ㉕ OB-2).
 
-    머지를 막는 것은 `backend` 잡의 **이름**이다. 그래서 그 잡 안의 린트 · 타입 · 테스트 ·
-    셸 · 이미지 · 기동 스텝을 지우거나 `continue-on-error: true` 를 달아도 잡은 초록이고
-    머지가 된다 — 실제로 돌려 확인했다(감사 ㉕ M6-d). 위 검사가 의존성 · 잠금 줄만 물던
-    자리를 스텝 전부로 넓힌다: `backend` 잡의 스텝마다 **`run` 값에 명령이 있고**, 실패를
-    삼키는 장치(잡과 스텝의 `continue-on-error` · `if:`, 명령의 `|| true`)가 **없다.**
+    CI 에서 머지를 막는 상태 체크는 `backend` 잡의 **이름**이다 — 잡 안의 스텝은 룰셋이 모른다.
+    **돌려 확인한 것**은 하나다: 잠금 스텝에 `continue-on-error: true` 를 달아도 그때의 검사가
+    초록이었다(감사 ㉕ M6-d). 다른 스텝을 지우거나 끄는 것, 그리고 그때 잡이 초록이고 머지가
+    된다는 것은 **읽어서 판단한 것**이다 — 스텝의 실패를 삼키면 잡이 실패하지 않는다는 GitHub
+    Actions 의 정의에서 온다(감사 ㉘ NC-212). 위 검사가 의존성 · 잠금 줄만 물던 자리를 스텝
+    전부로 넓힌다: **목록의** 스텝마다 **`run` 값에 명령이 있고**, `backend` 잡의 `run` 스텝이
+    전부 목록에 들며, 실패를 삼키는 장치(잡과 스텝의 `continue-on-error` · `if:`, 명령의
+    `|| true`)가 **없다.**
 
-    명령은 `run` 의 **실행 줄 맨 앞**에서 찾는다 — 주석으로 막거나 `echo` 로 찍기만 한 명령은
+    명령은 `run` 의 **물리적 줄 맨 앞**에서 찾는다 — 주석으로 막거나 `echo` 로 찍기만 한 명령은
     명령이 아니다(PR #38 Codex 리뷰 · 저장소 소유자가 정한 작성 규칙 — `docs/리뷰-루프.md`
     방안 B).
 
     **이 검사가 못 보는 부류**(W-6 ③): 명령의 **인자**가 좁아진 것(`pytest tests/test_api.py`
-    처럼 — 명령은 있다), 위 목록에 없는 새 스텝, 셸 안에서 실패를 삼키는 다른 모양
-    (`set +e` · `; true` · `if false; then …`), 그리고 워크플로 밖(룰셋 · 저장소 설정)에서
+    처럼 — 명령은 있다), 셸 안에서 실패를 삼키는 다른 모양(`set +e` · `; true` ·
+    `if false; then …`), 줄 끝의 `\\` 로 앞 줄에 이어 붙인 명령(`echo \\` 다음 줄 — 물리적 줄로
+    읽는다, 감사 ㉘ NC-210), 그리고 워크플로 밖(룰셋 · 저장소 설정)에서
     검사를 끄는 것. **이 검사는 실수로 지우거나 끄는 것을 막는다 — 일부러 속이려는 편집은 막지
     않는다.** 셸은 튜링 완전해서 글자로는 끝까지 가를 수 없고, 그 자리는 diff 를 보는 사람이다.
     """
@@ -129,6 +143,24 @@ def test_every_check_step_is_still_there_and_can_still_fail() -> None:
         or not any(re.match(command, line) for line in _executable_lines(steps[name]))
     ]
     assert missing == [], f"backend 잡에서 검사 스텝이나 그 run 명령이 사라졌다: {missing}"
+
+    # **반대 방향**(감사 ㉘ NC-211) — 목록은 `ci.yml` 의 사본이라 한 방향만 견주면 새 스텝이
+    # 목록 밖에 선다. `run` 스텝은 전부 이름이 있고 목록에 든다(`uses` 스텝은 검사 스텝이
+    # 아니다)
+    unlisted = [
+        str(step.get("name", "(이름 없는 run 스텝)"))
+        for step in job["steps"]
+        if "run" in step and step.get("name") not in _CI_STEPS
+    ]
+    assert unlisted == [], (
+        f"backend 잡의 run 스텝이 _CI_STEPS 에 없다 — 목록에 더한다: {unlisted}"
+    )
+
+    # 이름으로 모으면 같은 이름의 스텝이 하나로 접힌다 — 진짜 `린트` 앞에 `echo` 만 하는
+    # `린트` 를 두어도 초록이었다(PR #39 Codex 리뷰). `run` 스텝의 이름은 겹치지 않는다
+    names = [step.get("name") for step in job["steps"] if "run" in step]
+    twice = sorted({str(name) for name in names if names.count(name) > 1})
+    assert twice == [], f"backend 잡의 run 스텝 이름이 겹쳐 하나로 접힌다: {twice}"
 
     # **잡 자체를 끄는 것도 삼킨다**(PR #38 Codex 리뷰). 잡의 `if:` 가 거짓이면 스텝은 한 줄도
     # 돌지 않은 채 건너뛴 잡이 된다 — 스텝의 글자는 그대로다
