@@ -160,7 +160,8 @@ def test_claude_md_stays_short() -> None:
 
 # 두 스키마 문서의 표 번호 — 「표 N」 · 「§N」. 「N번」은 「N 회」와 겹쳐 세지 않고,
 # 「표 N개」는 수라 번호가 아니다
-_TABLE_NUMBER = re.compile(r"(?:표|§)\s?\d{1,2}(?!\d|\s?개)")
+# 「표」 앞에 한글이 붙으면 다른 낱말의 끝이다(「대표 1명」 — PR #39 Codex 리뷰)
+_TABLE_NUMBER = re.compile(r"(?<![가-힣])(?:표|§)\s?\d{1,2}(?!\d|\s?개)")
 _SCHEMA_DOCUMENTS = ("schema.md", "schema-2단계.md")
 
 # 번호를 문서 이름 없이 써도 되는 파일 — 이름과 사유로 든다
@@ -984,13 +985,14 @@ _RED_OPENING = re.compile(r"<code>test_|같은 검사")
 
 # 한 칸에 「고치기 전에는 초록, 고친 뒤 빨강」을 함께 적은 **옛 줄** — 뒤의 빨강을 기록하므로
 # 빨강으로 센다. 빨강 줄의 여는 모양(`_RED_OPENING`)이 서기 전의 기록이라 고치지 않는다. 새로
-# 적을 때는 두 줄로 나눈다 — 초록 줄과 빨강 줄
+# 적을 때는 두 줄로 나눈다 — 초록 줄과 빨강 줄. **셋째 칸이 여는 글자까지 든다** — (커밋, NC)
+# 만으로는 같은 묶음 · 같은 NC 의 다른 줄까지 봐주었다(PR #39 Codex 리뷰)
 _BEFORE_AND_AFTER = {
-    ("b2bb637", "153"): "고치기 전 · 고친 뒤",
-    ("b2bb637", "155"): "고치기 전 · 고친 뒤",
-    ("5472330", "164"): "처음 · 고친 뒤",
-    ("b701a19", "142"): "첫 판 · 좁힌 뒤",
-    ("9c09a96", "109"): "처음 · 떼어 둔 뒤",
+    ("b2bb637", "153"): "고치기 전에는",
+    ("b2bb637", "155"): "고치기 전에는",
+    ("5472330", "164"): "처음에는 없었다",
+    ("b701a19", "142"): "첫 판에서는",
+    ("9c09a96", "109"): "처음에는 통과했다",
 }
 
 
@@ -1014,7 +1016,9 @@ def _green_and_later_red() -> tuple[list[tuple[str, str, int]], dict[str, int]]:
     for order, (commit, cells, html) in enumerate(_mutation_record_rows()):
         if html[2].startswith("<strong>없다"):
             green.append((commit, cells[0], order))
-        elif _RED_OPENING.match(html[2]) or (commit, cells[0]) in _BEFORE_AND_AFTER:
+        elif _RED_OPENING.match(html[2]) or cells[2].startswith(
+            _BEFORE_AND_AFTER.get((commit, cells[0]), "\0")
+        ):
             if cells[0].isdigit():
                 last_red[cells[0]] = order
         elif (commit, cells[0]) not in _LEGACY_RESULT:

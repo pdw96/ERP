@@ -156,6 +156,12 @@ def test_every_check_step_is_still_there_and_can_still_fail() -> None:
         f"backend 잡의 run 스텝이 _CI_STEPS 에 없다 — 목록에 더한다: {unlisted}"
     )
 
+    # 이름으로 모으면 같은 이름의 스텝이 하나로 접힌다 — 진짜 `린트` 앞에 `echo` 만 하는
+    # `린트` 를 두어도 초록이었다(PR #39 Codex 리뷰). `run` 스텝의 이름은 겹치지 않는다
+    names = [step.get("name") for step in job["steps"] if "run" in step]
+    twice = sorted({str(name) for name in names if names.count(name) > 1})
+    assert twice == [], f"backend 잡의 run 스텝 이름이 겹쳐 하나로 접힌다: {twice}"
+
     # **잡 자체를 끄는 것도 삼킨다**(PR #38 Codex 리뷰). 잡의 `if:` 가 거짓이면 스텝은 한 줄도
     # 돌지 않은 채 건너뛴 잡이 된다 — 스텝의 글자는 그대로다
     swallowing = [f"backend 잡의 {key}" for key in ("if", "continue-on-error") if key in job]
