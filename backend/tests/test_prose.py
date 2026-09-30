@@ -139,19 +139,28 @@ _MUTATIONS = REPO_ROOT / "docs/audit/mutations.md"
 _COMMIT = re.compile(r"`[0-9a-f]{7,40}`")
 
 
-def _bundles_with_a_table(text: str) -> list[tuple[int, str]]:
-    """`## ` 절 가운데 **표를 든 것**만 돌려준다 — 그것이 어긋냄의 기록이다.
+# 제목 줄 — 수준을 가리지 않는다(감사 ㉕ NC-186)
+_ANY_HEADING = re.compile(r"#{1,6} ")
 
-    제목의 문구에 기대지 않는 이유는 위 게이트의 독스트링에 있다(NC-153).
+
+def _bundles_with_a_table(text: str) -> list[tuple[int, str]]:
+    """**표마다** 그 표 바로 위의 가장 가까운 제목을 돌려준다 — 표가 어긋냄의 기록이다.
+
+    제목의 문구에 기대지 않는 이유는 아래 게이트의 독스트링에 있다(NC-153). 제목의
+    **수준**에도 기대지 않는다(NC-186) — `## ` 만 보면 `###` 묶음과 한 절의 둘째 표가
+    훑는 집합 밖에 섰다. 위에 제목이 없는 표는 그 표의 첫 줄을 제목 자리에 둔다 —
+    커밋이 없으니 빨갛다.
     """
     found: list[tuple[int, str]] = []
     heading: tuple[int, str] | None = None
+    in_table = False
     for number, line in enumerate(text.splitlines(), start=1):
-        if line.startswith("## "):
+        if _ANY_HEADING.match(line):
             heading = (number, line)
-        elif line.startswith("|") and heading is not None:
-            found.append(heading)
-            heading = None
+        row = line.startswith("|")
+        if row and not in_table:
+            found.append(heading if heading is not None else (number, line))
+        in_table = row
     return found
 
 
@@ -169,12 +178,16 @@ def test_a_mutation_bundle_says_which_commit_it_was_measured_on() -> None:
     **훑을 것을 낱말로 고르지 않는다** (감사 ⑮ NC-153). 처음에는 제목에 「고침」이
     든 절만 셌는데, 그러면 제목을 달리 지은 묶음이 **훑는 집합에 아예 들어오지
     않아** 커밋이 없어도 초록이다 — NC-132 가 낸 그 모양 그대로다. 어긋내 확인했다.
-    묶음을 가르는 것은 제목의 문구가 아니라 **그 절이 표를 들고 있는가**이며, 이
-    파일에서 표를 드는 절은 기록이고 들지 않는 절은 산문이다.
+    묶음을 가르는 것은 제목의 문구가 아니라 **표**이며, 이 파일에서 표는 기록이고
+    표가 아닌 것은 산문이다. **표마다 바로 위의 제목**을 본다 — 처음에는 `## ` 절의
+    첫 표만 셌는데, 그러면 `###` 묶음과 한 절에 덧붙인 둘째 표가 커밋 없이도 초록이었다
+    (감사 ㉕ NC-186, 어긋내 확인했다).
 
     **이 게이트가 못 보는 부류**(W-6 ③): 커밋이 적혀 있으나 **그 트리가 아닌**
     것 — 모양만 보고 값을 보지 않는다. 그리고 「`X` 뒤」처럼 **바탕**을 가리키는
-    옛 형태도 통과한다. 둘 다 기계가 가를 수 없어 규칙이 산문으로 남는다.
+    옛 형태도 통과한다. 둘 다 기계가 가를 수 없어 규칙이 산문으로 남는다. **옛 절
+    밑에 나중에 덧붙인 표**도 그 절 제목의 커밋을 빌려 통과한다 — 새로 잰 것은 새
+    제목 아래에 둔다.
     """
     assert _MUTATIONS.exists(), f"{_MUTATIONS} 가 없다 — 어긋냄의 기록이 사는 자리다"
 
@@ -339,10 +352,28 @@ def _rounds_with_a_section(text: str) -> set[str]:
 _ROUND_LABEL = re.compile(r"[①-⑳㉑-㉟㊱-㊿](?:-b)?(?:\s+[가-힣]{1,3})?\Z")
 
 
+# 회차별 W 표가 사는 절의 머리 — 머리 뒤의 수(「— 0 건」)는 바뀔 수 있어 앞머리로 찾는다
+_ROUND_TABLE_HEAD = "### 기한이 지난 W"
+
+
+def _round_table(text: str) -> str:
+    """회차별 W 표의 절 — 그 머리부터 다음 제목 앞까지 (감사 ㉕ NC-188).
+
+    대장 **전체**를 훑으면 다른 표(⑦ 번호 대조표의 `⑦` 행 따위)가 회차를 채워, W 표의
+    줄을 지워도 초록이었다.
+    """
+    lines = text.splitlines()
+    start = next(i for i, line in enumerate(lines) if line.startswith(_ROUND_TABLE_HEAD))
+    end = next(
+        (i for i in range(start + 1, len(lines)) if _ANY_HEADING.match(lines[i])), len(lines)
+    )
+    return "\n".join(lines[start:end])
+
+
 def _rounds_in_the_round_table(text: str) -> set[str]:
     """회차별 W 표에 줄이 있는 회차들 — 첫 칸이 **회차 이름뿐인** 행만 센다."""
     found: set[str] = set()
-    for _, row in _table_rows(text):
+    for _, row in _table_rows(_round_table(text)):
         first = row.strip("|").split("|")[0].strip()
         if _ROUND_LABEL.fullmatch(first):
             found.update(_ROUND.findall(first))
@@ -360,6 +391,9 @@ def test_a_round_that_closed_leaves_a_line_in_the_round_table() -> None:
 
     **수를 세지 않는다.** 회차 절이 선 기호와 표에 줄이 있는 기호를 **집합으로**
     견준다 — 회차가 하나 늘어도 이 검사는 낡지 않는다(NC-86).
+
+    **W 표의 절만 훑는다**(감사 ㉕ NC-188). 대장 전체를 훑었을 때는 ⑦ 번호 대조표의
+    `⑦` 행이 기호 ⑦ 을 채워, W 표에서 `⑦-b` 행을 지워도 초록이었다(어긋내 확인했다).
 
     **이 게이트가 못 보는 부류**(W-6 ③): 줄은 있는데 **내용이 틀린** 것
     (⑦-b 행이 아홉을 여덟으로 적었던 자리 — NC-93 — 가 그 부류다), 꼬리로만 갈리는
@@ -592,7 +626,10 @@ def test_a_row_still_waiting_does_not_wait_on_a_closed_nc() -> None:
     자리(…)」 · `NC-N` 꼴이 아닌 줄, **셋째 칸의 산문**이 든 번호(「… 는 아직 기다린다」),
     이미 지운 줄의 낡은 문장, 그리고 재감사 없이 닫히는 「갈래 추가」(대장 머리) — 그
     번호가 닫혔어도 재감사는 돌지 않았으므로 이 게이트는 거짓 양성을 낸다. 그때는 줄을
-    지우지 말고 그 번호를 첫 칸에서 뺀다.
+    지우지 말고 그 번호를 첫 칸에서 뺀다. **재감사가 돌았는데 드는 번호가 하나도 닫히지
+    않은 줄**(전부 부분 닫힘이나 유지로 남은 줄)도 못 본다 — 번호의 상태로는 재감사가
+    돌았는지 가를 수 없다(감사 ㉕ NC-187 (i)). 반대 방향 — **아무 줄도 기다리지 않는
+    NC** — 는 아래 게이트가 문다.
 
     **담당이 여럿인 줄도 거짓 양성을 낸다**(감사 ㉔ — NC-185). 한 담당이 제 몫을 닫아도
     다른 담당은 아직 기다린다 — 대장의 ⑧ 셋 행과 ⑫ 행이 그랬다. 그 줄을 지우면 남은
@@ -619,4 +656,88 @@ def test_a_row_still_waiting_does_not_wait_on_a_closed_nc() -> None:
         "「아직 아무도 보지 않은 것」의 살아 있는 줄이 이미 닫힌 NC 를 기다린다 — "
         "재감사가 돌았으면 줄을 지우고 결과를 적는다(담당이 여럿이면 줄을 담당별로 나눈다):\n"
         + "\n".join(stale)
+    )
+
+
+# 재감사를 기다리는 상태 — 고쳤거나(재감사가 닫는다), 새로 났거나(저자 판정 뒤 재감사가 닫는다)
+_AWAITING = ("**고침", "**열림")
+
+
+def _awaiting_ncs(text: str) -> set[int]:
+    awaiting: set[int] = set()
+    for _, row in _table_rows(_section(text, "부적합 대장")):
+        cells = _row_cells(row)
+        if cells[0].isdigit() and cells[4].startswith(_AWAITING):
+            awaiting.add(int(cells[0]))
+    return awaiting
+
+
+def test_an_nc_waiting_for_a_reaudit_has_a_row_that_waits_for_it() -> None:
+    """**재감사를 기다리는 NC 는 「아직 아무도 보지 않은 것」의 살아 있는 줄이 든다** (NC-187).
+
+    위 게이트는 「살아 있는 줄이 **닫힌** NC 를 기다리는가」만 본다 — 반대 방향, **아무도
+    기다리지 않는 NC** 는 초록이었다. 실제로 NC-157 이 그랬다. ⑮ 의 고침 중에 저자가
+    낸 줄인데 ⑮ 행의 첫 칸(153 ~ 156)에 들지 않았고, 그 재감사는 호출자가 범위에 적어
+    주어서야 돌았다(감사 ㉕). 번호의 집합끼리 견준다 — 위 게이트와 같은 형태다.
+
+    **이 게이트가 못 보는 부류**(W-6 ③): 상태 칸이 「고침」 · 「열림」으로 시작하지 않는데
+    재감사를 기다리는 줄(「부분 닫힘」은 잇는 NC 가 닫혀야 닫히므로 그 NC 가 대신 든다),
+    그리고 줄이 번호를 들되 **담당이 틀린** 것 — 그 줄의 감사자 칸은 보지 않는다.
+    """
+    ledger = _LEDGER.read_text()
+    awaiting = _awaiting_ncs(ledger)
+    assert awaiting, "재감사를 기다리는 NC 를 찾지 못했다 — 이 게이트가 아무것도 견주지 않는다"
+
+    waiting = _section(ledger, "아직 아무도 보지 않은 것")
+    rows = [_row_cells(row) for _, row in _table_rows(waiting)]
+    named: set[int] = set()
+    for cells in rows[1:]:
+        if not cells[0].startswith("~~"):
+            named |= _waiting_on(cells[0])
+
+    orphans = sorted(awaiting - named)
+    assert orphans == [], (
+        "재감사를 기다리는 NC 인데 「아직 아무도 보지 않은 것」의 어느 살아 있는 줄도 "
+        "그것을 들지 않는다 — 그 회차의 재감사 행 첫 칸에 넣는다:\n"
+        + "\n".join(f"  NC-{number}" for number in orphans)
+    )
+
+
+# **게이트 파일** — 산문 · 경계 · 의존성을 무는 검사가 사는 자리(감사 ㉕ NC-189). 이 파일들의
+# 검사는 어긋내 빨개지는 것을 본 기록이 `docs/audit/mutations.md` 의 표에 있어야 한다.
+# 목록은 이름이다 — 게이트 파일이 새로 서면 여기 더한다(아래 「못 보는 부류」).
+_GATE_FILES = ("tests/test_prose.py", "tests/test_boundary.py", "tests/test_dependencies.py")
+_TEST_NAME = re.compile(r"test_[a-z0-9_]+")
+
+
+def test_every_gate_has_a_record_of_turning_red() -> None:
+    """**새 검사는 어긋내서 빨갛게 되는 것을 본다 — 기록은 `mutations.md`** (`CLAUDE.md`).
+
+    그 규칙을 무는 것이 사람뿐이었고, 같은 모양이 거듭 났다. NC-156 이 「돌렸는데 기록의
+    자리에 없다」를 없앤 바로 그 고침 회차에 NC-157 이 결과를 대장에만 적었고, 그 뒤 선
+    게이트 셋은 기록이 아예 없었다(감사 ㉕ NC-189). 게이트 파일의 검사 이름이 전부 그
+    파일의 **표 안에** 나와야 한다 — 산문에 이름만 든 것은 기록이 아니다.
+
+    **이 게이트가 못 보는 부류**(W-6 ③): 기록이 있으나 **지금도 참인지** — 그 뒤 검사가
+    바뀌어 더는 물지 않아도 옛 줄이 통과시킨다(묶음의 커밋이 그것을 되짚는 자리다). 표의
+    셋째 칸이 「통과했다」인 줄도 이름만 있으면 센다. 그리고 `_GATE_FILES` 밖의 테스트 —
+    게이트 파일이 새로 서도 이 목록에 들기 전에는 보지 않는다.
+    """
+    recorded = {
+        name
+        for line in _MUTATIONS.read_text().splitlines()
+        if line.startswith("|")
+        for name in _TEST_NAME.findall(line)
+    }
+    gates = [
+        (path, name)
+        for path in _GATE_FILES
+        for name in re.findall(r"^def (test_\w+)", (BACKEND_ROOT / path).read_text(), re.M)
+    ]
+    assert gates, "게이트 파일에서 검사를 찾지 못했다 — 이 게이트가 아무것도 세지 않는다"
+
+    unrecorded = [f"  {path}::{name}" for path, name in gates if name not in recorded]
+    assert unrecorded == [], (
+        "어긋내 빨개지는 것을 본 기록이 docs/audit/mutations.md 의 표에 없다:\n"
+        + "\n".join(unrecorded)
     )

@@ -129,6 +129,31 @@ def test_the_entrypoint_is_executable() -> None:
     )
 
 
+def test_the_entrypoint_stops_at_the_first_failure() -> None:
+    """**엔트리포인트의 첫 실행 줄은 `set -euo pipefail` 이다** (감사 ㉕ NC-190).
+
+    그 줄이 없으면 `alembic upgrade head` 가 실패해도 스크립트가 다음 줄로 넘어가
+    `exec "$@"` 가 돌고, **반쯤 마이그레이션된 DB 위에 API 가 뜬다.** 그런데 지워도
+    `shellcheck` · 이미지 빌드 · 기동 스텝 · `pytest` 가 전부 초록이었다 — 기동 스텝은
+    빈 DB 에서 돌아 마이그레이션이 실패하지 않으므로 이 줄을 시험하지 못한다. 어긋내
+    확인했다(감사 ⑬ NC-147 · 감사 ㉕).
+
+    **첫 실행 줄**이어야 하는 이유: 그 앞에 선 명령은 이 보호를 받지 못한다.
+
+    **이 검사가 못 보는 부류**(W-6 ③): 뒤에서 `set +e` 로 푸는 것, 그리고 이 줄이
+    있어도 실패를 삼키는 명령(`|| true` 따위) — 첫 줄만 본다.
+    """
+    lines = (BACKEND_ROOT / "docker-entrypoint.sh").read_text().splitlines()
+    commands = [
+        line.strip() for line in lines if line.strip() and not line.lstrip().startswith("#")
+    ]
+
+    assert commands, "엔트리포인트에 실행 줄이 없다"
+    assert commands[0] == "set -euo pipefail", (
+        f"엔트리포인트의 첫 실행 줄이 `set -euo pipefail` 이 아니다: {commands[0]!r}"
+    )
+
+
 def _test_database_url() -> str:
     """검사용 DB 주소. `conftest.py` 가 세우는 환경변수를 그대로 읽는다."""
     import os
