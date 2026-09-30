@@ -65,6 +65,9 @@ def _repo_files(pattern: str) -> list[Path]:
     CI 가 갈렸다.** 커밋될 수 있는 파일은 git 이 안다. 추적 안 된 새 파일도 들이므로
     `git add` 전에도 문다.
 
+    닫힌 단계를 **찾는** 자리도 이것으로 모은다 — 무시된 워크트리에 뒤 단계의 `PRD-N단계.md` 가
+    있으면 그 단계를 닫힌 것으로 읽어 추적하는 산문이 빨개졌다(PR #38 Codex 리뷰).
+
     **이 선택이 못 보는 부류**(W-6 ③): `.gitignore` 에 잘못 든 파일 — 무시되면 이 게이트들도
     보지 않는다. git 이 없는 자리에서는 돌지 않고 실패한다(건너뛰지 않는다).
     """
@@ -95,7 +98,7 @@ def test_a_stage_that_closed_is_not_written_as_if_it_were_now() -> None:
     """
     closed = {
         match.group(1)
-        for path in REPO_ROOT.rglob("docs/PRD-*단계.md")
+        for path in _repo_files("docs/PRD-*단계.md")
         if (match := _CLOSED_RECORD.search(str(path)))
     }
     assert closed, "닫힌 단계의 기록이 하나도 없다 — 이 게이트가 아무것도 세지 않는다"
@@ -752,8 +755,9 @@ def test_an_nc_waiting_for_a_reaudit_has_a_row_that_waits_for_it() -> None:
 
 # 상태 칸의 어휘 — 대장 「닫는 규칙」이 정한 말. 굵게 연다. 여기 없는 말로 쓴 줄은 위 두
 # 게이트가 기다리는지 · 닫혔는지를 가르지 못한다(감사 ㉗ NC-196)
+# 굵게는 **닫혀야** 굵게다 — 여는 `**` 만 있으면 GFM 은 굵게 그리지 않는다(PR #38 Codex 리뷰)
 _STATUS = re.compile(
-    r"\*\*(?:닫힘|부분 닫힘|고침|등록|반박|중복|열림 — 저자 판정 대기)(?=[ *(—])"
+    r"\*\*(?:닫힘|부분 닫힘|고침|등록|반박|중복|열림 — 저자 판정 대기)(?:[ (—][^*]*)?\*\*"
 )
 
 
@@ -793,6 +797,29 @@ _TEST_NAME = re.compile(r"test_[a-z0-9_]+")
 _UNESCAPED_BAR = re.compile(r"(?<!\\)\|")
 
 
+# 기록 표의 머리 — 이 모양의 표만 「빨개진 검사」 칸을 든다
+_RECORD_HEAD = ["NC", "무엇을 어긋냈나", "빨개진 검사"]
+
+
+def _mutation_record_rows() -> list[list[str]]:
+    """어긋냄 묶음의 **기록 표** 본문 줄 — 칸마다 렌더된 글자. 표는 cmark-gfm 이 가른다."""
+    html = cmarkgfm.github_flavored_markdown_to_html(_mutation_bundles())
+
+    def text(cell: str) -> str:
+        return re.sub(r"<[^>]+>", "", cell).strip()
+
+    rows: list[list[str]] = []
+    for table in re.finditer(r"<table>(.*?)</table>", html, re.S):
+        head, _, body = table.group(1).partition("</thead>")
+        if [
+            text(cell) for cell in re.findall(r"<th[^>]*>(.*?)</th>", head, re.S)
+        ] != _RECORD_HEAD:
+            continue
+        for row in re.findall(r"<tr>(.*?)</tr>", body, re.S):
+            rows.append([text(cell) for cell in re.findall(r"<td[^>]*>(.*?)</td>", row, re.S)])
+    return rows
+
+
 def test_every_gate_has_a_record_of_turning_red() -> None:
     """**새 검사는 어긋내서 빨갛게 되는 것을 본다 — 기록은 `mutations.md`** (`CLAUDE.md`).
 
@@ -810,13 +837,13 @@ def test_every_gate_has_a_record_of_turning_red() -> None:
     **셋째 칸(「빨개진 검사」)의 이름만 센다**(감사 ㉗ NC-198). 처음에는 표의 모든 칸을
     셌는데, 그러면 「무엇을 어긋냈나」 칸이나 실측 표에 이름이 든 다른 줄이 기록을 대신
     채웠다 — 155 의 `chmod -x` 줄을 지워도 초록이었고(㉖ R4), 그 이름을 둘째 칸에 든
-    189 줄이 그 틈을 만들었다(어긋내 확인했다). 셋째 칸이 없는 줄은 세지 않는다.
+    189 줄이 그 틈을 만들었다(어긋내 확인했다). **기록 표만 센다** — 머리가 `NC` ·
+    `무엇을 어긋냈나` · `빨개진 검사` 인 표다. 표는 파서가 가른다(PR #38 Codex 리뷰) — 셋째 칸을
+    손으로 가르면 설명 · 실측 표의 셋째 칸도 「빨개진 검사」로 읽혔고, 인용 안의 표나 앞 파이프
+    없는 표는 보이지 않았다.
     """
     recorded = {
-        name
-        for _, row in _table_rows(_mutation_bundles())
-        if len(cells := _UNESCAPED_BAR.split(row.strip().removeprefix("|"))) > 2
-        for name in _TEST_NAME.findall(cells[2])
+        name for cells in _mutation_record_rows() for name in _TEST_NAME.findall(cells[2])
     }
     gates = [
         (path, name)
