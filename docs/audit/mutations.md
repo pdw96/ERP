@@ -71,6 +71,11 @@
 | `143a527` | — | 옛 전 · 후 줄과 같은 (커밋, NC) 의 다른 줄에서 검사 이름을 빼도 초록 검사가 통과한다 | `audit-quality` | **닫혔다** — 예외가 셋째 칸의 여는 글자까지 든다(「PR #39 Codex 리뷰 1 라운드의 고침」 묶음) |
 | `143a527` | — | 진짜 `린트` 앞에 `echo` 만 하는 같은 이름의 `린트` 스텝을 두어도 스텝 검사가 통과한다 | `audit-quality` | **닫혔다** — `run` 스텝의 이름이 겹치면 빨갛다(같은 묶음) |
 | `5d579d9` | — | 「대표 1명을 지정한다」 줄 | `audit-quality` | 초록이 맞다 — 다른 낱말의 끝인 「표」는 표 번호가 아니다(대조군) |
+| `88a8ff1` | 213 | 머리 셋째 칸이 「결과」인 표의 **굵게 하지 않은** 초록 줄 | `audit-quality` | 초록 — ㉙ NC-213. 기록 표가 아닌 표에서 `없다` 로 여는 칸을 굵게 여부 없이 보는 날, 또는 「못 보는 부류」에 적는 날 닫힌다 |
+| `88a8ff1` | 214 | 셋째 칸을 검사 이름으로 열고 「통과했다」를 적은 초록 줄이 앞 초록을 닫고 기록 게이트의 기록을 채운다 | `audit-quality` | 초록 — ㉙ NC-214. 빨강 칸 안의 초록 낱말을 거절하는 날 닫힌다 |
+| `88a8ff1` | 215 | 두 스키마 문서끼리의 번호 · 틀린 문서 이름 · 대장의 새 줄에 표 번호 게이트가 통과한다 | `audit-quality` | 초록 — ㉙ NC-215. 저자가 「못 보는 부류」에 적을지 예외를 좁힐지 정한다 |
+| `88a8ff1` | — | `uses:` 로 선 검사 스텝 · 형제 잡에 스텝 검사가 통과한다 | `audit-quality` | 초록 — ㉙(`audit-quality`) OB-3. `uses` 스텝을 검사 스텝에서 뺀 것이 규칙인지 정해지는 날 다시 본다 |
+| `88a8ff1` | 219 | 한 칸에 고치기 전 · 뒤를 적은 규칙 뒤의 새 줄(`e0159e2` 묶음)을 게이트가 물지 않는다 | `audit-internal` | 초록 — ㉙ NC-219. 214 가 닫히면 함께 문다 |
 
 ## ⑧ 의 고침 (`03b6c1f`)
 
@@ -703,3 +708,31 @@ Codex 의 지적 셋을 저장소의 실제 파일에 넣어 재현했다(`docs/
 | — | 「대표 1명을 지정한다.」 줄을 더했다 | **없다 — 통과했다** (`test_a_third_document_names_the_schema_document_with_a_table_number`) — 고친 대로다 |
 | 206 | `test_write_path.py` 의 주석을 「표 18 이 설 때는」으로 되돌렸다(대조군 — 게이트가 느슨해지지 않았다) | `test_a_third_document_names_the_schema_document_with_a_table_number` |
 | 203 | `_BEFORE_AND_AFTER` 에서 `("5472330", "164")` 를 뺐다(대조군) | `test_a_mutation_that_stayed_green_is_closed_later_or_listed` |
+
+## 감사 ㉙ 가 돌린 어긋냄 (`88a8ff1`)
+
+감사자 둘(`audit-quality` · `audit-internal`, 읽기 전용)이 「이것을 돌리면 판정이 확정된다」로 적어 넘긴 것을 호출자가
+실제 PostgreSQL 16 위에서 하나씩 돌리고 되돌렸다. 매번 `pytest` 전체이고 기준선은 388 passed 다 — 브리핑 보관본을
+`.claude/briefs/` 에 둔 채 돌렸다. 대장 ㉙(`audit-internal`) 절의 표와 같은 것이다. 검사 이름은 소문자 `_x` 로 어긋냈다.
+
+| NC | 무엇을 어긋냈나 | 빨개진 검사 |
+|---|---|---|
+| 213 | 파일 끝에 커밋 있는 묶음을 붙이고 머리 셋째 칸을 「결과」로, 줄의 셋째 칸을 굵게 없이 「없다 — 통과했다 (`test_claude_md_stays_short`)」로 썼다 | **없다 — 통과했다** (`test_a_mutation_that_stayed_green_is_closed_later_or_listed`) |
+| — | 같은 묶음의 머리 셋째 칸만 「빨개진 검사」로 썼다(대조군) | `test_a_mutation_that_stayed_green_is_closed_later_or_listed` — 빨강도 초록도 아닌 줄 |
+| 214 | 기록 표에 굵은 초록 줄을 두고, 그 **뒤에** 같은 NC 의 줄을 셋째 칸 「`test_claude_md_stays_short` — 통과했다」로 더했다 | **없다 — 통과했다** (같은 검사) — 뒤 줄이 빨강으로 읽혀 앞 초록을 닫았다 |
+| — | 둘째 줄을 빼고 굵은 초록 줄만 두었다(대조군) | `test_a_mutation_that_stayed_green_is_closed_later_or_listed` — 색인에 없다 |
+| 214 | ㉕ 가 돌린 묶음의 `test_claude_md_stays_short` 를 `…_x` 로 바꾸고, 끝에 셋째 칸 「`test_claude_md_stays_short` — 통과했다」인 줄의 묶음을 더했다 | **없다 — 통과했다** (`test_every_gate_has_a_record_of_turning_red`) — 초록 줄이 기록을 채웠다 |
+| — | 이름만 `…_x` 로 바꿨다(대조군 — ㉘ 의 같은 줄을 다시 쟀다) | `test_every_gate_has_a_record_of_turning_red` |
+| 215 | `docs/schema.md` 에 「원장은 표 18 을 본다.」를 더했다 | **없다 — 통과했다** (`test_a_third_document_names_the_schema_document_with_a_table_number`) — 번호의 주인은 통째로 빠진다 |
+| 215 | `docs/지나온-길.md` 에 「`docs/schema.md` 의 표 18 이 설 때는 …」을 더했다 — 그 문서에 18 은 없다 | **없다 — 통과했다** (같은 검사) — 같은 줄에 문서 이름이 있다 |
+| 215 | 대장 끝에 「표 18 이 설 때는 …」을 더했다 | **없다 — 통과했다** (같은 검사) — 대장은 통째로 빠진다 |
+| — | `docs/지나온-길.md` 에 「표 18 이 설 때는 …」을 더했다(대조군) | `test_a_third_document_names_the_schema_document_with_a_table_number` |
+| — | `backend` 잡의 `린트` 뒤에 `uses: astral-sh/ruff-action@v3` 인 `새 검사` 스텝을 더했다 | **없다 — 통과했다** (`test_every_check_step_is_still_there_and_can_still_fail`) |
+| — | `ci.yml` 에 형제 잡 `extra`(`run: exit 1`)를 더했다 | **없다 — 통과했다** (같은 검사) |
+| 217 | 머리가 `NC \| 무엇 \| 결과` 인 표에서 **둘째 칸**만 `**없다 — 통과했다**` 로 썼다 | `test_a_mutation_that_stayed_green_is_closed_later_or_listed` — 기록 표가 아닌 표의 초록. 독스트링의 「셋째 칸」보다 넓게 본다 |
+| 216 | 「아직 초록인 어긋냄」 절의 색인 표 뒤(`## ⑧` 앞)에 커밋 없는 `###` 묶음을 넣었다 | `test_a_mutation_bundle_says_which_commit_it_was_measured_on` — 주석(「이 절을 뺀다」)이 아니라 코드가 맞다 |
+| 218 | `4abd1b6` 묶음 186 줄의 셋째 칸을 「고치기 전에는 통과했다. 고친 뒤 `test_…`」로 바꿨다 | `test_a_mutation_that_stayed_green_is_closed_later_or_listed` — 빨강도 초록도 아닌 줄. 검사 이름으로 연 옛 줄은 `_BEFORE_AND_AFTER` 없이 빨강으로 세인다 |
+
+**219 는 어긋내지 않고 잰 것이다** — `e0159e2` 묶음의 한 칸 전 · 후 줄을 그대로 두고 `pytest` 전체를 돌려 388 passed 였다.
+게이트가 그 줄을 물지 않는다는 뜻이라 색인에 줄을 두었다. **통과한 줄은 전부 여전히 초록이다** — 이 회차는 고치지 않았다.
+213 · 214 · 215 와 `—` 둘은 「아직 초록인 어긋냄」에 든다.
