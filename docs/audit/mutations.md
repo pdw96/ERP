@@ -449,3 +449,28 @@ W 표에서 줄을 지워도 초록**이었다. 「첫 칸이 회차 **이름뿐
 | 197 | head 위에 리비전 하나를 더하고 엔트리포인트 목록 맨 위에 그 줄을 넣되 「사슬은 여덟이고」는 그대로 뒀다 | **없다 — 통과했다** (`test_the_entrypoint_lists_the_whole_chain`) |
 
 **통과한 줄은 전부 여전히 초록이다** — 이 회차는 고치지 않았다. 각 줄의 NC 가 열림으로 든다.
+
+## 감사 ㉗ 의 고침 (`0a92e57`)
+
+저장소 소유자가 ㉗ 의 여덟을 추천대로 고치기로 정했다(2026-09-30). 고친 커밋 위에서 하나씩 돌리고 되돌렸다.
+「고치기 전」의 결과는 위 ㉗ 묶음이다.
+
+| NC | 무엇을 어긋냈나 | 빨개진 검사 |
+|---|---|---|
+| 195 | 이 파일 끝에 커밋 없는 `###` 묶음을 붙이되 표를 앞 파이프 없이 썼다 | `test_a_mutation_bundle_says_which_commit_it_was_measured_on` — 고치기 전에는 통과했다 |
+| 195 | 같은 표를 인용(`>`) 안에 썼다 | `test_a_mutation_bundle_says_which_commit_it_was_measured_on` — 고치기 전에는 통과했다 |
+| 195 | 커밋 없는 제목 아래 울타리 코드에 `# 가짜 제목` 과 커밋 토막을 넣고 그 뒤에 표를 두었다 | `test_a_mutation_bundle_says_which_commit_it_was_measured_on` — 코드 안의 줄이 제목으로 읽히지 않는다 |
+| 195 | 커밋 없는 Setext 제목(`시험 묶음` / `---`) 아래에 표를 두었다 | `test_a_mutation_bundle_says_which_commit_it_was_measured_on` — Setext 도 제목이라 앞 절의 커밋을 빌리지 않는다 |
+| 195 | 같은 Setext 제목에 커밋을 적었다(대조군) | **없다 — 통과했다** (같은 검사) — 그래야 맞다 |
+| 196 | 대장 NC-192 의 상태 칸을 `판정 대기` 로(굵게 하지 않고) | `test_every_nc_status_opens_with_a_word_the_ledger_defined` |
+| 196 | 같은 칸을 `**판정 대기**` 로 | `test_every_nc_status_opens_with_a_word_the_ledger_defined` |
+| 196 | 그 게이트가 NC 줄을 하나도 고르지 못하게(`isdigit()` → `== "x"`) | `test_every_nc_status_opens_with_a_word_the_ledger_defined` — 앵커 |
+| 198 | ⑮ 묶음 155 줄의 셋째 칸에서 `test_the_entrypoint_is_executable` 을 다른 이름으로 | `test_every_gate_has_a_record_of_turning_red` — 고치기 전에는 189 줄이 대신 채워 통과했다 |
+| 198 | ㉕ 의 고침 묶음 190 줄 둘에서 검사 이름을 셋째 칸에서 빼 둘째 칸에만 두었다 | `test_every_gate_has_a_record_of_turning_red` — 둘째 칸의 이름은 기록이 아니다 |
+| 202 | `.claude/briefs/` 에 닫힌 단계를 현재형으로 가리키는 줄을 든 파일을 두었다 | **없다 — 통과했다** (`test_a_stage_that_closed_is_not_written_as_if_it_were_now`) — 무시된 파일은 보지 않는다. 고치기 전에는 빨갰다 |
+| 202 | 같은 파일을 `docs/` 에 추적 안 된 채로 두었다 | `test_a_stage_that_closed_is_not_written_as_if_it_were_now` — 추적 안 된 새 파일은 여전히 본다 |
+| 202 | `.claude/briefs/` 에 넘치는 표를 든 파일을 두었다 | **없다 — 통과했다** (`test_a_table_row_does_not_carry_a_cell_the_header_did_not_declare`) |
+| 202 | 같은 파일을 `docs/` 에 추적 안 된 채로 두었다 | `test_a_table_row_does_not_carry_a_cell_the_header_did_not_declare` |
+
+**통과한 줄은 전부 의도한 초록이다** — Setext 대조군과 무시된 파일 둘. 197 · 199 · 200 은 주석만 고쳐 어긋낼 검사가 없고,
+201 은 규칙 절의 문장이다.
