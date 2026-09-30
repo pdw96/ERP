@@ -17,6 +17,11 @@ httpx2==2.13.1
 # 손으로 흉내 내면 울타리 · HTML 블록 · 목록 들여쓰기마다 틈이 났다(ERP#18).
 # 테스트만 부르므로 개발 의존성이다.
 cmarkgfm==2025.10.22
+# **PyYAML** — 워크플로(`.github/workflows/ci.yml`)를 YAML 로 읽는다. CI 스텝 게이트
+# (`tests/test_dependencies.py`)가 `jobs.backend.steps` 와 각 `run` 값을 이것에 묻는다.
+# 손으로 흉내 내면 형제 잡 · 접힌 블록 · 잡의 `if:` 마다 틈이 났다(PR #38 리뷰 2 ~ 4 라운드).
+# 테스트만 부르므로 개발 의존성이다.
+pyyaml==6.0.3
 pytest==9.1.1
 ruff==0.16.9
 mypy==2.3.1
