@@ -98,7 +98,8 @@ def test_the_build_context_still_carries_what_the_image_needs_to_boot() -> None:
 
     **이 검사가 못 보는 부류**(W-6 ③): 이름이 아니라 **패턴**으로 가리는 것
     (`*.ini` · `**/app`)과, 컨텍스트에는 있는데 `Dockerfile` 이 `COPY` 하지 않는
-    것. 그리고 기동 자체는 여전히 아무도 띄우지 않는다 — 그 층은 `audit-ops` 다.
+    것. 기동 자체는 이 검사가 아니라 `ci.yml` 의 「기동」 스텝이 띄운다(감사 ⑰
+    NC-165) — 이 검사는 컨텍스트만 본다(감사 ㉖ NC-194).
     """
     ignored = {
         line.strip().strip("/")
@@ -134,9 +135,10 @@ def test_the_entrypoint_stops_at_the_first_failure() -> None:
 
     그 줄이 없으면 `alembic upgrade head` 가 실패해도 스크립트가 다음 줄로 넘어가
     `exec "$@"` 가 돌고, **반쯤 마이그레이션된 DB 위에 API 가 뜬다.** 그런데 지워도
-    `shellcheck` · 이미지 빌드 · 기동 스텝 · `pytest` 가 전부 초록이었다 — 기동 스텝은
-    빈 DB 에서 돌아 마이그레이션이 실패하지 않으므로 이 줄을 시험하지 못한다. 어긋내
-    확인했다(감사 ⑬ NC-147 · 감사 ㉕).
+    `shellcheck`(감사 ⑬ NC-147 · 감사 ㉕)와 `tests/test_boundary.py`(감사 ㉕ — 이 검사가
+    서기 전)는 초록이었다 — 어긋내 확인했다. 이미지 빌드와 기동 스텝은 **돌려 보지
+    않았다** — 기동 스텝은 빈 DB 에서 돌아 마이그레이션이 실패하지 않으므로 이 줄을
+    시험하지 못한다고 **읽어서** 판단했다(감사 ㉖ NC-192).
 
     **첫 실행 줄**이어야 하는 이유: 그 앞에 선 명령은 이 보호를 받지 못한다.
 
