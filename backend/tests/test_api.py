@@ -22,7 +22,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.api import app as api
-from app.api import schemas
+from app.api import schemas, spec
 from app.api.app import API_VERSION, app, session_scope
 from app.core import codes
 from app.db.constraints import blank_characters, is_present
@@ -405,15 +405,34 @@ def test_the_spec_lists_every_transport_name(client: TestClient) -> None:
     `$ref` 가 사라지거나, `responses=` 에서 모델이 빠지면 빨개진다.
 
     **그것으로 충분한 이유**는 NC-160 이 요구한 것이 「이름이 기계가 읽는 계약에
-    있을 것」이기 때문이다 — 이제 이름을 고치면 `/openapi.json` 이 **함께 바뀌어
-    diff 에 보인다.** 「이름이 바뀌면 검사가 문다」를 원하면 필요한 것은 **찍어 둔
-    스펙과의 대조**이고, 그것은 이 저장소에 없다(감사 ⑯ OB-1).
+    있을 것」이기 때문이다. 이름의 변동은 아래의 **찍어 둔 스펙과의 대조**가 문다
+    (ADR 0012) — 한때 「그것은 이 저장소에 없다」고 적혀 있었다(감사 ⑯ · ㉛ OB-1).
     """
     spec = client.get("/openapi.json").json()
 
     assert spec["components"]["schemas"]["Transport"]["enum"] == [
         name.value for name in schemas.Transport
     ]
+
+
+def test_the_spec_matches_the_snapshot_in_the_repository() -> None:
+    """**계약을 바꾸는 커밋은 그 변화를 diff 에 남긴다** (ADR 0012, 감사 ⑯ · ㉛ OB-1).
+
+    `/openapi.json` 은 실행할 때 지어져 저장소에 없었으므로, 오류 이름이나 응답 선언을
+    바꾸는 PR 에서 보이는 것은 `schemas.py` 의 한 줄뿐이었다 — 위의 이름 검사는 양변이
+    같은 원천이라 그 변동에 초록이다. 사진(`docs/openapi.json`)과 견주면 계약이 바뀌는
+    순간 빨갛고, 사진을 다시 지어야 초록이 되며 그 사진의 diff 가 리뷰에 남는다.
+
+    **이 검사가 못 보는 부류**(W-6 ③): 선언 밖으로 나가는 응답(NC-220 의 400 같은 것 —
+    선언이 없으니 사진에도 없다. 위의 「실제로 일으켜 견주는」 검사가 문다), 그리고
+    **생각 없이 다시 지은 사진** — 이 검사는 막지 않고 보이게 할 뿐이다. 깨는 변경인지
+    가르는 것은 읽는 엔드포인트가 서는 조각의 몫이다.
+    """
+    assert spec.SNAPSHOT.exists(), f"{spec.SNAPSHOT} 가 없다 — `python -m app.api.spec`"
+    assert spec.render() == spec.SNAPSHOT.read_text(encoding="utf-8"), (
+        "밖으로 나가는 계약이 `docs/openapi.json` 과 다르다 — 의도한 변경이면 "
+        "`cd backend && .venv/bin/python -m app.api.spec` 로 다시 짓고 그 diff 를 함께 올린다"
+    )
 
 
 def test_the_spec_says_which_header_names_the_request(client: TestClient) -> None:
