@@ -331,6 +331,20 @@ def test_a_body_that_cannot_be_read_points_at_the_body(client: TestClient) -> No
     assert client.post("/inspection", json=_PAYLOAD).json()["detail"][0]["loc"] == ["path"]
 
 
+def test_a_trailing_slash_is_not_sent_elsewhere(client: TestClient) -> None:
+    """**끝 슬래시는 선언된 404 로 답한다 — 선언 밖의 307 이 아니다** (감사 ㉝ OB-1).
+
+    기본값은 `/inspections/` 에 본문 없는 307 을 `/inspections` 로 냈다. 스펙에 없는
+    응답이고, 리다이렉트를 따라가지 않는 클라이언트는 빈 본문을 받는다. 같은 관찰이
+    ⑯ · ㉛ · ㉝ 세 번 나서 저장소 소유자가 끄기로 정했다.
+    """
+    response = client.post("/inspections/", json=_PAYLOAD, follow_redirects=False)
+
+    assert response.status_code == 404, (response.status_code, response.headers)
+    assert response.json()["detail"][0]["type"] == "http_error", response.json()
+    assert "X-Request-Id" in response.headers, response.headers
+
+
 def test_the_spec_lists_every_refusal_name(client: TestClient) -> None:
     """**거절의 이름을 `/openapi.json` 만 읽고 셀 수 있다** (감사 ⑫ NC-134).
 
@@ -379,6 +393,7 @@ def test_the_spec_declares_every_answer_that_actually_goes_out(client: TestClien
             "/inspections", content=b"\xff", headers={"content-type": "application/json"}
         ),
         client.post("/inspection", json=_PAYLOAD),
+        client.post("/inspections/", json=_PAYLOAD, follow_redirects=False),
         client.get("/inspections"),
     ):
         assert response.status_code in (400, 404, 405), response.text
