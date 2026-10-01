@@ -22,16 +22,27 @@ name: 프로젝트 보드
 # 입력이 명령으로 읽힌다(스크립트 주입). 준비가 없으면 **빨갛게 멈춘다** — 조용히 건너뛰면
 # 부른 쪽은 보드가 바뀐 줄 안다.
 #
-# **이 워크플로가 못 하는 것**(W-6 ③): 상태(Status) 밖의 사용자 정의 칸, 저장소 밖의 이슈,
-# 보드 자체의 생성 · 설정. 그 자리는 사람이 화면에서 한다.
+# **보기(`show`)는 보드를 주석(notice)으로 남긴다** — 클라우드 세션은 보드를 직접 읽을 수 없고(GraphQL),
+# 실행 로그도 내려받지 못하지만 주석은 저장소 범위 API 로 읽힌다. Status 하나에 한 줄로 묶는다 — 주석은
+# 단계마다 종류별 개수에 상한이 있다.
+#
+# **이 워크플로가 못 하는 것**(W-6 ③): 상태(Status) 밖의 사용자 정의 칸, 저장소 밖의 이슈 · 드래프트
+# 카드(보기에서도 빠진다), 보드 자체의 생성 · 설정. 그 자리는 사람이 화면에서 한다.
 
 on:
   workflow_dispatch:
     inputs:
+      action:
+        description: put — 이슈를 보드에 넣고 Status 를 옮긴다 · show — 보드의 카드를 주석으로 보인다
+        required: false
+        type: choice
+        options: [put, show]
+        default: put
       issue:
-        description: 이슈 번호 — 보드에 넣는다(이미 있으면 그 카드를 쓴다)
-        required: true
-        type: number
+        description: 이슈 번호 — put 은 반드시, show 는 주면 그 카드만 보인다
+        required: false
+        type: string
+        default: ""
       status:
         description: 상태(Status) 칸의 값 — 비우면 넣기만 한다
         required: false
@@ -51,12 +62,13 @@ jobs:
     timeout-minutes: 5
     environment: project-board
     steps:
-      - name: 보드에 넣고 상태를 옮긴다
+      - name: 보드를 다룬다 — 넣기(put) · 보기(show)
         env:
           GH_TOKEN: ${{ secrets.PROJECT_TOKEN }}
           PROJECT_NUMBER: ${{ vars.PROJECT_NUMBER }}
           OWNER: ${{ github.repository_owner }}
           REPOSITORY: ${{ github.repository }}
+          ACTION: ${{ inputs.action }}
           ISSUE: ${{ inputs.issue }}
           STATUS: ${{ inputs.status }}
         run: |
@@ -65,11 +77,14 @@ jobs:
           # (로그 저장소가 세션 프록시 밖이다), 주석은 저장소 범위 API(check-runs 의 annotations)로
           # 읽힌다. 첫 실제 실행이 「exit code 1」만 남겨 원인을 볼 수 없었다
           exec 3>&1
-          fail() {
-            local m=${1//'%'/'%25'}
+          annotate() {
+            local m=${2//'%'/'%25'}
             m=${m//$'\r'/ }
             m=${m//$'\n'/ }
-            printf '::error::%s\n' "$m" >&3
+            printf '::%s::%s\n' "$1" "$m" >&3
+          }
+          fail() {
+            annotate error "$1"
             exit 1
           }
           # gh 를 부르고, 실패하면 gh 의 말을 주석으로 남기고 멈춘다. 성공하면 표준 출력만 돌려준다
@@ -83,6 +98,34 @@ jobs:
           fi
           if [ -z "$PROJECT_NUMBER" ]; then
             fail "변수 PROJECT_NUMBER 가 없다 — ADR 0008 의 준비를 본다"
+          fi
+          if [ -n "$ISSUE" ] && ! [[ "$ISSUE" =~ ^[0-9]+$ ]]; then
+            fail "이슈 번호가 숫자가 아니다: $ISSUE"
+          fi
+
+          if [ "$ACTION" = "show" ]; then
+            items=$(run_gh project item-list "$PROJECT_NUMBER" --owner "$OWNER" --format json --limit 1000)
+            # 이 저장소의 이슈 · PR 카드만 Status 별로 묶는다. 제목은 40 자에서 자른다
+            groups=$(jq -r --arg repo "$REPOSITORY" --arg issue "$ISSUE" '
+              [.items[] | select(.content.repository == $repo)
+                        | select($issue == "" or ((.content.number | tostring) == $issue))]
+              | group_by(.status // "(Status 없음)") | .[]
+              | "\(.[0].status // "(Status 없음)") (\(length)): "
+                + ([.[] | "#\(.content.number) \(.title[0:40])"] | join(" · "))' <<<"$items")
+            total=$(jq -r '.totalCount // (.items | length)' <<<"$items")
+            if [ -z "$groups" ]; then
+              annotate notice "보드 $PROJECT_NUMBER: ${ISSUE:+이슈 #$ISSUE 의 }카드가 없다(보드 전체 $total 장)"
+              exit 0
+            fi
+            annotate notice "보드 $PROJECT_NUMBER: 이 저장소의 카드(보드 전체 $total 장)"
+            while IFS= read -r line; do
+              annotate notice "$line"
+            done <<<"$groups"
+            exit 0
+          fi
+
+          if [ -z "$ISSUE" ]; then
+            fail "put 은 이슈 번호가 있어야 한다"
           fi
 
           # Status 를 옮길 때는 값을 **먼저** 확인한다 — 넣은 뒤에 틀린 값을 알면 카드만 보드에 남고
