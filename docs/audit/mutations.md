@@ -45,7 +45,7 @@
 | 기록 | NC | 무엇이 초록이었나 | 담당 | 닫는 조건 · 지금 |
 |---|---|---|---|---|
 | `0d9a96d` | 147 | 엔트리포인트의 `set -euo pipefail` 을 지워도 `shellcheck` 가 통과한다 | `audit-quality` | **닫혔다** — 엔트리포인트의 첫 실행 줄을 보는 검사가 문다(감사 ㉕ NC-190, `4abd1b6` 묶음의 190 줄) |
-| `1e0a336` | 160 | 스펙의 열거 이름을 더하거나 바꿔도 대조가 통과한다 — 양변이 같은 원천이다 | `audit-contract` | 초록 — 찍어 둔 스펙과 견주는 검사가 서는 날(⑯ OB-1) |
+| `1e0a336` | 160 | 스펙의 열거 이름을 더하거나 바꿔도 대조가 통과한다 — 양변이 같은 원천이다 | `audit-contract` | **닫혔다** — 찍어 둔 스펙과 견주는 검사(ADR 0012)가 같은 둘을 빨갛게 한다(「ADR 0012」 묶음). 옛 조건은 「찍어 둔 스펙과 견주는 검사가 서는 날(⑯ OB-1)」 |
 | `6402ccb` | 191 | 두 잠금의 같은 하위 의존성을 함께 다른 실재 판으로 바꿔도 `lock.sh --check` 가 통과한다 | `audit-quality` | 초록 — 의도한 경계. 사람의 diff 검토가 그 자리다(`CHECKLIST.md` 「항상」 · ADR 0004) |
 | `6402ccb` | — | 잠금 스텝에 `continue-on-error: true` 를 달아도 통과한다(㉕ OB-2) | `audit-quality` | **닫혔다** — CI 의 검사 스텝마다 명령과 실패를 삼키는 장치를 보는 검사가 문다(`bbfb6e8` — 「감사 ㉕ OB-1 · OB-2 의 고침」 묶음) |
 | `30ef34f` | 196 | `_AWAITING` 에서 「열림」을 빼도 통과한다 — 뒤의 `0a92e57` 묶음 196 빨강 줄은 **다른** 어긋냄(상태 어휘)을 물어 이 초록을 닫지 않는다 | `audit-quality` | 초록 — 대장에 굵은 「열림」 줄이 서는 회차에 다시 잰다(감사 ㉘ NC-204 가 빠진 이 줄을 더했다) |
@@ -967,3 +967,14 @@ PostgreSQL 16)도 초록이다(392 passed).
 |---|---|---|
 | 220 | `responses` 에서 400 선언 줄을 지웠다 | `test_the_spec_declares_every_answer_that_actually_goes_out` · `test_the_spec_says_which_header_names_the_request` |
 | 220 | 덮개의 `loc` 을 늘 `"path"` 로 되돌렸다 | `test_a_body_that_cannot_be_read_points_at_the_body` |
+
+## ADR 0012 — 계약의 사진 (`ded3639`)
+
+`docs/openapi.json` 과 `test_the_spec_matches_the_snapshot_in_the_repository`. 어긋낸 뒤 `test_api.py` 를 돌렸다. 어긋냄 없이 돌린
+대조군은 초록이고, 같은 트리의 `pytest` 전체(실제 PostgreSQL 16)도 초록이다. 앞의 둘은 `1e0a336` 묶음에서 초록이던 그 어긋냄이다.
+
+| NC | 무엇을 어긋냈나 | 빨개진 검사 |
+|---|---|---|
+| 160 | `Transport` 의 `http_error` 를 `path_error` 로 고쳤다 | `test_the_spec_matches_the_snapshot_in_the_repository` · `test_a_body_that_cannot_be_read_points_at_the_body` |
+| 160 | `Transport` 열거에 이름(`ghost`)을 하나 더했다 | `test_the_spec_matches_the_snapshot_in_the_repository` |
+| — | 코드는 그대로 두고 `docs/openapi.json` 의 `http_error` 를 `path_error` 로 고쳤다 | `test_the_spec_matches_the_snapshot_in_the_repository` |
