@@ -37,7 +37,7 @@ git rev-parse --verify "$0^{commit}"
 **둘. 아래를 모읍니다.** 실패한 명령은 그 자리를 비워 두지 말고 **실패를
 브리핑에 적으세요.** `git diff`(`--no-index` 빼고) · `git ls-files` 끝에는 `-- ':/' ':(top,exclude).claude/audits'
 ':(top,exclude).claude/briefs' ':(top,exclude).claude/audit-brief.md'` 를 붙입니다 — 빼지 않으면 지난 기록이 다시 담깁니다.
-이 레포의 대장도 뺍니다 — `':(top,literal,exclude)docs/audit/README.md'`(감사자는 대장을 `Read` 로 읽습니다).
+이 레포의 대장 두 파일도 뺍니다 — `':(top,literal,exclude)docs/audit/README.md' ':(top,literal,exclude)docs/audit/회차-기록.md'`(감사자는 대장을 `Read` 로 읽습니다).
 모든 `git diff` 에는 `--no-ext-diff --no-textconv --submodule=short --ignore-submodules=none --no-color` 도 붙입니다 — 설정이 바꾼 모양은 대조를 깨뜨립니다.
 
 | 무엇 | 명령 |
@@ -96,7 +96,7 @@ git rev-parse --verify "$0^{commit}"
 말없이 자르면 감사자는 전부 본 줄 알고, **안 본 자리가 통과한 자리처럼**
 보입니다 — 가장 피할 일입니다.
 
-**다 쓰면 git 과 대조합니다:** `python3 .claude/scripts/verify-brief.py .claude/audit-brief.md --exclude docs/audit/README.md`
+**다 쓰면 git 과 대조합니다:** `python3 .claude/scripts/verify-brief.py .claude/audit-brief.md --exclude docs/audit/README.md --exclude docs/audit/회차-기록.md`
 (대장을 diff 에서 뺐으니 검사기에도 뺀다고 알립니다). FAIL 이면 그 줄대로 고쳐 다시 돌리고, **PASS 전에는 감사자를
 부르지 마세요.** 검사기를 못 찾으면 `검사:` 에 그렇게 적고 감사자에게도 알립니다.
 
@@ -113,7 +113,7 @@ git rev-parse --verify "$0^{commit}"
 ## 남기는 것
 
 **감사가 끝나면 그 기록을 대장(`docs/audit/README.md`)에 등록해 주세요 — 이 레포는
-`.claude/audits/` 를 쓰지 않습니다.** 대장이 회차를 가로질러 한 표로 번호를 매기고, 다음 회차의
+`.claude/audits/` 를 쓰지 않습니다.** 새 줄은 `README.md` 의 표에, 회차 절은 `docs/audit/회차-기록.md` 끝에 둡니다(ADR 0010). 대장이 회차를 가로질러 한 표로 번호를 매기고, 다음 회차의
 감사자가 그 표에서 담당이 자기인 열린 줄을 읽습니다. 다른 자리에 두면 대장이 둘로 갈리고 번호가 겹칩니다. **한 작업트리에서는 감사를 하나씩 돌리세요 — 감사자가 달라도.**
 브리핑 자리가 하나라 서로의 것을 덮고, 같은 지난 기록(대장)을 읽으면 같은 다음 번호를 뽑습니다.
 **회차 절 머리 바로 아래 첫 줄은 「감사한 커밋」 줄입니다** — 브리핑의 「대상」 SHA 를 백틱으로 적습니다

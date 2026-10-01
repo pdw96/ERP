@@ -15,13 +15,14 @@
 가 그 답을 냈다 — 세지 않는 문장으로 바꾸는 것.
 
 > **이 게이트가 못 보는 부류**(W-6 ③ — 가드는 자기가 못 보는 것을 적는다):
-> 아래 `_RECORDS` 에 통째로 빠진 두 파일 안에서 새로 나는 자리, 조사 없이
+> 아래 `_RECORDS` 에 통째로 빠진 파일 안에서 새로 나는 자리, 조사 없이
 > 「1단계」만 쓴 문장, 그리고 **닫히지 않은 단계**에 대한 거짓 주장. 마지막
 > 것은 기계가 가를 수 없다 — 그 단계가 아직 진행 중이면 참일 수 있다.
 """
 
 import re
 import subprocess
+from collections import Counter
 from collections.abc import Iterator
 from itertools import pairwise
 from pathlib import Path
@@ -44,6 +45,7 @@ _CLOSED_RECORD = re.compile(r"PRD-(\d+)단계\.md$")
 _RECORDS = {
     "docs/PRD-1단계.md": "닫힌 기록 — 그 문서가 스스로 그렇게 적는다",
     "docs/audit/README.md": "회차 기록은 소급해 고치지 않는다 — 대장이 그렇게 정했다",
+    "docs/audit/회차-기록.md": "대장의 지나간 쪽 — 회차 절과 닫힌 줄이 옮겨 갔다(ADR 0010)",
 }
 
 # **줄 단위 예외.** 과거형이거나, 규칙이 자기 예를 드는 줄이다.
@@ -169,6 +171,7 @@ _TABLE_NUMBER_OWNERS = {
     "docs/schema.md": "번호의 주인 — 자기 표를 번호로 부른다",
     "docs/schema-2단계.md": "번호의 주인 — 자기 표를 번호로 부른다",
     "docs/audit/README.md": "감사 기록 — 이 규칙 앞의 문장을 고치지 않는다",
+    "docs/audit/회차-기록.md": "감사 기록 — 대장에서 옮겨 간 옛 문장(ADR 0010)",
     "docs/audit/mutations.md": "어긋냄 기록 — 규칙을 어긴 글자를 어긋냄으로 옮겨 적는다",
 }
 
@@ -184,7 +187,7 @@ def test_a_third_document_names_the_schema_document_with_a_table_number() -> Non
     **이 게이트가 못 보는 부류**(W-6 ③): 「N번」 꼴(「N 회」와 겹쳐 세지 않는다), 문서 이름이
     **앞 줄에** 있는 것(그때는 거짓 양성이다 — 같은 줄로 옮긴다), 그리고 다른 번호 체계(ADR ·
     NC · 회차)를 쓰면서 「표」라는 낱말을 붙인 것 — 그 모양은 거짓 양성이 된다. 그리고
-    `_TABLE_NUMBER_OWNERS` 가 **통째로** 빼는 네 파일 안의 줄이다(감사 ㉙ NC-215, 어긋내
+    `_TABLE_NUMBER_OWNERS` 가 **통째로** 빼는 파일 안의 줄이다(감사 ㉙ NC-215, 어긋내
     확인했다) — 두 스키마 문서가 서로의 표를 번호로 부르는 것(위에 든 NC-139 · 170 이 바로 그
     모양이다), 그리고 규칙 **뒤에** 대장 · `mutations.md` 에 새로 쓰는 줄. 이름이 같은 줄에
     **있는지만** 보므로, 같은 줄의 문서 이름이 **틀린** 것(「`docs/schema.md` 의 표 18」)도 못
@@ -332,8 +335,9 @@ def test_a_mutation_bundle_says_which_commit_it_was_measured_on() -> None:
 def _table_rows(text: str) -> list[tuple[int, str]]:
     """표의 줄만 돌려준다 — 구분선(`|---|`)과 코드 블록 안은 뺀다.
 
-    **대장(`docs/audit/README.md`) 전용이다.** 대장은 줄 머리의 울타리로만 코드 블록을
-    연다(대장 게이트가 문다). 저장소 전체의 표는 GFM 파서가 가른다(`_overflowing_rows`).
+    **대장(`docs/audit/` 의 `README.md` · `회차-기록.md`) 전용이다.** 대장은 줄 머리의
+    울타리로만 코드 블록을 연다(대장 게이트가 문다). 저장소 전체의 표는 GFM 파서가
+    가른다(`_overflowing_rows`).
     """
     rows: list[tuple[int, str]] = []
     fenced = False
@@ -421,6 +425,19 @@ def test_a_table_row_does_not_carry_a_cell_the_header_did_not_declare() -> None:
 
 
 _LEDGER = REPO_ROOT / "docs" / "audit" / "README.md"
+# **대장의 지나간 쪽**(ADR 0010) — 닫힌 줄의 표와 회차 절, 회차별 W 표(감사 ⑥ 절 안)가
+# 여기 산다. 대장을 읽는 게이트는 두 파일을 함께 읽는다 — 한쪽만 읽으면 옮겨 간 쪽의 줄이
+# 말없이 빠진다
+_LEDGER_RECORD = REPO_ROOT / "docs" / "audit" / "회차-기록.md"
+_LEDGER_FILES = (_LEDGER, _LEDGER_RECORD)
+# 두 파일이 든 NC 표 — (파일, 절 머리). 열린 줄은 앞의 것, 닫힌 줄은 뒤의 것에 산다
+_NC_TABLES = ((_LEDGER, "부적합 대장"), (_LEDGER_RECORD, "닫힌 부적합"))
+
+
+def _ledger_text() -> str:
+    """대장 두 파일을 이어 붙인 글 — 회차 절 · W 표처럼 **어느 파일에 있든** 세는 자리."""
+    return "\n".join(path.read_text() for path in _LEDGER_FILES)
+
 
 # 회차 기호. 범위를 적지 않는다 — 대장은 ⑳ 을 넘었고 기호는 유니코드에서 두 자리에
 # 나뉘어 있다(아래 `_RUN_HEAD` 가 그 이유를 든다). 「⑦-b」처럼 꼬리가 붙는 회차가 있다.
@@ -525,7 +542,7 @@ def test_a_round_that_closed_leaves_a_line_in_the_round_table() -> None:
     회차(`⑦` 과 `⑦-b` 는 같은 기호라 한 줄로 센다), 그리고 **절도 줄도 없이
     지나간** 회차 — 그것은 이 파일이 아니라 대장 자신이 모르는 회차다.
     """
-    ledger = _LEDGER.read_text()
+    ledger = _ledger_text()
     tabled = _rounds_in_the_round_table(ledger)
     assert tabled, "회차별 W 표를 찾지 못했다 — 이 게이트가 아무것도 세지 않는다"
 
@@ -672,11 +689,14 @@ def test_a_round_section_names_the_commit_it_audited() -> None:
     리뷰마다 새 틈이 났다(ERP#17, 2026-09-29). 대신 가르지 않는 모양이 대장에 **없게** 한다 —
     넓게 막아 평범한 문장이 걸릴 수 있고, 그러면 문장을 고친다.
     """
-    ledger = _LEDGER.read_text()
-    off = _off_contract(ledger)
+    off = [
+        f"  {path.name}:{line.strip()}"
+        for path in _LEDGER_FILES
+        for line in _off_contract(path.read_text())
+    ]
     assert off == [], "대장이 이 게이트가 가르는 모양을 벗어났다:\n" + "\n".join(off)
 
-    sections = _round_sections(ledger)
+    sections = _round_sections(_ledger_text())
     assert sections, "회차 절을 찾지 못했다 — 이 게이트가 아무것도 세지 않는다"
 
     missing = [
@@ -722,13 +742,22 @@ def _row_cells(row: str) -> list[str]:
     return [cell.strip() for cell in _UNESCAPED_BAR.split(inner)]
 
 
-def _closed_ncs(text: str) -> set[int]:
-    closed: set[int] = set()
-    for _, row in _table_rows(_section(text, "부적합 대장")):
-        cells = _row_cells(row)
-        if cells[0].isdigit() and cells[4].startswith("**닫힘"):
-            closed.add(int(cells[0]))
-    return closed
+def _nc_rows(path: Path, head: str) -> list[list[str]]:
+    """한 NC 표의 줄마다 칸 — 첫 칸이 번호인 줄만."""
+    return [
+        cells
+        for _, row in _table_rows(_section(path.read_text(), head))
+        if (cells := _row_cells(row))[0].isdigit()
+    ]
+
+
+def _all_nc_rows() -> list[list[str]]:
+    """대장 두 파일의 NC 줄 전부 — 열린 표와 닫힌 표(ADR 0010)."""
+    return [cells for path, head in _NC_TABLES for cells in _nc_rows(path, head)]
+
+
+def _closed_ncs() -> set[int]:
+    return {int(cells[0]) for cells in _all_nc_rows() if cells[4].startswith("**닫힘")}
 
 
 def _waiting_on(cell: str) -> set[int]:
@@ -765,11 +794,10 @@ def test_a_row_still_waiting_does_not_wait_on_a_closed_nc() -> None:
     담당의 재감사가 표에서 사라지므로, **줄을 담당별로 나눈다**. 닫은 담당의 줄은 지운
     줄이 되고, 남은 담당의 줄은 제 몫의 번호만 든다.
     """
-    ledger = _LEDGER.read_text()
-    closed = _closed_ncs(ledger)
+    closed = _closed_ncs()
     assert closed, "부적합 대장에서 닫힌 줄을 찾지 못했다 — 이 게이트가 아무것도 견주지 않는다"
 
-    waiting = _section(ledger, "아직 아무도 보지 않은 것")
+    waiting = _section(_LEDGER.read_text(), "아직 아무도 보지 않은 것")
     rows = [_row_cells(row) for _, row in _table_rows(waiting)]
     live = [cells[0] for cells in rows[1:] if not cells[0].startswith("~~")]
     assert any(_waiting_on(first) for first in live), (
@@ -792,13 +820,8 @@ def test_a_row_still_waiting_does_not_wait_on_a_closed_nc() -> None:
 _AWAITING = ("**고침", "**열림")
 
 
-def _awaiting_ncs(text: str) -> set[int]:
-    awaiting: set[int] = set()
-    for _, row in _table_rows(_section(text, "부적합 대장")):
-        cells = _row_cells(row)
-        if cells[0].isdigit() and cells[4].startswith(_AWAITING):
-            awaiting.add(int(cells[0]))
-    return awaiting
+def _awaiting_ncs() -> set[int]:
+    return {int(cells[0]) for cells in _all_nc_rows() if cells[4].startswith(_AWAITING)}
 
 
 def test_an_nc_waiting_for_a_reaudit_has_a_row_that_waits_for_it() -> None:
@@ -813,11 +836,10 @@ def test_an_nc_waiting_for_a_reaudit_has_a_row_that_waits_for_it() -> None:
     재감사를 기다리는 줄(「부분 닫힘」은 잇는 NC 가 닫혀야 닫히므로 그 NC 가 대신 든다),
     그리고 줄이 번호를 들되 **담당이 틀린** 것 — 그 줄의 감사자 칸은 보지 않는다.
     """
-    ledger = _LEDGER.read_text()
-    awaiting = _awaiting_ncs(ledger)
+    awaiting = _awaiting_ncs()
     assert awaiting, "재감사를 기다리는 NC 를 찾지 못했다 — 이 게이트가 아무것도 견주지 않는다"
 
-    waiting = _section(ledger, "아직 아무도 보지 않은 것")
+    waiting = _section(_LEDGER.read_text(), "아직 아무도 보지 않은 것")
     rows = [_row_cells(row) for _, row in _table_rows(waiting)]
     named: set[int] = set()
     for cells in rows[1:]:
@@ -851,11 +873,7 @@ def test_every_nc_status_opens_with_a_word_the_ledger_defined() -> None:
     **이 게이트가 못 보는 부류**(W-6 ③): 말은 맞는데 **상태가 틀린** 줄 — 재감사가 닫지
     않았는데 「닫힘」으로 적은 것은 문장을 읽어야 가른다. 그리고 부적합 대장 밖의 표.
     """
-    rows = [
-        cells
-        for _, row in _table_rows(_section(_LEDGER.read_text(), "부적합 대장"))
-        if (cells := _row_cells(row))[0].isdigit()
-    ]
+    rows = _all_nc_rows()
     assert rows, "부적합 대장에서 NC 줄을 찾지 못했다 — 이 게이트가 아무것도 세지 않는다"
 
     strange = [
@@ -864,6 +882,88 @@ def test_every_nc_status_opens_with_a_word_the_ledger_defined() -> None:
     assert strange == [], (
         "상태 칸이 대장 「닫는 규칙」이 정한 말(굵게)로 열리지 않는다 — 기다리는 표 게이트가 "
         "그 줄을 가르지 못한다:\n" + "\n".join(strange)
+    )
+
+
+# 두 NC 표 어디에도 줄이 없는 번호 — 사유와 함께 든다. 여기 없는 빈 번호는 옮기다 잃은 줄이다
+# 「부적합 대장」이 드는 다음 번호 — 번호의 상한은 표가 아니라 이 줄에서 읽는다
+_NEXT_NUMBER = re.compile(r"\*\*다음 번호는 NC-(\d+) 이다\.\*\*")
+
+_NOT_IN_AN_NC_TABLE = {
+    21: "남은 것이 감사자 자신이라 「사본 특화 대기」 W-7 로 옮겼다(부적합 대장의 옛 주석)",
+    26: "같은 이유로 W-8",
+    30: "같은 이유로 W-9",
+}
+
+
+def test_an_nc_row_lives_in_the_table_its_status_names() -> None:
+    """**열린 줄은 `README.md` 에, 닫힌 줄은 `회차-기록.md` 에 산다** (ADR 0010).
+
+    대장이 한 파일로 자라, 열린 줄을 보려면 닫힌 줄과 회차 절을 전부 읽어야 했다. 두 파일로
+    나눈 뒤로는 줄이 닫힐 때 사람이 옮긴다 — 옮기지 않으면 `README.md` 가 다시 자라고, 열린
+    줄을 닫힌 표에 두면 기다리는 표 게이트들은 그 줄을 여전히 세지만 다음 조각을 여는 사람은
+    보지 못한다. 옮기다 줄을 잃거나 두 표에 함께 두는 것도 여기서 문다 — 번호는 두 표를
+    가로질러 하나다.
+
+    **번호의 상한은 표가 아니라 「다음 번호」 줄에서 읽는다**(PR #45 Codex 리뷰). 두 표의 가장
+    큰 번호를 상한으로 삼으면 가장 큰 줄을 잃었을 때 상한이 함께 내려가 초록이었다(어긋내
+    확인했다) — 그러면 다음 회차가 그 번호를 다시 준다.
+
+    **이 게이트가 못 보는 부류**(W-6 ③): 옮기면서 **글자가 바뀐** 줄(옮기기 전의 글자와 견줄
+    것이 저장소에 없다), 닫힌 표 안의 순서, 그리고 상태가 「닫힘」인데 재감사가 닫지 않은 줄 —
+    그것은 위 게이트의 「못 보는 부류」와 같다.
+    """
+    open_rows = _nc_rows(*_NC_TABLES[0])
+    closed_rows = _nc_rows(*_NC_TABLES[1])
+    assert open_rows and closed_rows, "NC 표 하나가 비었다 — 이 게이트가 아무것도 가르지 않는다"
+
+    misplaced = [
+        f"  {_LEDGER.name} 의 NC-{cells[0]} 가 닫혔다 — 「닫힌 부적합」으로 옮긴다"
+        for cells in open_rows
+        if cells[4].startswith("**닫힘")
+    ] + [
+        f"  {_LEDGER_RECORD.name} 의 NC-{cells[0]} 가 닫히지 않았다 — 「부적합 대장」에 둔다"
+        for cells in closed_rows
+        if not cells[4].startswith("**닫힘")
+    ]
+    assert misplaced == [], "NC 줄이 상태와 다른 표에 있다:\n" + "\n".join(misplaced)
+
+    found = _NEXT_NUMBER.findall(_section(_LEDGER.read_text(), "부적합 대장"))
+    assert len(found) == 1, f"「부적합 대장」에 「다음 번호」 줄이 하나가 아니다: {found}"
+    next_number = int(found[0])
+
+    counted = Counter(int(cells[0]) for cells in open_rows + closed_rows)
+    twice = sorted(number for number, seen in counted.items() if seen > 1)
+    lost = sorted(set(range(1, next_number)) - set(counted) - set(_NOT_IN_AN_NC_TABLE))
+    beyond = sorted(number for number in counted if number >= next_number)
+    stale = sorted(set(counted) & set(_NOT_IN_AN_NC_TABLE))
+    assert (twice, lost, beyond, stale) == ([], [], [], []), (
+        "NC 번호가 두 표를 가로질러 하나씩이 아니다 — "
+        f"두 번 있는 번호 {twice} · 어디에도 없는 번호 {lost} · "
+        f"「다음 번호」(NC-{next_number}) 이상인 번호 {beyond} — 다음 번호 줄도 올린다 · "
+        f"`_NOT_IN_AN_NC_TABLE` 에 들었는데 표에 있는 번호 {stale}"
+    )
+
+
+def test_a_round_section_lives_in_the_record() -> None:
+    """**회차 절은 `회차-기록.md` 에만 선다** (ADR 0010, PR #45 Codex 리뷰).
+
+    회차 절을 세는 게이트들은 두 파일을 이어 읽으므로(`_ledger_text`), 새 회차 절을 옛 자리인
+    `README.md` 끝에 두어도 초록이었다(어긋내 확인했다). 그러면 살아 있는 쪽이 다시 자라고,
+    다음 감사자는 `회차-기록.md` 에서 지난 회차와 그 `### UNK-n` 을 찾지 못한다. 회차를
+    **가리키는** 절(번호 대조)도 회차 기록이라 `## 감사 ` 로 여는 머리는 전부 본다.
+
+    **이 게이트가 못 보는 부류**(W-6 ③): `## 감사 ` 로 열지 않는 회차 기록(`## PR 리뷰 —` 같은
+    머리)과, 회차 절의 몸만 `README.md` 의 다른 절 아래에 붙인 것.
+    """
+    heads = [
+        f"  {number}: {line}"
+        for number, line, in_code in _ledger_lines(_LEDGER.read_text())
+        if not in_code and line.startswith("## 감사 ")
+    ]
+    assert heads == [], (
+        f"{_LEDGER.name} 에 회차 절이 있다 — {_LEDGER_RECORD.name} 끝으로 옮긴다:\n"
+        + "\n".join(heads)
     )
 
 
