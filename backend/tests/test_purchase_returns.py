@@ -428,9 +428,15 @@ def test_a_return_cannot_take_more_than_is_left(prepared: Session) -> None:
 
 
 def test_returns_can_empty_a_lot_to_the_last_gram(prepared: Session) -> None:
-    """**합은 `numeric` 으로 센다.** `double precision` 으로 더하면 500 − 33.3 − 66.7 − 400 이
-    0 이 아니라 아주 작은 음수가 되고, 실제로 다 빠진 로트를 「음수」라며 거부한다."""
-    for minute, quantity in enumerate((33.3, 66.7, 400.0)):
+    """**합은 `numeric` 으로 센다.** `double precision` 으로 더하면 500 − 0.1 − 0.3 − 499.6 이
+    0 이 아니라 −5.7e-14 가 되고, 실제로 다 빠진 로트를 「음수」라며 거부한다.
+
+    **수를 아무렇게나 고르면 이 검사는 아무것도 지키지 않는다.** 처음에는 33.3 · 66.7 · 400
+    으로 쟀는데 그 합은 부동소수점에서도 공교롭게 0 보다 조금 **크게** 남아, 합을
+    `double precision` 으로 세게 어긋내도 초록이었다(`docs/audit/mutations.md`). 지금의 수는
+    부동소수점 합이 실제로 음수가 되는 것을 확인하고 골랐다.
+    """
+    for minute, quantity in enumerate((0.1, 0.3, 499.6)):
         document = _lot_return(prepared, quantity, returned_at=datetime(2026, 9, 26, 9, minute))
         prepared.add(document)
         prepared.flush()
