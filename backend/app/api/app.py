@@ -267,9 +267,14 @@ def do_not_hand_what_the_database_echoed_to_the_server(
     사람이 실제로 쓰는 둘(SQLSTATE · 제약 이름)을 골라 적는다 — 제약 이름은
     **어느 규칙이 걸렸는가**라 SQLAlchemy 프레임 스택보다 정확하다.
 
-    **이 처리기가 못 보는 부류**(W-6 ③): `ExceptionMiddleware` 바깥(사용자
-    미들웨어 · 응답을 보낸 뒤의 정리)에서 터진 DB 오류는 여기 오지 않고
-    `Exception` 처리기로 가서 다시 던져진다. 오늘 그 층은 DB 를 만지지 않는다.
+    **이 처리기가 못 보는 부류**(W-6 ③): 사용자 미들웨어에서 터진 DB 오류는
+    `ExceptionMiddleware` 바깥이라 여기 오지 않는다 — 오늘 그 층은 DB 를 만지지
+    않는다. 그리고 **응답이 이미 나간 뒤**의 DB 오류. 422 는 예외를 던지지 않고
+    응답을 돌려주므로 `session_scope` 의 `close()` 가 응답 뒤에 rollback 을 돌고,
+    그것이 터지면 이 처리기에 오기는 하지만 보낼 자리가 없어 starlette 가
+    `RuntimeError` 로 바꿔 던지고 `Exception` 처리기를 지나 uvicorn 이 찍는다.
+    rollback 오류에는 행의 값이 없어 새는 것은 없다 — 부르는 쪽은 422 를 받았는데
+    로그에는 「처리하지 못했다」가 남는 어긋남이다(감사 ㉜ — #67).
     """
     request_id = getattr(request.state, "request_id", "-")
     diagnosis = getattr(exc.orig, "diag", None)
@@ -300,7 +305,8 @@ def do_not_answer_a_break_with_plain_text(request: Request, exc: Exception) -> J
     (감사 ⑱ NC-166). 500 을 좇는 사람이 처음 읽는 줄이라, 「로그가 없다」로
     읽으면 그 경로를 아예 찾지 않는다.
 
-    데이터베이스 오류는 여기 오지 않는다 — 위의 처리기가 받는다(NC-164).
+    데이터베이스 오류는 위의 처리기가 받는다(NC-164) — 응답이 이미 나간 뒤의 것만
+    여기로 다시 온다(위 처리기의 「못 보는 부류」).
     """
     # **여기서 한 줄 찍는다.** 트레이스백은 starlette 가 다시 던져 uvicorn 이
     # 찍지만, 그 줄에는 이 요청을 가리키는 것이 없다. 안을 싣지 않는 것은 본문의
