@@ -7,7 +7,8 @@ name: 프로젝트 보드
 #
 # **준비**(저장소 설정):
 # - 환경 `project-board` — Settings → Environments. 배포 브랜치를 `main` 하나로 둔다
-# - 그 환경의 시크릿 `PROJECT_TOKEN` — 클래식 개인 토큰, 범위 `project` 하나. 세분화 토큰은
+# - 그 환경의 시크릿 `PROJECT_TOKEN` — 클래식 개인 토큰, 범위 `project` · `read:org`
+#   (ADR 0009 — `project` 하나로는 `gh project --owner` 가 `unknown owner type` 으로 멈췄다). 세분화 토큰은
 #   사용자 소유 Projects 에 쓸 수 없다(GitHub 의 제한). 이 저장소가 공개라 `repo` 범위는 필요 없다
 # - 변수 `PROJECT_NUMBER` — Settings → Secrets and variables → Actions → Variables. 보드 주소
 #   `github.com/users/<소유자>/projects/<번호>` 의 번호
@@ -21,16 +22,27 @@ name: 프로젝트 보드
 # 입력이 명령으로 읽힌다(스크립트 주입). 준비가 없으면 **빨갛게 멈춘다** — 조용히 건너뛰면
 # 부른 쪽은 보드가 바뀐 줄 안다.
 #
-# **이 워크플로가 못 하는 것**(W-6 ③): 상태(Status) 밖의 사용자 정의 칸, 저장소 밖의 이슈,
-# 보드 자체의 생성 · 설정. 그 자리는 사람이 화면에서 한다.
+# **보기(`show`)는 보드를 주석(notice)으로 남긴다** — 클라우드 세션은 보드를 직접 읽을 수 없고(GraphQL),
+# 실행 로그도 내려받지 못하지만 주석은 저장소 범위 API 로 읽힌다. Status 하나에 한 줄로 묶는다 — 주석은
+# 단계마다 종류별 개수에 상한이 있다.
+#
+# **이 워크플로가 못 하는 것**(W-6 ③): 상태(Status) 밖의 사용자 정의 칸, 저장소 밖의 이슈 · 드래프트
+# 카드(보기에서도 빠진다), 보드 자체의 생성 · 설정. 그 자리는 사람이 화면에서 한다.
 
 on:
   workflow_dispatch:
     inputs:
+      action:
+        description: put — 이슈를 보드에 넣고 Status 를 옮긴다 · show — 보드의 카드를 주석으로 보인다
+        required: false
+        type: choice
+        options: [put, show]
+        default: put
       issue:
-        description: 이슈 번호 — 보드에 넣는다(이미 있으면 그 카드를 쓴다)
-        required: true
-        type: number
+        description: 이슈 번호 — put 은 반드시, show 는 주면 그 카드만 보인다
+        required: false
+        type: string
+        default: ""
       status:
         description: 상태(Status) 칸의 값 — 비우면 넣기만 한다
         required: false
@@ -50,51 +62,110 @@ jobs:
     timeout-minutes: 5
     environment: project-board
     steps:
-      - name: 보드에 넣고 상태를 옮긴다
+      - name: 보드를 다룬다 — 넣기(put) · 보기(show)
         env:
           GH_TOKEN: ${{ secrets.PROJECT_TOKEN }}
           PROJECT_NUMBER: ${{ vars.PROJECT_NUMBER }}
           OWNER: ${{ github.repository_owner }}
           REPOSITORY: ${{ github.repository }}
+          ACTION: ${{ inputs.action }}
           ISSUE: ${{ inputs.issue }}
           STATUS: ${{ inputs.status }}
         run: |
           set -euo pipefail
-          if [ -z "$GH_TOKEN" ]; then
-            echo "::error::시크릿 PROJECT_TOKEN 이 없다 — 환경 project-board 의 시크릿이고 main 의 실행만 받는다(ADR 0008)"
+          # 실패의 말은 주석(`::error::`)으로 남긴다 — 클라우드 세션은 실행 로그를 내려받을 수 없고
+          # (로그 저장소가 세션 프록시 밖이다), 주석은 저장소 범위 API(check-runs 의 annotations)로
+          # 읽힌다. 첫 실제 실행이 「exit code 1」만 남겨 원인을 볼 수 없었다
+          exec 3>&1
+          annotate() {
+            local m=${2//'%'/'%25'}
+            m=${m//$'\r'/ }
+            m=${m//$'\n'/ }
+            printf '::%s::%s\n' "$1" "$m" >&3
+          }
+          fail() {
+            annotate error "$1"
             exit 1
+          }
+          # gh 를 부르고, 실패하면 gh 의 말을 주석으로 남기고 멈춘다. 성공하면 표준 출력만 돌려준다
+          err=$(mktemp)
+          run_gh() {
+            gh "$@" 2>"$err" || fail "gh $1 $2 실패 — $(cat "$err")"
+          }
+
+          if [ -z "$GH_TOKEN" ]; then
+            fail "시크릿 PROJECT_TOKEN 이 없다 — 환경 project-board 의 시크릿이고 main 의 실행만 받는다(ADR 0008)"
           fi
           if [ -z "$PROJECT_NUMBER" ]; then
-            echo "::error::변수 PROJECT_NUMBER 가 없다 — ADR 0008 의 준비를 본다"
-            exit 1
+            fail "변수 PROJECT_NUMBER 가 없다 — ADR 0008 의 준비를 본다"
+          fi
+          # 앞자리 0 도 받지 않는다 — 보기는 번호를 글자로 견주므로 `043` 이 #43 의 카드를 「없다」고 한다
+          # (PR #44 Codex 리뷰 2 라운드). 고쳐 읽기보다 멈춰서 바른 번호를 받는다
+          if [ -n "$ISSUE" ] && ! [[ "$ISSUE" =~ ^[1-9][0-9]*$ ]]; then
+            fail "이슈 번호는 앞자리 0 이 없는 양의 정수여야 한다: $ISSUE"
+          fi
+
+          if [ "$ACTION" = "show" ]; then
+            limit=1000
+            items=$(run_gh project item-list "$PROJECT_NUMBER" --owner "$OWNER" --format json --limit "$limit")
+            # `--limit` 에서 잘린 뒤에 거르면 뒤의 카드가 조용히 빠진다 — 「카드가 없다」가 거짓이 된다
+            # (PR #44 Codex 리뷰). 다 읽지 못했으면 빨갛게 멈춘다. 전체 수가 없으면 상한에 닿은 것을 잘림으로 본다
+            got=$(jq '.items | length' <<<"$items")
+            total=$(jq -r '.totalCount // empty' <<<"$items")
+            if [ -n "$total" ] && [ "$got" -lt "$total" ]; then
+              fail "보드 $PROJECT_NUMBER 의 카드를 다 읽지 못했다 — $total 장 가운데 $got 장. 보기를 멈춘다"
+            fi
+            if [ -z "$total" ] && [ "$got" -ge "$limit" ]; then
+              fail "보드 $PROJECT_NUMBER 의 카드가 $limit 장을 넘을 수 있다 — 다 읽었는지 알 수 없어 보기를 멈춘다"
+            fi
+            total=${total:-$got}
+            # 이 저장소의 이슈 · PR 카드만 Status 별로 묶는다. 제목은 40 자에서 자른다
+            groups=$(jq -r --arg repo "$REPOSITORY" --arg issue "$ISSUE" '
+              [.items[] | select(.content.repository == $repo)
+                        | select($issue == "" or ((.content.number | tostring) == $issue))]
+              | group_by(.status // "(Status 없음)") | .[]
+              | "\(.[0].status // "(Status 없음)") (\(length)): "
+                + ([.[] | "#\(.content.number) \(.title[0:40])"] | join(" · "))' <<<"$items")
+            if [ -z "$groups" ]; then
+              annotate notice "보드 $PROJECT_NUMBER: ${ISSUE:+이슈 #$ISSUE 의 }카드가 없다(보드 전체 $total 장)"
+              exit 0
+            fi
+            annotate notice "보드 $PROJECT_NUMBER: 이 저장소의 카드(보드 전체 $total 장)"
+            while IFS= read -r line; do
+              annotate notice "$line"
+            done <<<"$groups"
+            exit 0
+          fi
+
+          if [ -z "$ISSUE" ]; then
+            fail "put 은 이슈 번호가 있어야 한다"
           fi
 
           # Status 를 옮길 때는 값을 **먼저** 확인한다 — 넣은 뒤에 틀린 값을 알면 카드만 보드에 남고
           # 빨갛게 멈춘다(보드의 변경은 되돌려지지 않는다, PR #42 Codex 리뷰)
           if [ -n "$STATUS" ]; then
-            project=$(gh project view "$PROJECT_NUMBER" --owner "$OWNER" --format json --jq .id)
+            project=$(run_gh project view "$PROJECT_NUMBER" --owner "$OWNER" --format json --jq .id)
             # 칸 목록은 기본 30 개까지만 온다 — Status 가 그 뒤에 있으면 없는 값으로 잘못 멈춘다
             # (PR #42 Codex 리뷰). 보드의 칸 수보다 넉넉히 가져온다
-            fields=$(gh project field-list "$PROJECT_NUMBER" --owner "$OWNER" --format json --limit 100)
+            fields=$(run_gh project field-list "$PROJECT_NUMBER" --owner "$OWNER" --format json --limit 100)
             field=$(jq -r '.fields[] | select(.name == "Status") | .id' <<<"$fields")
             option=$(jq -r --arg s "$STATUS" \
               '.fields[] | select(.name == "Status") | .options[] | select(.name == $s) | .id' \
               <<<"$fields")
             if [ -z "$field" ] || [ -z "$option" ]; then
-              echo "::error::Status 칸에 「$STATUS」가 없다 — 보드는 바꾸지 않았다. 있는 값:"
-              jq -r '.fields[] | select(.name == "Status") | .options[].name' <<<"$fields"
-              exit 1
+              names=$(jq -r '[.fields[] | select(.name == "Status") | .options[].name] | join(", ")' <<<"$fields")
+              fail "Status 칸에 「$STATUS」가 없다 — 보드는 바꾸지 않았다. 있는 값: ${names:-(Status 칸 없음)}"
             fi
           fi
 
           # 이미 보드에 있는 이슈면 그 카드의 ID 를 돌려준다(GitHub 문서 「Using the API to manage
-          # Projects」 — 첫 실제 실행에서 확인한다)
-          item=$(gh project item-add "$PROJECT_NUMBER" --owner "$OWNER" \
+          # Projects」 — 같은 이슈를 두 번 넣어 확인했다, ADR 0009)
+          item=$(run_gh project item-add "$PROJECT_NUMBER" --owner "$OWNER" \
             --url "https://github.com/$REPOSITORY/issues/$ISSUE" --format json --jq .id)
           echo "이슈 #$ISSUE → 보드 $PROJECT_NUMBER 의 카드 $item"
 
           if [ -n "$STATUS" ]; then
-            gh project item-edit --id "$item" --project-id "$project" \
-              --field-id "$field" --single-select-option-id "$option"
+            run_gh project item-edit --id "$item" --project-id "$project" \
+              --field-id "$field" --single-select-option-id "$option" >/dev/null
             echo "카드 $item 의 Status → $STATUS"
           fi
