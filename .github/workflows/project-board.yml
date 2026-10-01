@@ -99,8 +99,10 @@ jobs:
           if [ -z "$PROJECT_NUMBER" ]; then
             fail "변수 PROJECT_NUMBER 가 없다 — ADR 0008 의 준비를 본다"
           fi
-          if [ -n "$ISSUE" ] && ! [[ "$ISSUE" =~ ^[0-9]+$ ]]; then
-            fail "이슈 번호가 숫자가 아니다: $ISSUE"
+          # 앞자리 0 도 받지 않는다 — 보기는 번호를 글자로 견주므로 `043` 이 #43 의 카드를 「없다」고 한다
+          # (PR #44 Codex 리뷰 2 라운드). 고쳐 읽기보다 멈춰서 바른 번호를 받는다
+          if [ -n "$ISSUE" ] && ! [[ "$ISSUE" =~ ^[1-9][0-9]*$ ]]; then
+            fail "이슈 번호는 앞자리 0 이 없는 양의 정수여야 한다: $ISSUE"
           fi
 
           if [ "$ACTION" = "show" ]; then
