@@ -795,3 +795,24 @@ Codex 의 지적 둘을 저장소의 실제 파일에 넣어 재현했다(`docs/
 | — | `bbfb6e8` 묶음의 검사 이름뿐인 줄 하나에 「— 통과했다」를 붙였다 | `test_a_mutation_that_stayed_green_is_closed_later_or_listed` — 목록이 여는 글자까지 견준다 |
 | — | 같은 NC 의 줄을 셋째 칸 「`test_claude_md_stays_short` — 처음에는 없었다」로 더했다 | 같은 검사 — 빨강 칸에 전 · 후가 한 칸에 들었다 |
 | 214 | `_RED_WITH_A_PASS` 에서 `("4abd1b6", "188")` 을 뺐다(대조군 — 게이트가 느슨해지지 않았다) | `test_a_mutation_that_stayed_green_is_closed_later_or_listed` |
+
+## 대장 가르기 (`aa794d1`)
+
+대장을 `README.md` 와 `회차-기록.md` 로 가른 트리(ADR 0010)에서 하나씩 넣고 되돌렸다. `test_prose.py` 만 돌렸다. 그
+트리에는 이 묶음이 아직 없어 기록 게이트가 새 검사의 기록을 찾지 못해 빨갰다 — 아래 「빨개진 검사」는 **그 하나를 뺀**
+빨강이다. 어긋냄 없이 돌린 대조군은 그 하나 말고 초록이다. 같은 트리의 `pytest` 전체(실제 PostgreSQL 16)도 그 하나 말고
+초록이다(389 passed).
+
+| NC | 무엇을 어긋냈나 | 빨개진 검사 |
+|---|---|---|
+| — | 닫힌 NC-1 줄을 `회차-기록.md` 에서 빼 `README.md` 표 끝에 두었다 | `test_an_nc_row_lives_in_the_table_its_status_names` |
+| — | 열린 NC-213 줄을 `README.md` 에서 빼 「닫힌 부적합」 표 끝에 두었다 | `test_an_nc_row_lives_in_the_table_its_status_names` — 기다리는 표 게이트는 두 표를 함께 세므로 초록이다. 이 자리를 무는 것은 이 검사 하나다 |
+| — | 「닫힌 부적합」에서 NC-100 줄을 지웠다 | `test_an_nc_row_lives_in_the_table_its_status_names` — 어디에도 없는 번호 |
+| — | 「닫힌 부적합」의 NC-5 줄을 두 번 두었다 | `test_an_nc_row_lives_in_the_table_its_status_names` — 두 번 있는 번호 |
+| — | `_NOT_IN_AN_NC_TABLE` 에서 21 을 뺐다 | `test_an_nc_row_lives_in_the_table_its_status_names` — 어디에도 없는 번호 |
+| — | 「닫힌 부적합」의 NC-1 상태 칸 `**닫힘**` 을 굵게 없이 `닫힘` 으로 썼다 — 게이트가 `회차-기록.md` 의 표를 읽는가 | `test_every_nc_status_opens_with_a_word_the_ledger_defined` · `test_an_nc_row_lives_in_the_table_its_status_names` |
+| — | `회차-기록.md` 의 「감사 ㉙(`audit-quality`)」 절에서 감사한 커밋 줄을 지웠다 | `test_a_round_section_names_the_commit_it_audited` |
+| — | `회차-기록.md` 의 회차별 W 표(감사 ⑥ 절 안)에서 「㉙ 둘」 줄을 지웠다 | `test_a_round_that_closed_leaves_a_line_in_the_round_table` |
+| — | `회차-기록.md` 「닫힌 부적합」 머리 아래에 들여쓴 울타리 블록을 두었다 | `test_a_round_section_names_the_commit_it_audited` — 대장이 지키는 모양을 두 파일 다 본다 |
+| — | `README.md` 「아직 아무도 보지 않은 것」의 지운 줄 「㉘(`audit-quality`) 이 낸 자리(203 ~ 206)」를 되살렸다 — 닫힌 204 · 206 은 `회차-기록.md` 에 있다 | `test_a_row_still_waiting_does_not_wait_on_a_closed_nc` |
+| — | 「㉙(`audit-quality`) 이 낸 자리(213 ~ 215)」의 첫 칸을 214 ~ 215 로 좁혔다 | `test_an_nc_waiting_for_a_reaudit_has_a_row_that_waits_for_it` |
