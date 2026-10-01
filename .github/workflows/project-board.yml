@@ -73,7 +73,9 @@ jobs:
           # 빨갛게 멈춘다(보드의 변경은 되돌려지지 않는다, PR #42 Codex 리뷰)
           if [ -n "$STATUS" ]; then
             project=$(gh project view "$PROJECT_NUMBER" --owner "$OWNER" --format json --jq .id)
-            fields=$(gh project field-list "$PROJECT_NUMBER" --owner "$OWNER" --format json)
+            # 칸 목록은 기본 30 개까지만 온다 — Status 가 그 뒤에 있으면 없는 값으로 잘못 멈춘다
+            # (PR #42 Codex 리뷰). 보드의 칸 수보다 넉넉히 가져온다
+            fields=$(gh project field-list "$PROJECT_NUMBER" --owner "$OWNER" --format json --limit 100)
             field=$(jq -r '.fields[] | select(.name == "Status") | .id' <<<"$fields")
             option=$(jq -r --arg s "$STATUS" \
               '.fields[] | select(.name == "Status") | .options[] | select(.name == $s) | .id' \
