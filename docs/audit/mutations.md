@@ -82,6 +82,9 @@
 | `4da615c` | 215 | 표 번호 게이트가 빼는 파일 안의 줄 · 틀린 문서 이름 — 고친 뒤에도 같다 | `audit-quality` | 초록 — 의도한 경계(㉙ NC-215). `88a8ff1` 215 줄과 같은 자리다 |
 | `89712c1` | — | `_RED_WITH_A_PASS` 에 든 (커밋, NC) 의 다른 줄에 「— 통과했다」를 붙여도 초록 검사가 통과한다 | `audit-quality` | **닫혔다** — 목록이 셋째 칸의 여는 글자까지 든다(「PR #41 Codex 리뷰 1 라운드의 고침」 묶음) |
 | `89712c1` | — | 빨강 칸에 「처음에는 없었다」로 전 · 후를 함께 적어도 초록 검사가 통과한다 | `audit-quality` | **닫혔다** — 전 표현에 「처음에는」 · 「첫 판」을 더했다(같은 묶음) |
+| `757def1` | — | 대장에서 가장 큰 번호의 줄을 잃어도 줄 배치 검사가 통과한다 — 상한을 두 표에서 읽었다 | `audit-quality` | **닫혔다** — 상한을 「다음 번호」 줄에서 읽는다(「PR #45 Codex 리뷰 1 라운드의 고침」 묶음) |
+| `757def1` | — | `README.md` 에 회차 절을 두어도 회차 게이트들이 통과한다 — 두 파일을 이어 읽는다 | `audit-quality` | **닫혔다** — `test_a_round_section_lives_in_the_record` 가 문다(같은 묶음) |
+| `25676d4` | — | 회차 절을 `회차-기록.md` 끝에 둔다 | `audit-quality` | 초록이 맞다 — 대조군(「PR #45 Codex 리뷰 1 라운드의 고침」 묶음) |
 
 ## ⑧ 의 고침 (`03b6c1f`)
 
@@ -816,3 +819,27 @@ Codex 의 지적 둘을 저장소의 실제 파일에 넣어 재현했다(`docs/
 | — | `회차-기록.md` 「닫힌 부적합」 머리 아래에 들여쓴 울타리 블록을 두었다 | `test_a_round_section_names_the_commit_it_audited` — 대장이 지키는 모양을 두 파일 다 본다 |
 | — | `README.md` 「아직 아무도 보지 않은 것」의 지운 줄 「㉘(`audit-quality`) 이 낸 자리(203 ~ 206)」를 되살렸다 — 닫힌 204 · 206 은 `회차-기록.md` 에 있다 | `test_a_row_still_waiting_does_not_wait_on_a_closed_nc` |
 | — | 「㉙(`audit-quality`) 이 낸 자리(213 ~ 215)」의 첫 칸을 214 ~ 215 로 좁혔다 | `test_an_nc_waiting_for_a_reaudit_has_a_row_that_waits_for_it` |
+
+## PR #45 Codex 리뷰 1 라운드 — 고치기 전 (`757def1`)
+
+Codex 의 지적 둘을 저장소의 실제 파일에 넣어 재현했다(`docs/리뷰-루프.md`). 둘 다 이 PR 이 세운 게이트의 틈이고, `main` 에는
+그 게이트가 없어 같은 입력을 똑같이 놓친다 — **기존 한계 · 조용한 통과**(2 · 2). 저장소의 실제 줄에는 그런 입력이 없다.
+라운드 점수 4. `test_prose.py` 만 돌렸다.
+
+| NC | 무엇을 어긋냈나 | 빨개진 검사 |
+|---|---|---|
+| — | `README.md` 「부적합 대장」에서 가장 큰 번호의 줄(NC-219)을 지웠다 — 상한이 함께 218 로 내려간다 | **없다 — 통과했다** (`test_an_nc_row_lives_in_the_table_its_status_names`) |
+| — | `README.md` 끝에 「감사 ㉚」 절(감사한 커밋 줄까지)을 두고 회차별 W 표에 ㉚ 줄을 더했다 | **없다 — 통과했다** (`test_a_round_section_names_the_commit_it_audited` · `test_a_round_that_closed_leaves_a_line_in_the_round_table`) — 두 파일을 이어 읽는다 |
+
+## PR #45 Codex 리뷰 1 라운드의 고침 (`25676d4`)
+
+같은 둘과 그 곁의 셋. `test_prose.py` 만 돌렸다. 그 트리에는 이 묶음이 아직 없어 기록 게이트가 새 검사의 기록을 찾지 못해
+빨갰다 — 아래 「빨개진 검사」는 그 하나를 뺀 빨강이다. 어긋냄 없이 돌린 대조군은 그 하나 말고 초록이다.
+
+| NC | 무엇을 어긋냈나 | 빨개진 검사 |
+|---|---|---|
+| — | 「부적합 대장」에서 NC-219 줄을 지웠다 | `test_an_nc_row_lives_in_the_table_its_status_names` — 「다음 번호」(NC-220) 아래의 빈 번호 |
+| — | NC-219 줄을 베껴 220 으로 더하고 「다음 번호」 줄은 그대로 두었다 | `test_an_nc_row_lives_in_the_table_its_status_names` · `test_an_nc_waiting_for_a_reaudit_has_a_row_that_waits_for_it` — 앞의 것은 다음 번호 이상인 번호, 뒤의 것은 그 줄을 기다리는 줄이 없다 |
+| — | 「다음 번호」 줄의 굵게를 뺐다 | `test_an_nc_row_lives_in_the_table_its_status_names` — 다음 번호 줄이 하나가 아니다 |
+| — | `README.md` 끝에 「감사 ㉚」 절을 두고 회차별 W 표에 ㉚ 줄을 더했다 | `test_a_round_section_lives_in_the_record` |
+| — | 같은 절을 `회차-기록.md` 끝에 두고 W 표에 ㉚ 줄을 더했다(대조군 — 제자리다) | **없다 — 통과했다** (`test_a_round_section_lives_in_the_record`) — 초록이 맞다 |
