@@ -313,6 +313,24 @@ def test_a_path_error_answers_in_the_same_shape(client: TestClient) -> None:
         assert detail[0].keys() == {"loc", "msg", "type"}, detail
 
 
+def test_a_body_that_cannot_be_read_points_at_the_body(client: TestClient) -> None:
+    """**틀린 것이 본문이면 `loc` 도 본문을 가리킨다** (감사 ㉛ NC-220).
+
+    UTF-8 로 풀리지 않는 본문은 FastAPI 가 400 으로 던지고 덮개를 지난다. 덮개는
+    경로 · 메서드 오류를 위해 `loc` 을 `["path"]` 로 적었으므로, 그대로 두면
+    `loc` 으로 틀린 칸을 표시하는 소비자는 **본문 오류를 경로 오류로 읽는다.**
+    """
+    response = client.post(
+        "/inspections", content=b"\xff", headers={"content-type": "application/json"}
+    )
+
+    assert response.status_code == 400, response.text
+    assert response.json()["detail"][0]["loc"] == ["body"], response.json()
+    assert response.json()["detail"][0]["type"] == "http_error", response.json()
+    # 같은 덮개를 지나는 404 는 그대로 요청선을 가리킨다.
+    assert client.post("/inspection", json=_PAYLOAD).json()["detail"][0]["loc"] == ["path"]
+
+
 def test_the_spec_lists_every_refusal_name(client: TestClient) -> None:
     """**거절의 이름을 `/openapi.json` 만 읽고 셀 수 있다** (감사 ⑫ NC-134).
 
@@ -344,19 +362,30 @@ def test_the_spec_declares_every_answer_that_actually_goes_out(client: TestClien
     갈리므로, 라우트 밖 거절을 **실제로 일으켜** 그 상태 코드가 선언에 있는지를
     본다.
 
+    **400 도 일으킨다** (감사 ㉛ NC-220). 본문이 UTF-8 로 풀리지 않으면 FastAPI 가
+    400 을 던지는데, 처음에는 이 검사가 그 갈래를 「일으키지 못하는 응답」으로 두어
+    선언에서 빠진 채 초록이었다.
+
     **이 검사가 못 보는 부류**(W-6 ③): 이 검사가 일으키지 못하는 응답(500 은
-    다른 검사가 일으킨다)과, 선언은 있는데 **모양이 다른** 경우 — 모양은 위의
-    검사들이 본다.
+    다른 검사가 일으킨다), 프레임워크가 얹는데 **아무도 모르는** 갈래(400 이 그랬다),
+    그리고 선언은 있는데 **모양이 다른** 경우 — 모양은 위의 검사들이 본다.
     """
     spec = client.get("/openapi.json").json()
     declared = spec["paths"]["/inspections"]["post"]["responses"]
 
-    # 라우트 밖 거절을 실제로 일으킨다 — 404 와 405.
-    for response in (client.post("/inspection", json=_PAYLOAD), client.get("/inspections")):
+    # 라우트 밖 거절을 실제로 일으킨다 — 400 · 404 · 405.
+    for response in (
+        client.post(
+            "/inspections", content=b"\xff", headers={"content-type": "application/json"}
+        ),
+        client.post("/inspection", json=_PAYLOAD),
+        client.get("/inspections"),
+    ):
+        assert response.status_code in (400, 404, 405), response.text
         assert str(response.status_code) in declared, (response.status_code, sorted(declared))
 
-    # 500 은 다른 검사가 일으키므로 선언만 본다. 세 상태가 같은 모양을 든다.
-    for code in ("404", "405", "500"):
+    # 500 은 다른 검사가 일으키므로 선언만 본다. 네 상태가 같은 모양을 든다.
+    for code in ("400", "404", "405", "500"):
         schema = declared[code]["content"]["application/json"]["schema"]
         assert schema["$ref"].endswith("/TransportRefused"), (code, schema)
 
@@ -397,7 +426,7 @@ def test_the_spec_says_which_header_names_the_request(client: TestClient) -> Non
     spec = client.get("/openapi.json").json()
     declared = spec["paths"]["/inspections"]["post"]["responses"]
 
-    for code in ("201", "404", "405", "422", "500"):
+    for code in ("201", "400", "404", "405", "422", "500"):
         assert "X-Request-Id" in declared[code]["headers"], (code, declared[code])
 
     assert "Allow" in declared["405"]["headers"], declared["405"]

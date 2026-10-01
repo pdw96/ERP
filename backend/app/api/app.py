@@ -340,7 +340,10 @@ def answer_a_path_error_in_the_same_shape(
     **처리기가 없어서가 아니다.** FastAPI 는 이 예외의 처리기를 기본으로 등록해
     두는데, 그 기본이 문자열을 싣는다. 그래서 **덮는다**(감사 ⑫ NC-135).
 
-    경로·메서드 오류라 `loc` 은 본문이 아니라 요청선을 가리킨다.
+    경로·메서드 오류라 `loc` 은 대개 요청선(`["path"]`)을 가리킨다. **400 만은
+    본문이다**(`["body"]`) — FastAPI 가 본문을 읽다 `JSONDecodeError` 가 아닌
+    예외(UTF-8 로 풀리지 않는 바이트)를 만나면 이 예외로 400 을 던지는데, 그때
+    틀린 것은 본문이다(감사 ㉛ NC-220). 이 앱에서 400 을 던지는 자리는 그것뿐이다.
 
     **덮으면 기본 처리기가 하던 것을 전부 떠안는다.** 그것은 둘이었다 — 헤더를
     넘기는 것과, **본문을 실으면 안 되는 상태 코드**를 본문 없이 돌려보내는 것.
@@ -355,9 +358,10 @@ def answer_a_path_error_in_the_same_shape(
     """
     if not is_body_allowed_for_status_code(exc.status_code):
         return Response(status_code=exc.status_code, headers=exc.headers)
+    where = "body" if exc.status_code == status.HTTP_400_BAD_REQUEST else "path"
     return _refusal(
         exc.status_code,
-        [{"loc": ["path"], "msg": str(exc.detail), "type": Transport.HTTP_ERROR}],
+        [{"loc": [where], "msg": str(exc.detail), "type": Transport.HTTP_ERROR}],
         headers=exc.headers,
     )
 
@@ -424,10 +428,15 @@ def session_scope() -> Iterator[Session]:
     # `X-Request-Id` 도 함께 적는다. NC-145 가 그것을 **「부르는 쪽이 『이 요청』
     # 이라고 말할 수 있게」** 세웠는데, 말할 자리가 스펙에 없으면 그 규약은
     # 우리끼리의 것이다. 받은 값을 존중하는 것까지가 그 규약이다.
+    #
+    # **400 을 빠뜨렸었다** (감사 ㉛ NC-220). 본문이 UTF-8 로 풀리지 않으면 FastAPI 가
+    # 400 을 던지는데, 위의 「다 적는다」를 쓰고도 그 갈래를 몰랐다 — 프레임워크가
+    # 얹은 응답이라 눈으로 센 목록에서 빠졌다(NC-84 와 같은 부류).
     responses={
         # **성공도 그 헤더를 단다.** 미들웨어가 모든 응답에 달므로 201 만 빼면
         # 선언이 다시 실제보다 좁아진다 — NC-160 이 낸 그 모양이다(찍어서 봤다).
         status.HTTP_201_CREATED: {"headers": _REQUEST_ID_SPEC},
+        status.HTTP_400_BAD_REQUEST: {"model": TransportRefused, "headers": _REQUEST_ID_SPEC},
         status.HTTP_404_NOT_FOUND: {"model": TransportRefused, "headers": _REQUEST_ID_SPEC},
         status.HTTP_405_METHOD_NOT_ALLOWED: {
             "model": TransportRefused,
