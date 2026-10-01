@@ -1,4 +1,4 @@
-# ADR 0009 — 보드 토큰에 `read:org` · `read:discussion` 을 더한다 (ADR 0008 의 토큰 범위를 대체)
+# ADR 0009 — 보드 토큰에 `read:org` 를 더한다 (ADR 0008 의 토큰 범위를 대체)
 
 - 상태: 채택
 - 날짜: 2026-10-01
@@ -16,19 +16,21 @@ ADR 0008 은 보드 토큰(`PROJECT_TOKEN`, 클래식 개인 토큰)의 범위�
 
 ## 대안
 
-- **가) 토큰에 `read:org` · `read:discussion` 을 더한다.** 둘 다 읽기 전용이다. 토큰 값은 그대로라 시크릿을
-  다시 넣지 않는다
+- **가) 토큰에 `read:org` 를 더한다.** 읽기 전용이다. 토큰 값은 그대로라 시크릿을 다시 넣지 않는다
 - **나) 워크플로가 `gh project` 대신 GraphQL 을 직접 부른다.** 노드 ID 로 부르면 소유자 조회가 없어 `project`
   하나로 된다(mtharrison/edgewise#23). 코드가 커지고, 토큰이 `main` 실행에만 가므로(ADR 0008) 고칠 때마다
   머지해야 시험할 수 있다
 
 ## 결정
 
-**가).** 범위는 `project` · `read:org` · `read:discussion` 이다. `repo` 는 여전히 필요 없다(공개 저장소).
+**가).** 범위는 `project` · `read:org` 이다. `repo` 는 여전히 필요 없다(공개 저장소).
+
+`read:discussion` 은 넣지 않는다. 처음에는 위의 저장소들을 따라 함께 더했으나, 워크플로가 토론을 읽는 자리가 없다
+(PR #44 Codex 리뷰 2 라운드). 빼고 다시 쟀더니 초록이었다(아래 표의 끝 두 줄).
 
 ## 결과
 
-범위를 더한 뒤 같은 이슈 #43 으로 `main` 에서 쟀다(2026-10-01):
+범위를 더한 뒤 같은 이슈 #43 으로 `main` 에서 쟀다(2026-10-01). 위 네 줄은 `read:discussion` 이 함께 있던 때다:
 
 | 시험 | 실행 | 결과 |
 |---|---|---|
@@ -36,6 +38,8 @@ ADR 0008 은 보드 토큰(`PROJECT_TOKEN`, 클래식 개인 토큰)의 범위�
 | 넣기만 | 36799302911 | 초록 |
 | 같은 이슈를 다시 넣고 `In Progress` 로 | 36799370457 | 초록 — 이미 있는 카드에 `item-add` 가 실패하지 않는다. PR #42 Codex 리뷰가 보류로 남긴 지적이 반박됐다. `field-list` 의 출력 모양도 워크플로의 가정과 같다 |
 | `main` 이 아닌 브랜치로 | 36799409922 | 거절 — 「Branch … is not allowed to deploy to project-board due to environment protection rules」. 단계가 하나도 돌지 않았다 |
+| `read:discussion` 을 빼고 넣기만 | 36801410067 | 초록 — 소유자 조회(`--owner`)가 `project` · `read:org` 로 된다 |
+| `read:discussion` 을 빼고 `In Progress` 로 | 36801435380 | 초록 — `view` · `field-list` · `item-edit` 까지 |
 
-`read:org` 는 소유자가 속한 조직의 소속 · 팀을, `read:discussion` 은 팀 토론을 읽을 수 있다 — 쓰기는 없다. 그 토큰은
+`read:org` 는 소유자가 속한 조직의 소속 · 팀을 읽을 수 있다 — 쓰기는 없다. 그 토큰은
 여전히 환경 `project-board` 의 시크릿에만 둔다(ADR 0008).

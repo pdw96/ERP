@@ -7,7 +7,7 @@ name: 프로젝트 보드
 #
 # **준비**(저장소 설정):
 # - 환경 `project-board` — Settings → Environments. 배포 브랜치를 `main` 하나로 둔다
-# - 그 환경의 시크릿 `PROJECT_TOKEN` — 클래식 개인 토큰, 범위 `project` · `read:org` · `read:discussion`
+# - 그 환경의 시크릿 `PROJECT_TOKEN` — 클래식 개인 토큰, 범위 `project` · `read:org`
 #   (ADR 0009 — `project` 하나로는 `gh project --owner` 가 `unknown owner type` 으로 멈췄다). 세분화 토큰은
 #   사용자 소유 Projects 에 쓸 수 없다(GitHub 의 제한). 이 저장소가 공개라 `repo` 범위는 필요 없다
 # - 변수 `PROJECT_NUMBER` — Settings → Secrets and variables → Actions → Variables. 보드 주소
