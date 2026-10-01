@@ -7,7 +7,8 @@ name: 프로젝트 보드
 #
 # **준비**(저장소 설정):
 # - 환경 `project-board` — Settings → Environments. 배포 브랜치를 `main` 하나로 둔다
-# - 그 환경의 시크릿 `PROJECT_TOKEN` — 클래식 개인 토큰, 범위 `project` 하나. 세분화 토큰은
+# - 그 환경의 시크릿 `PROJECT_TOKEN` — 클래식 개인 토큰, 범위 `project` · `read:org` · `read:discussion`
+#   (ADR 0009 — `project` 하나로는 `gh project --owner` 가 `unknown owner type` 으로 멈췄다). 세분화 토큰은
 #   사용자 소유 Projects 에 쓸 수 없다(GitHub 의 제한). 이 저장소가 공개라 `repo` 범위는 필요 없다
 # - 변수 `PROJECT_NUMBER` — Settings → Secrets and variables → Actions → Variables. 보드 주소
 #   `github.com/users/<소유자>/projects/<번호>` 의 번호
@@ -102,7 +103,7 @@ jobs:
           fi
 
           # 이미 보드에 있는 이슈면 그 카드의 ID 를 돌려준다(GitHub 문서 「Using the API to manage
-          # Projects」 — 첫 실제 실행에서 확인한다)
+          # Projects」 — 같은 이슈를 두 번 넣어 확인했다, ADR 0009)
           item=$(run_gh project item-add "$PROJECT_NUMBER" --owner "$OWNER" \
             --url "https://github.com/$REPOSITORY/issues/$ISSUE" --format json --jq .id)
           echo "이슈 #$ISSUE → 보드 $PROJECT_NUMBER 의 카드 $item"
