@@ -954,6 +954,22 @@ def test_an_nc_row_lives_in_the_table_its_status_names() -> None:
 # 원 지적이 심각도를 낮음으로 적은 꼴 — 「심각도 낮음」 · 「심각도는 **낮음**」
 _LOW = re.compile(r"심각도\s*(?:는\s*)?\**낮음")
 
+
+def _original_finding(cells: list[str]) -> str:
+    """줄의 **원 지적** — 「무엇」 칸과, 끝 칸에서 뒤의 판정이 붙기 전까지(PR #65 Codex 리뷰).
+
+    끝 칸은 원 지적 뒤에 재감사 · 고침 판정이 「 · **…**」로 덧붙는다. 원 지적은 「제안:」
+    앞에서 끝나고, 제안이 없는 줄은 첫 덧붙임 앞에서 끝난다. 줄 전체를 보면 뒤의 판정이 잔여나
+    다른 NC 를 「심각도 낮음」으로 든 것만으로 보통 이상의 부모 줄이 낮음으로 잡혔다(어긋내
+    확인했다).
+    """
+    tail = cells[5]
+    end = tail.find("제안:")
+    if end == -1:
+        end = tail.find(" · **")
+    return cells[1] + " " + (tail if end == -1 else tail[:end])
+
+
 # 낮음인데 NC 로 남는 열린 줄 — 부분 닫힘인 부모가 잔여로 기다린다(대장 「심각도」의 예외)
 _LOW_KEPT_AS_NC = {
     163: "보통인 NC-146 의 잔여 — 146 이 「잇는 NC 가 전부 닫혔을 것」으로 기다린다",
@@ -968,9 +984,13 @@ def test_a_low_nc_goes_to_an_issue() -> None:
     무는 것이 사람뿐이면 다음 회차에 낮음 줄이 다시 NC 로 등록된다 — 그래서 `README.md` 의 열린
     줄 가운데 원 지적이 「심각도 낮음」인 줄을 센다.
 
+    **원 지적만 본다**(`_original_finding`) — 뒤에 덧붙은 판정이 다른 NC 를 낮음으로 들어도 그
+    줄은 낮음이 아니다.
+
     **이 게이트가 못 보는 부류**(W-6 ③): 원 지적에 심각도를 **적지 않은** 줄(낼 때 적지 않은
-    옛 줄이 그랬다), 「낮음」을 다른 꼴로 적은 줄, 그리고 이슈 쪽 — 이슈가 실제로 있는지 ·
-    라벨이 붙었는지 · 열려 있는지는 저장소 밖이라 보지 않는다.
+    옛 줄이 그랬다), 「낮음」을 다른 꼴로 적은 줄, 원 지적 안에 「제안:」이나 「 · **」가 먼저
+    나와 심각도 문장이 잘려 나간 줄, 그리고 이슈 쪽 — 이슈가 실제로 있는지 · 라벨이 붙었는지 ·
+    열려 있는지는 저장소 밖이라 보지 않는다.
     """
     open_rows = _nc_rows(*_NC_TABLES[0])
     assert open_rows, "열린 NC 줄을 찾지 못했다 — 이 게이트가 아무것도 세지 않는다"
@@ -978,7 +998,7 @@ def test_a_low_nc_goes_to_an_issue() -> None:
     low = [
         f"  NC-{cells[0]} — {cells[1][:50]}"
         for cells in open_rows
-        if int(cells[0]) not in _LOW_KEPT_AS_NC and any(_LOW.search(cell) for cell in cells)
+        if int(cells[0]) not in _LOW_KEPT_AS_NC and _LOW.search(_original_finding(cells))
     ]
     assert low == [], (
         "심각도 낮음인 줄이 NC 로 열려 있다 — 이슈(`audit-low`)로 내고 상태를 "

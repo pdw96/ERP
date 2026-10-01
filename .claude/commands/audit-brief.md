@@ -48,7 +48,7 @@ git rev-parse --verify "$0^{commit}"
 | 커밋 목록 | `git log --oneline <B>..HEAD` |
 | 본문 diff | `git diff <B>...HEAD` — 머지 베이스부터 |
 | 추적 안 된 파일 | `git ls-files -z --others --exclude-standard` |
-| 열린 낮음 이슈 | `gh issue list --label audit-low --state open` — `gh` 가 없으면 REST `GET /repos/<소유자>/<저장소>/issues?labels=audit-low&state=open`(PR 은 뺀다). 번호와 제목만 |
+| 열린 낮음 이슈 | `gh issue list --label audit-low --state open --limit 1000` — `gh` 가 없으면 REST `GET /repos/<소유자>/<저장소>/issues?labels=audit-low&state=open&per_page=100` 을 `Link` 머리의 `next` 가 없을 때까지 넘긴다(PR 은 뺀다). 번호와 제목만. **기본 상한(`gh` 는 30)에서 잘리면 없는 이슈를 없다고 적게 된다** — 받은 수가 `--limit` 에 닿으면 그 사실을 절에 적는다 |
 
 작업트리에 커밋 안 된 변경이 있으면(`git status --short -uno` 가 비어 있지 않으면)
 `<B>...HEAD` 는 그것을 담지 않습니다. 그 사실을 머리에 적고 `git diff --cached` 와 `git diff` 를 diff
