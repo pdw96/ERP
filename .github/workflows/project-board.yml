@@ -60,41 +60,55 @@ jobs:
           STATUS: ${{ inputs.status }}
         run: |
           set -euo pipefail
-          if [ -z "$GH_TOKEN" ]; then
-            echo "::error::시크릿 PROJECT_TOKEN 이 없다 — 환경 project-board 의 시크릿이고 main 의 실행만 받는다(ADR 0008)"
+          # 실패의 말은 주석(`::error::`)으로 남긴다 — 클라우드 세션은 실행 로그를 내려받을 수 없고
+          # (로그 저장소가 세션 프록시 밖이다), 주석은 저장소 범위 API(check-runs 의 annotations)로
+          # 읽힌다. 첫 실제 실행이 「exit code 1」만 남겨 원인을 볼 수 없었다
+          exec 3>&1
+          fail() {
+            local m=${1//'%'/'%25'}
+            m=${m//$'\r'/ }
+            m=${m//$'\n'/ }
+            printf '::error::%s\n' "$m" >&3
             exit 1
+          }
+          # gh 를 부르고, 실패하면 gh 의 말을 주석으로 남기고 멈춘다. 성공하면 표준 출력만 돌려준다
+          err=$(mktemp)
+          run_gh() {
+            gh "$@" 2>"$err" || fail "gh $1 $2 실패 — $(cat "$err")"
+          }
+
+          if [ -z "$GH_TOKEN" ]; then
+            fail "시크릿 PROJECT_TOKEN 이 없다 — 환경 project-board 의 시크릿이고 main 의 실행만 받는다(ADR 0008)"
           fi
           if [ -z "$PROJECT_NUMBER" ]; then
-            echo "::error::변수 PROJECT_NUMBER 가 없다 — ADR 0008 의 준비를 본다"
-            exit 1
+            fail "변수 PROJECT_NUMBER 가 없다 — ADR 0008 의 준비를 본다"
           fi
 
           # Status 를 옮길 때는 값을 **먼저** 확인한다 — 넣은 뒤에 틀린 값을 알면 카드만 보드에 남고
           # 빨갛게 멈춘다(보드의 변경은 되돌려지지 않는다, PR #42 Codex 리뷰)
           if [ -n "$STATUS" ]; then
-            project=$(gh project view "$PROJECT_NUMBER" --owner "$OWNER" --format json --jq .id)
+            project=$(run_gh project view "$PROJECT_NUMBER" --owner "$OWNER" --format json --jq .id)
             # 칸 목록은 기본 30 개까지만 온다 — Status 가 그 뒤에 있으면 없는 값으로 잘못 멈춘다
             # (PR #42 Codex 리뷰). 보드의 칸 수보다 넉넉히 가져온다
-            fields=$(gh project field-list "$PROJECT_NUMBER" --owner "$OWNER" --format json --limit 100)
+            fields=$(run_gh project field-list "$PROJECT_NUMBER" --owner "$OWNER" --format json --limit 100)
             field=$(jq -r '.fields[] | select(.name == "Status") | .id' <<<"$fields")
             option=$(jq -r --arg s "$STATUS" \
               '.fields[] | select(.name == "Status") | .options[] | select(.name == $s) | .id' \
               <<<"$fields")
             if [ -z "$field" ] || [ -z "$option" ]; then
-              echo "::error::Status 칸에 「$STATUS」가 없다 — 보드는 바꾸지 않았다. 있는 값:"
-              jq -r '.fields[] | select(.name == "Status") | .options[].name' <<<"$fields"
-              exit 1
+              names=$(jq -r '[.fields[] | select(.name == "Status") | .options[].name] | join(", ")' <<<"$fields")
+              fail "Status 칸에 「$STATUS」가 없다 — 보드는 바꾸지 않았다. 있는 값: ${names:-(Status 칸 없음)}"
             fi
           fi
 
           # 이미 보드에 있는 이슈면 그 카드의 ID 를 돌려준다(GitHub 문서 「Using the API to manage
           # Projects」 — 첫 실제 실행에서 확인한다)
-          item=$(gh project item-add "$PROJECT_NUMBER" --owner "$OWNER" \
+          item=$(run_gh project item-add "$PROJECT_NUMBER" --owner "$OWNER" \
             --url "https://github.com/$REPOSITORY/issues/$ISSUE" --format json --jq .id)
           echo "이슈 #$ISSUE → 보드 $PROJECT_NUMBER 의 카드 $item"
 
           if [ -n "$STATUS" ]; then
-            gh project item-edit --id "$item" --project-id "$project" \
-              --field-id "$field" --single-select-option-id "$option"
+            run_gh project item-edit --id "$item" --project-id "$project" \
+              --field-id "$field" --single-select-option-id "$option" >/dev/null
             echo "카드 $item 의 Status → $STATUS"
           fi
