@@ -947,3 +947,23 @@ PostgreSQL 16)도 초록이다(392 passed).
 |---|---|---|
 | 164 | `app.py` 의 `@app.exception_handler(DBAPIError)` 줄을 주석으로 바꿨다(DB 오류가 다시 `Exception` 처리기로 간다) | `test_a_break_does_not_carry_the_values_the_caller_sent` — `IntegrityError` 가 앱 밖으로 나왔다 |
 | 164 | 미들웨어의 `400 <= response.status_code < 500` 을 옛 `response.status_code >= 400` 으로 되돌렸다 | 같은 검사 — DB 500 이 「거절했다」 줄을 한 번 더 남겼다 |
+
+## 감사 ㉛ 이 돌린 어긋냄 (`26e44ed`)
+
+감사자는 읽기 전용이라 호출자가 돌렸다. 감사자가 코드로 읽어 낸 400(NC-220)을 **어긋냄 없이** 찍었다 — 임시 검사로
+`b"\xff"` 를 `application/json` 으로 보내 상태 · 본문 · 스펙을 봤다(임시 파일, 지웠다). 400 · `loc:["path"]` 로 나갔고 스펙에
+`"400"` 이 없었다. 같은 트리의 `test_api.py` 는 초록이었다.
+
+| NC | 무엇을 어긋냈나 | 빨개진 검사 |
+|---|---|---|
+| 220 | 어긋내지 않았다 — 실제로 나가는 400 이 선언에 없는 채로 돌렸다 | **없다 — 통과했다** (`test_the_spec_declares_every_answer_that_actually_goes_out` 의 원래 형태) — 그 검사는 400 을 일으키지 않았다 |
+
+## 감사 ㉛ 의 고침 (`bb78260`)
+
+`app.py` 의 400 선언과 덮개의 `loc`, 그것을 무는 `test_api.py` 의 검사 둘. 어긋낸 뒤 `test_api.py` 를 돌렸다. 어긋냄 없이 돌린
+대조군은 초록이고, 같은 트리의 `pytest` 전체(실제 PostgreSQL 16)도 초록이다(393 passed).
+
+| NC | 무엇을 어긋냈나 | 빨개진 검사 |
+|---|---|---|
+| 220 | `responses` 에서 400 선언 줄을 지웠다 | `test_the_spec_declares_every_answer_that_actually_goes_out` · `test_the_spec_says_which_header_names_the_request` |
+| 220 | 덮개의 `loc` 을 늘 `"path"` 로 되돌렸다 | `test_a_body_that_cannot_be_read_points_at_the_body` |
