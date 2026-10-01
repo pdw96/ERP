@@ -85,6 +85,7 @@
 | `757def1` | — | 대장에서 가장 큰 번호의 줄을 잃어도 줄 배치 검사가 통과한다 — 상한을 두 표에서 읽었다 | `audit-quality` | **닫혔다** — 상한을 「다음 번호」 줄에서 읽는다(「PR #45 Codex 리뷰 1 라운드의 고침」 묶음) |
 | `757def1` | — | `README.md` 에 회차 절을 두어도 회차 게이트들이 통과한다 — 두 파일을 이어 읽는다 | `audit-quality` | **닫혔다** — `test_a_round_section_lives_in_the_record` 가 문다(같은 묶음) |
 | `25676d4` | — | 회차 절을 `회차-기록.md` 끝에 둔다 | `audit-quality` | 초록이 맞다 — 대조군(「PR #45 Codex 리뷰 1 라운드의 고침」 묶음) |
+| `c6baf9a` | — | 예외인 NC-163 줄에 「심각도 낮음」을 적는다 | `audit-quality` | 초록이 맞다 — 대조군(「심각도 낮음을 이슈로」 묶음) |
 
 ## ⑧ 의 고침 (`03b6c1f`)
 
@@ -843,3 +844,18 @@ Codex 의 지적 둘을 저장소의 실제 파일에 넣어 재현했다(`docs/
 | — | 「다음 번호」 줄의 굵게를 뺐다 | `test_an_nc_row_lives_in_the_table_its_status_names` — 다음 번호 줄이 하나가 아니다 |
 | — | `README.md` 끝에 「감사 ㉚」 절을 두고 회차별 W 표에 ㉚ 줄을 더했다 | `test_a_round_section_lives_in_the_record` |
 | — | 같은 절을 `회차-기록.md` 끝에 두고 W 표에 ㉚ 줄을 더했다(대조군 — 제자리다) | **없다 — 통과했다** (`test_a_round_section_lives_in_the_record`) — 초록이 맞다 |
+
+## 심각도 낮음을 이슈로 (`c6baf9a`)
+
+낮음을 이슈로 옮긴 트리(ADR 0011)에서 하나씩 넣고 되돌렸다. `test_prose.py` 만 돌렸다. 그 트리에는 이 묶음이 아직 없어
+기록 게이트가 새 검사의 기록을 찾지 못해 빨갰다 — 아래 「빨개진 검사」는 그 하나를 뺀 빨강이다. 어긋냄 없이 돌린 대조군은
+그 하나 말고 초록이다. 같은 트리의 `pytest` 전체(실제 PostgreSQL 16)도 그 하나 말고 초록이다(391 passed).
+
+| NC | 무엇을 어긋냈나 | 빨개진 검사 |
+|---|---|---|
+| — | 열린 NC-4 줄의 끝 칸에 「심각도 낮음.」을 덧붙였다 | `test_a_low_nc_goes_to_an_issue` |
+| — | 같은 글을 예외인 NC-163 줄에 덧붙였다(대조군 — 보통인 146 의 잔여) | **없다 — 통과했다** (`test_a_low_nc_goes_to_an_issue`) — 초록이 맞다 |
+| — | `_LOW_KEPT_AS_NC` 의 163 을 열린 줄이 아닌 80 으로 바꿨다 | `test_a_low_nc_goes_to_an_issue` — 목록의 번호가 열린 줄이 아니다 |
+| — | 옮긴 216 줄의 상태 `**이슈로 옮김 — #61**` 에서 이슈 번호를 뺐다 | `test_every_nc_status_opens_with_a_word_the_ledger_defined` |
+| — | 옮긴 216 줄을 `README.md` 표 끝으로 되돌렸다 | `test_an_nc_row_lives_in_the_table_its_status_names` · `test_a_low_nc_goes_to_an_issue` — 원 지적이 「심각도 낮음」이다 |
+| — | `_SETTLED` 에서 「이슈로 옮김」을 뺐다 | `test_an_nc_row_lives_in_the_table_its_status_names` — 옮긴 줄이 기록 쪽에 있을 수 없게 된다 |
