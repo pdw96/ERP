@@ -951,8 +951,9 @@ def test_an_nc_row_lives_in_the_table_its_status_names() -> None:
     )
 
 
-# 원 지적이 심각도를 낮음으로 적은 꼴 — 「심각도 낮음」 · 「심각도는 **낮음**」
-_LOW = re.compile(r"심각도\s*(?:는\s*)?\**낮음")
+# 원 지적이 심각도를 낮음으로 적은 꼴 — 「심각도 낮음」 · 「심각도는 **낮음**」, 그리고
+# 감사자 출력 양식의 「심각도: 낮음」(PR #65 Codex 리뷰 — 그 꼴을 그대로 옮긴 줄이 빠졌다)
+_LOW = re.compile(r"심각도\s*(?:는|[:：])?\s*\**낮음")
 
 
 def _original_finding(cells: list[str]) -> str:
