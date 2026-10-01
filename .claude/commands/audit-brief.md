@@ -48,6 +48,7 @@ git rev-parse --verify "$0^{commit}"
 | 커밋 목록 | `git log --oneline <B>..HEAD` |
 | 본문 diff | `git diff <B>...HEAD` — 머지 베이스부터 |
 | 추적 안 된 파일 | `git ls-files -z --others --exclude-standard` |
+| 열린 낮음 이슈 | `gh issue list --label audit-low --state open` — `gh` 가 없으면 REST `GET /repos/<소유자>/<저장소>/issues?labels=audit-low&state=open`(PR 은 뺀다). 번호와 제목만 |
 
 작업트리에 커밋 안 된 변경이 있으면(`git status --short -uno` 가 비어 있지 않으면)
 `<B>...HEAD` 는 그것을 담지 않습니다. 그 사실을 머리에 적고 `git diff --cached` 와 `git diff` 를 diff
@@ -70,6 +71,10 @@ git rev-parse --verify "$0^{commit}"
 - 추적 안 된 파일: <없음 / `경로` 목록 — 아래 diff 에 포함 여부>
 - 자름: <없음 / 있음 — diff 전체 N줄 중 M줄>
 - 검사: <PASS / 못 돌림 — 까닭>
+
+## 열린 낮음 이슈
+
+<`#번호 제목` 한 줄씩 — 없으면 「없음」, 못 가져왔으면 그 까닭. 심각도 낮음은 대장의 NC 가 아니라 이 이슈들이다(ADR 0011)>
 
 ## 변경 파일
 
@@ -113,7 +118,7 @@ git rev-parse --verify "$0^{commit}"
 ## 남기는 것
 
 **감사가 끝나면 그 기록을 대장(`docs/audit/README.md`)에 등록해 주세요 — 이 레포는
-`.claude/audits/` 를 쓰지 않습니다.** 새 줄은 `README.md` 의 표에, 회차 절은 `docs/audit/회차-기록.md` 끝에 둡니다(ADR 0010). 대장이 회차를 가로질러 한 표로 번호를 매기고, 다음 회차의
+`.claude/audits/` 를 쓰지 않습니다.** 심각도 높음 · 보통은 `README.md` 의 표에 NC 로, **낮음은 GitHub 이슈(라벨 `audit-low`)로** 냅니다(ADR 0011 — 대장 「심각도」). 회차 절은 `docs/audit/회차-기록.md` 끝에 둡니다(ADR 0010). 대장이 회차를 가로질러 한 표로 번호를 매기고, 다음 회차의
 감사자가 그 표에서 담당이 자기인 열린 줄을 읽습니다. 다른 자리에 두면 대장이 둘로 갈리고 번호가 겹칩니다. **한 작업트리에서는 감사를 하나씩 돌리세요 — 감사자가 달라도.**
 브리핑 자리가 하나라 서로의 것을 덮고, 같은 지난 기록(대장)을 읽으면 같은 다음 번호를 뽑습니다.
 **회차 절 머리 바로 아래 첫 줄은 「감사한 커밋」 줄입니다** — 브리핑의 「대상」 SHA 를 백틱으로 적습니다

@@ -858,7 +858,8 @@ def test_an_nc_waiting_for_a_reaudit_has_a_row_that_waits_for_it() -> None:
 # 게이트가 기다리는지 · 닫혔는지를 가르지 못한다(감사 ㉗ NC-196)
 # 굵게는 **닫혀야** 굵게다 — 여는 `**` 만 있으면 GFM 은 굵게 그리지 않는다(PR #38 Codex 리뷰)
 _STATUS = re.compile(
-    r"\*\*(?:닫힘|부분 닫힘|고침|등록|반박|중복|열림 — 저자 판정 대기)(?:[ (—][^*]*)?\*\*"
+    r"\*\*(?:닫힘|부분 닫힘|고침|등록|반박|중복|열림 — 저자 판정 대기|이슈로 옮김 — #\d+)"
+    r"(?:[ (—][^*]*)?\*\*"
 )
 
 
@@ -885,10 +886,15 @@ def test_every_nc_status_opens_with_a_word_the_ledger_defined() -> None:
     )
 
 
-# 두 NC 표 어디에도 줄이 없는 번호 — 사유와 함께 든다. 여기 없는 빈 번호는 옮기다 잃은 줄이다
+# 대장의 일이 끝난 상태 — 닫혔거나, 심각도 낮음이라 이슈로 옮겼다(ADR 0011). 이 줄은
+# `회차-기록.md` 에 산다. 이슈로 옮긴 줄은 닫힌 것이 아니다 — 기다리는 표 게이트의
+# 「닫힌 NC」에는 들지 않는다
+_SETTLED = ("**닫힘", "**이슈로 옮김")
+
 # 「부적합 대장」이 드는 다음 번호 — 번호의 상한은 표가 아니라 이 줄에서 읽는다
 _NEXT_NUMBER = re.compile(r"\*\*다음 번호는 NC-(\d+) 이다\.\*\*")
 
+# 두 NC 표 어디에도 줄이 없는 번호 — 사유와 함께 든다. 여기 없는 빈 번호는 옮기다 잃은 줄이다
 _NOT_IN_AN_NC_TABLE = {
     21: "남은 것이 감사자 자신이라 「사본 특화 대기」 W-7 로 옮겼다(부적합 대장의 옛 주석)",
     26: "같은 이유로 W-8",
@@ -918,13 +924,13 @@ def test_an_nc_row_lives_in_the_table_its_status_names() -> None:
     assert open_rows and closed_rows, "NC 표 하나가 비었다 — 이 게이트가 아무것도 가르지 않는다"
 
     misplaced = [
-        f"  {_LEDGER.name} 의 NC-{cells[0]} 가 닫혔다 — 「닫힌 부적합」으로 옮긴다"
+        f"  {_LEDGER.name} 의 NC-{cells[0]} 가 닫혔거나 이슈로 갔다 — 「닫힌 부적합」으로"
         for cells in open_rows
-        if cells[4].startswith("**닫힘")
+        if cells[4].startswith(_SETTLED)
     ] + [
         f"  {_LEDGER_RECORD.name} 의 NC-{cells[0]} 가 닫히지 않았다 — 「부적합 대장」에 둔다"
         for cells in closed_rows
-        if not cells[4].startswith("**닫힘")
+        if not cells[4].startswith(_SETTLED)
     ]
     assert misplaced == [], "NC 줄이 상태와 다른 표에 있다:\n" + "\n".join(misplaced)
 
@@ -943,6 +949,45 @@ def test_an_nc_row_lives_in_the_table_its_status_names() -> None:
         f"「다음 번호」(NC-{next_number}) 이상인 번호 {beyond} — 다음 번호 줄도 올린다 · "
         f"`_NOT_IN_AN_NC_TABLE` 에 들었는데 표에 있는 번호 {stale}"
     )
+
+
+# 원 지적이 심각도를 낮음으로 적은 꼴 — 「심각도 낮음」 · 「심각도는 **낮음**」
+_LOW = re.compile(r"심각도\s*(?:는\s*)?\**낮음")
+
+# 낮음인데 NC 로 남는 열린 줄 — 부분 닫힘인 부모가 잔여로 기다린다(대장 「심각도」의 예외)
+_LOW_KEPT_AS_NC = {
+    163: "보통인 NC-146 의 잔여 — 146 이 「잇는 NC 가 전부 닫혔을 것」으로 기다린다",
+}
+
+
+def test_a_low_nc_goes_to_an_issue() -> None:
+    """**심각도 낮음은 NC 로 두지 않고 GitHub 이슈(`audit-low`)로 낸다** (ADR 0011).
+
+    대장의 낮음 줄이 전체의 대부분이었고, 낮음도 재감사가 닫아야 해 회차가 그것을 닫는 데
+    쓰였다. 저장소 소유자가 낮음은 이슈로 내고 고친 커밋이 닫기로 정했다(2026-10-01). 규칙을
+    무는 것이 사람뿐이면 다음 회차에 낮음 줄이 다시 NC 로 등록된다 — 그래서 `README.md` 의 열린
+    줄 가운데 원 지적이 「심각도 낮음」인 줄을 센다.
+
+    **이 게이트가 못 보는 부류**(W-6 ③): 원 지적에 심각도를 **적지 않은** 줄(낼 때 적지 않은
+    옛 줄이 그랬다), 「낮음」을 다른 꼴로 적은 줄, 그리고 이슈 쪽 — 이슈가 실제로 있는지 ·
+    라벨이 붙었는지 · 열려 있는지는 저장소 밖이라 보지 않는다.
+    """
+    open_rows = _nc_rows(*_NC_TABLES[0])
+    assert open_rows, "열린 NC 줄을 찾지 못했다 — 이 게이트가 아무것도 세지 않는다"
+
+    low = [
+        f"  NC-{cells[0]} — {cells[1][:50]}"
+        for cells in open_rows
+        if int(cells[0]) not in _LOW_KEPT_AS_NC and any(_LOW.search(cell) for cell in cells)
+    ]
+    assert low == [], (
+        "심각도 낮음인 줄이 NC 로 열려 있다 — 이슈(`audit-low`)로 내고 상태를 "
+        "「이슈로 옮김 — #n」으로 적어 「닫힌 부적합」으로 옮긴다:\n" + "\n".join(low)
+    )
+
+    numbers = {int(cells[0]) for cells in open_rows}
+    stale = sorted(set(_LOW_KEPT_AS_NC) - numbers)
+    assert stale == [], f"`_LOW_KEPT_AS_NC` 의 번호가 열린 줄이 아니다 — 목록에서 뺀다: {stale}"
 
 
 def test_a_round_section_lives_in_the_record() -> None:
