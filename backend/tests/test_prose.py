@@ -886,6 +886,9 @@ def test_every_nc_status_opens_with_a_word_the_ledger_defined() -> None:
 
 
 # 두 NC 표 어디에도 줄이 없는 번호 — 사유와 함께 든다. 여기 없는 빈 번호는 옮기다 잃은 줄이다
+# 「부적합 대장」이 드는 다음 번호 — 번호의 상한은 표가 아니라 이 줄에서 읽는다
+_NEXT_NUMBER = re.compile(r"\*\*다음 번호는 NC-(\d+) 이다\.\*\*")
+
 _NOT_IN_AN_NC_TABLE = {
     21: "남은 것이 감사자 자신이라 「사본 특화 대기」 W-7 로 옮겼다(부적합 대장의 옛 주석)",
     26: "같은 이유로 W-8",
@@ -901,6 +904,10 @@ def test_an_nc_row_lives_in_the_table_its_status_names() -> None:
     줄을 닫힌 표에 두면 기다리는 표 게이트들은 그 줄을 여전히 세지만 다음 조각을 여는 사람은
     보지 못한다. 옮기다 줄을 잃거나 두 표에 함께 두는 것도 여기서 문다 — 번호는 두 표를
     가로질러 하나다.
+
+    **번호의 상한은 표가 아니라 「다음 번호」 줄에서 읽는다**(PR #45 Codex 리뷰). 두 표의 가장
+    큰 번호를 상한으로 삼으면 가장 큰 줄을 잃었을 때 상한이 함께 내려가 초록이었다(어긋내
+    확인했다) — 그러면 다음 회차가 그 번호를 다시 준다.
 
     **이 게이트가 못 보는 부류**(W-6 ③): 옮기면서 **글자가 바뀐** 줄(옮기기 전의 글자와 견줄
     것이 저장소에 없다), 닫힌 표 안의 순서, 그리고 상태가 「닫힘」인데 재감사가 닫지 않은 줄 —
@@ -921,14 +928,42 @@ def test_an_nc_row_lives_in_the_table_its_status_names() -> None:
     ]
     assert misplaced == [], "NC 줄이 상태와 다른 표에 있다:\n" + "\n".join(misplaced)
 
+    found = _NEXT_NUMBER.findall(_section(_LEDGER.read_text(), "부적합 대장"))
+    assert len(found) == 1, f"「부적합 대장」에 「다음 번호」 줄이 하나가 아니다: {found}"
+    next_number = int(found[0])
+
     counted = Counter(int(cells[0]) for cells in open_rows + closed_rows)
     twice = sorted(number for number, seen in counted.items() if seen > 1)
-    lost = sorted(set(range(1, max(counted) + 1)) - set(counted) - set(_NOT_IN_AN_NC_TABLE))
+    lost = sorted(set(range(1, next_number)) - set(counted) - set(_NOT_IN_AN_NC_TABLE))
+    beyond = sorted(number for number in counted if number >= next_number)
     stale = sorted(set(counted) & set(_NOT_IN_AN_NC_TABLE))
-    assert (twice, lost, stale) == ([], [], []), (
+    assert (twice, lost, beyond, stale) == ([], [], [], []), (
         "NC 번호가 두 표를 가로질러 하나씩이 아니다 — "
         f"두 번 있는 번호 {twice} · 어디에도 없는 번호 {lost} · "
+        f"「다음 번호」(NC-{next_number}) 이상인 번호 {beyond} — 다음 번호 줄도 올린다 · "
         f"`_NOT_IN_AN_NC_TABLE` 에 들었는데 표에 있는 번호 {stale}"
+    )
+
+
+def test_a_round_section_lives_in_the_record() -> None:
+    """**회차 절은 `회차-기록.md` 에만 선다** (ADR 0010, PR #45 Codex 리뷰).
+
+    회차 절을 세는 게이트들은 두 파일을 이어 읽으므로(`_ledger_text`), 새 회차 절을 옛 자리인
+    `README.md` 끝에 두어도 초록이었다(어긋내 확인했다). 그러면 살아 있는 쪽이 다시 자라고,
+    다음 감사자는 `회차-기록.md` 에서 지난 회차와 그 `### UNK-n` 을 찾지 못한다. 회차를
+    **가리키는** 절(번호 대조)도 회차 기록이라 `## 감사 ` 로 여는 머리는 전부 본다.
+
+    **이 게이트가 못 보는 부류**(W-6 ③): `## 감사 ` 로 열지 않는 회차 기록(`## PR 리뷰 —` 같은
+    머리)과, 회차 절의 몸만 `README.md` 의 다른 절 아래에 붙인 것.
+    """
+    heads = [
+        f"  {number}: {line}"
+        for number, line, in_code in _ledger_lines(_LEDGER.read_text())
+        if not in_code and line.startswith("## 감사 ")
+    ]
+    assert heads == [], (
+        f"{_LEDGER.name} 에 회차 절이 있다 — {_LEDGER_RECORD.name} 끝으로 옮긴다:\n"
+        + "\n".join(heads)
     )
 
 
