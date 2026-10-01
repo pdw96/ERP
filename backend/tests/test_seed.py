@@ -217,7 +217,7 @@ def test_every_sigma_is_left_undecided(blank: Engine) -> None:
 def test_no_lot_is_planted(blank: Engine) -> None:
     """로트는 거래 표다 — **비어 있는 것이 정상 상태**다.
 
-    로트가 생기는 것은 IQC 합격이고, 그것은 2단계의 일이다.
+    로트가 생기는 것은 IQC 합격이고, 그 길은 2단계가 세웠다.
     """
     seed_module.seed(blank)
 
