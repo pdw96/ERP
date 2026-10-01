@@ -86,6 +86,7 @@
 | `757def1` | — | `README.md` 에 회차 절을 두어도 회차 게이트들이 통과한다 — 두 파일을 이어 읽는다 | `audit-quality` | **닫혔다** — `test_a_round_section_lives_in_the_record` 가 문다(같은 묶음) |
 | `25676d4` | — | 회차 절을 `회차-기록.md` 끝에 둔다 | `audit-quality` | 초록이 맞다 — 대조군(「PR #45 Codex 리뷰 1 라운드의 고침」 묶음) |
 | `c6baf9a` | — | 예외인 NC-163 줄에 「심각도 낮음」을 적는다 | `audit-quality` | 초록이 맞다 — 대조군(「심각도 낮음을 이슈로」 묶음) |
+| `584f5c9` | — | 보통인 줄의 뒤 판정이 잔여를 「심각도 낮음」으로 든다 | `audit-quality` | 초록이 맞다 — 낮음 게이트는 원 지적만 본다(「PR #65 Codex 리뷰 1 라운드의 고침」 묶음) |
 
 ## ⑧ 의 고침 (`03b6c1f`)
 
@@ -859,3 +860,24 @@ Codex 의 지적 둘을 저장소의 실제 파일에 넣어 재현했다(`docs/
 | — | 옮긴 216 줄의 상태 `**이슈로 옮김 — #61**` 에서 이슈 번호를 뺐다 | `test_every_nc_status_opens_with_a_word_the_ledger_defined` |
 | — | 옮긴 216 줄을 `README.md` 표 끝으로 되돌렸다 | `test_an_nc_row_lives_in_the_table_its_status_names` · `test_a_low_nc_goes_to_an_issue` — 원 지적이 「심각도 낮음」이다 |
 | — | `_SETTLED` 에서 「이슈로 옮김」을 뺐다 | `test_an_nc_row_lives_in_the_table_its_status_names` — 옮긴 줄이 기록 쪽에 있을 수 없게 된다 |
+
+## PR #65 Codex 리뷰 1 라운드 — 고치기 전 (`05c073c`)
+
+Codex 의 셋째 지적(낮음 게이트가 줄 전체를 훑는다)을 저장소의 실제 줄에 넣어 재현했다. `main` 에는 그 게이트가 없다 —
+**기존 한계 · 시끄러운 실패**(1). 나머지 둘(감사자 출력 형식 · 브리핑의 상한)은 산문이라 어긋낼 검사가 없다.
+`test_prose.py` 만 돌렸다.
+
+| NC | 무엇을 어긋냈나 | 빨개진 검사 |
+|---|---|---|
+| — | 보통인 NC-146 줄 끝에 뒤 판정 「· **㉚ 재감사** — 잔여 163 은 심각도 낮음이다」를 덧붙였다 | `test_a_low_nc_goes_to_an_issue` — 거짓 양성이다. 146 자신은 낮음이 아니다 |
+
+## PR #65 Codex 리뷰 1 라운드의 고침 (`584f5c9`)
+
+같은 줄과 곁의 둘. `test_prose.py` 만 돌렸다. 어긋냄 없이 돌린 대조군은 초록이고, 같은 트리의 `pytest` 전체(실제
+PostgreSQL 16)도 초록이다(392 passed).
+
+| NC | 무엇을 어긋냈나 | 빨개진 검사 |
+|---|---|---|
+| — | 보통인 NC-146 줄 끝에 뒤 판정 「· **㉚ 재감사** — 잔여 163 은 심각도 낮음이다」를 덧붙였다 | **없다 — 통과했다** (`test_a_low_nc_goes_to_an_issue`) — 초록이 맞다. 원 지적만 본다 |
+| — | 열린 NC-4 의 「무엇」 칸(원 지적)에 「— 심각도 낮음」을 덧붙였다 | `test_a_low_nc_goes_to_an_issue` |
+| — | 옮긴 216 줄을 `README.md` 표 끝으로 되돌렸다 — 원 지적의 「심각도 낮음」이 「제안:」 앞에 있다 | `test_a_low_nc_goes_to_an_issue` · `test_an_nc_row_lives_in_the_table_its_status_names` |
