@@ -39,7 +39,10 @@ def create_db_engine(url: str | None = None) -> Engine:
     # 로그에 실렸다. 지금 DB 오류는 SQLSTATE 와 제약 이름만 찍는 처리기가 받는데
     # (`app/api/app.py`, 감사 ㉚), 이 칸은 **엔진이 짓는 모든 문자열**에 걸리므로
     # 그 처리기 밖에서 예외가 찍히는 날을 위해 그대로 둔다 — DB 가 아닌
-    # `StatementError` 와, 다른 예외에 연쇄된 DB 오류가 그 자리다.
+    # `StatementError` 와, 다른 예외에 연쇄된 DB 오류가 그 자리다. **다만 이 칸이 끄는
+    # 것은 SQLAlchemy 의 `[parameters]` 뿐이다** — PostgreSQL 이 짓는 `DETAIL: Failing
+    # row contains (…)` 는 이 칸 밖이라, DB 오류를 다른 예외로 바꿔 던지는 코드
+    # (`raise X from e`)가 서면 값은 연쇄를 타고 다시 나간다(감사 ㉜ · ㉞ OB-1).
     #
     # **값을 로그에 여는 조건은 판정이 아니다.** 「판정이 오는 날 열린다」고 적혀
     # 있었는데 판정은 ⑲(`audit-secrets`)에서 이미 왔고, 그 답은 여는 조건이 보존 기간 ·
