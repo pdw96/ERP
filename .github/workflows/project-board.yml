@@ -1,0 +1,100 @@
+name: 프로젝트 보드
+
+# **클라우드 세션이 GitHub Projects 보드를 다루는 길이다**(ADR 0008). 클라우드 세션의 GitHub
+# 프록시는 GraphQL 을 막고 저장소 밖 경로(`users/…/projectsV2`)도 막는다 — 넣은 토큰과
+# 상관없이다. Projects v2 는 GraphQL 에만 있으므로, 세션은 이 워크플로를 **실행만** 걸고
+# (저장소 범위라 통과한다) 보드는 GitHub 의 러너가 `gh project` 로 다룬다.
+#
+# **준비**(저장소 설정):
+# - 환경 `project-board` — Settings → Environments. 배포 브랜치를 `main` 하나로 둔다
+# - 그 환경의 시크릿 `PROJECT_TOKEN` — 클래식 개인 토큰, 범위 `project` 하나. 세분화 토큰은
+#   사용자 소유 Projects 에 쓸 수 없다(GitHub 의 제한). 이 저장소가 공개라 `repo` 범위는 필요 없다
+# - 변수 `PROJECT_NUMBER` — Settings → Secrets and variables → Actions → Variables. 보드 주소
+#   `github.com/users/<소유자>/projects/<번호>` 의 번호
+#
+# **토큰은 저장소 시크릿이 아니라 환경 시크릿이다**(PR #42 Codex 리뷰). 수동 실행은 아무 브랜치의
+# 워크플로 판으로도 걸 수 있어(`gh workflow run --ref <브랜치>`), 저장소 시크릿이면 리뷰 안 된
+# 브랜치의 코드가 토큰을 받는다. 환경의 배포 브랜치 규칙은 GitHub 가 실행 전에 걸므로 `main` 의
+# 판만 토큰을 받는다 — 워크플로 글자가 아니라 저장소 설정이 지킨다
+#
+# **입력은 셸에 글자로 넣지 않는다** — 환경변수로만 넘긴다. `${{ … }}` 를 `run` 에 바로 쓰면
+# 입력이 명령으로 읽힌다(스크립트 주입). 준비가 없으면 **빨갛게 멈춘다** — 조용히 건너뛰면
+# 부른 쪽은 보드가 바뀐 줄 안다.
+#
+# **이 워크플로가 못 하는 것**(W-6 ③): 상태(Status) 밖의 사용자 정의 칸, 저장소 밖의 이슈,
+# 보드 자체의 생성 · 설정. 그 자리는 사람이 화면에서 한다.
+
+on:
+  workflow_dispatch:
+    inputs:
+      issue:
+        description: 이슈 번호 — 보드에 넣는다(이미 있으면 그 카드를 쓴다)
+        required: true
+        type: number
+      status:
+        description: 상태(Status) 칸의 값 — 비우면 넣기만 한다
+        required: false
+        type: string
+        default: ""
+
+# 저장소 토큰(`GITHUB_TOKEN`)은 쓰지 않는다 — 보드는 `PROJECT_TOKEN` 으로만 다룬다
+permissions: {}
+
+concurrency:
+  group: project-board
+  cancel-in-progress: false
+
+jobs:
+  board:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    environment: project-board
+    steps:
+      - name: 보드에 넣고 상태를 옮긴다
+        env:
+          GH_TOKEN: ${{ secrets.PROJECT_TOKEN }}
+          PROJECT_NUMBER: ${{ vars.PROJECT_NUMBER }}
+          OWNER: ${{ github.repository_owner }}
+          REPOSITORY: ${{ github.repository }}
+          ISSUE: ${{ inputs.issue }}
+          STATUS: ${{ inputs.status }}
+        run: |
+          set -euo pipefail
+          if [ -z "$GH_TOKEN" ]; then
+            echo "::error::시크릿 PROJECT_TOKEN 이 없다 — 환경 project-board 의 시크릿이고 main 의 실행만 받는다(ADR 0008)"
+            exit 1
+          fi
+          if [ -z "$PROJECT_NUMBER" ]; then
+            echo "::error::변수 PROJECT_NUMBER 가 없다 — ADR 0008 의 준비를 본다"
+            exit 1
+          fi
+
+          # Status 를 옮길 때는 값을 **먼저** 확인한다 — 넣은 뒤에 틀린 값을 알면 카드만 보드에 남고
+          # 빨갛게 멈춘다(보드의 변경은 되돌려지지 않는다, PR #42 Codex 리뷰)
+          if [ -n "$STATUS" ]; then
+            project=$(gh project view "$PROJECT_NUMBER" --owner "$OWNER" --format json --jq .id)
+            # 칸 목록은 기본 30 개까지만 온다 — Status 가 그 뒤에 있으면 없는 값으로 잘못 멈춘다
+            # (PR #42 Codex 리뷰). 보드의 칸 수보다 넉넉히 가져온다
+            fields=$(gh project field-list "$PROJECT_NUMBER" --owner "$OWNER" --format json --limit 100)
+            field=$(jq -r '.fields[] | select(.name == "Status") | .id' <<<"$fields")
+            option=$(jq -r --arg s "$STATUS" \
+              '.fields[] | select(.name == "Status") | .options[] | select(.name == $s) | .id' \
+              <<<"$fields")
+            if [ -z "$field" ] || [ -z "$option" ]; then
+              echo "::error::Status 칸에 「$STATUS」가 없다 — 보드는 바꾸지 않았다. 있는 값:"
+              jq -r '.fields[] | select(.name == "Status") | .options[].name' <<<"$fields"
+              exit 1
+            fi
+          fi
+
+          # 이미 보드에 있는 이슈면 그 카드의 ID 를 돌려준다(GitHub 문서 「Using the API to manage
+          # Projects」 — 첫 실제 실행에서 확인한다)
+          item=$(gh project item-add "$PROJECT_NUMBER" --owner "$OWNER" \
+            --url "https://github.com/$REPOSITORY/issues/$ISSUE" --format json --jq .id)
+          echo "이슈 #$ISSUE → 보드 $PROJECT_NUMBER 의 카드 $item"
+
+          if [ -n "$STATUS" ]; then
+            gh project item-edit --id "$item" --project-id "$project" \
+              --field-id "$field" --single-select-option-id "$option"
+            echo "카드 $item 의 Status → $STATUS"
+          fi
