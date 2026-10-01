@@ -987,3 +987,15 @@ PostgreSQL 16)도 초록이다(392 passed).
 | NC | 무엇을 어긋냈나 | 빨개진 검사 |
 |---|---|---|
 | — | `FastAPI(...)` 의 `redirect_slashes=False` 줄을 지웠다(기본값 307 으로 돌아간다) | `test_a_trailing_slash_is_not_sent_elsewhere` · `test_the_spec_declares_every_answer_that_actually_goes_out` |
+
+## 감사 ㉞ — 「아직」 표 게이트 둘의 앵커 (`6001d28`)
+
+마지막 사슬이 닫혀 재감사를 기다리는 NC 가 0 이 되자 두 게이트가 앵커(「기다리는 것이 하나라도 있다」)에서 빨개졌다 — 옳은 상태를
+틀렸다고 한 것이다. 앵커를 「파서가 표를 읽었다」로 바꾸고, 파서를 깨는 어긋냄으로 빨개지는 것을 봤다. `test_prose.py` 만 돌렸다.
+어긋냄 없이 돌린 대조군은 초록이고, 같은 트리의 `pytest` 전체(실제 PostgreSQL 16)도 초록이다.
+
+| NC | 무엇을 어긋냈나 | 빨개진 검사 |
+|---|---|---|
+| — | 「아직 아무도 보지 않은 것」 절의 「자리(」를 「곳(」으로 바꿨다(파서가 NC 번호를 못 읽는다) | `test_a_row_still_waiting_does_not_wait_on_a_closed_nc` |
+| — | 두 NC 표의 머리 줄 `\| NC \| 무엇 \|` 을 `\| 번호 \| 무엇 \|` 으로 바꿨다 | **없다 — 통과했다** — 파서는 머리 줄이 아니라 절 이름으로 표를 찾는다. 겨냥이 빗나간 어긋냄이라 아래 줄로 다시 쟀다 |
+| — | 두 NC 표의 절 머리(`## 부적합 대장` · 「닫힌 부적합」)를 다른 이름으로 바꿨다 | `test_an_nc_waiting_for_a_reaudit_has_a_row_that_waits_for_it` · `test_a_row_still_waiting_does_not_wait_on_a_closed_nc` 와 NC 표를 읽는 게이트 셋 |
