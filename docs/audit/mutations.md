@@ -926,3 +926,24 @@ PostgreSQL 16)도 초록이다(392 passed).
 **위 두 「고치기 전」 묶음의 분류를 바로잡는다**(PR #65 Codex 리뷰 4 라운드). 「PR #65 Codex 리뷰 1 라운드 — 고치기 전」과
 「3 라운드 — 고치기 전」은 낮음 게이트의 거짓 양성을 **기존 한계 · 시끄러운 실패**(1)로 적었다. 같은 입력을 `main` 은
 받아들이고(그 게이트가 없다) 이 PR 만 막으므로 `docs/리뷰-루프.md` 의 **회귀**(5)다 — 라운드 점수는 8 → 12, 5 → 9 다.
+
+## 감사 ㉚ 이 돌린 어긋냄 (`e53b091`)
+
+감사자는 읽기 전용이라 호출자가 돌렸다. 감사자가 코드로 읽어 낸 누출(NC-164 — `Exception` 처리기가
+`ServerErrorMiddleware` 에 놓여 예외를 다시 던진다)을 **어긋냄 없이** 그대로 재현했다 — 기존 검사
+`test_a_break_does_not_carry_the_values_the_caller_sent` 를 `raise_server_exceptions=True` 로만 바꿔 같은 트리에서
+돌렸다(임시 파일, 지웠다). 다시 던진 `IntegrityError` 의 문자열에 판정자 이름과 `Failing row contains` 가 둘 다 들었다.
+
+| NC | 무엇을 어긋냈나 | 빨개진 검사 |
+|---|---|---|
+| 164 | 어긋내지 않았다 — 검사의 `TestClient` 만 `raise_server_exceptions=True` 로 바꿨다 | **없다 — 통과했다** (`test_a_break_does_not_carry_the_values_the_caller_sent` 의 원래 형태) — 누출이 있는데 초록이었다. 다시 던진 예외를 삼키고 `app.api` 로거만 본다 |
+
+## 감사 ㉚ 의 고침 (`711e3a9`)
+
+`app.py` 의 `DBAPIError` 처리기와 미들웨어의 4xx 좁힘, 그것을 무는 `test_api.py` 의 검사. 어긋낸 뒤 그 검사만 돌렸다.
+어긋냄 없이 돌린 대조군은 초록이고, 같은 트리의 `pytest` 전체(실제 PostgreSQL 16)도 초록이다(392 passed).
+
+| NC | 무엇을 어긋냈나 | 빨개진 검사 |
+|---|---|---|
+| 164 | `app.py` 의 `@app.exception_handler(DBAPIError)` 줄을 주석으로 바꿨다(DB 오류가 다시 `Exception` 처리기로 간다) | `test_a_break_does_not_carry_the_values_the_caller_sent` — `IntegrityError` 가 앱 밖으로 나왔다 |
+| 164 | 미들웨어의 `400 <= response.status_code < 500` 을 옛 `response.status_code >= 400` 으로 되돌렸다 | 같은 검사 — DB 500 이 「거절했다」 줄을 한 번 더 남겼다 |

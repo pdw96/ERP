@@ -973,9 +973,8 @@ def _original_finding(cells: list[str]) -> str:
 
 
 # 낮음인데 NC 로 남는 열린 줄 — 부분 닫힘인 부모가 잔여로 기다린다(대장 「심각도」의 예외)
-_LOW_KEPT_AS_NC = {
-    163: "보통인 NC-146 의 잔여 — 146 이 「잇는 NC 가 전부 닫혔을 것」으로 기다린다",
-}
+# 지금은 없다 — 163 이 들었다가 ㉚(`audit-ops`)이 닫아 뺐다(아래 게이트가 물었다)
+_LOW_KEPT_AS_NC: dict[int, str] = {}
 
 
 def test_a_low_nc_goes_to_an_issue() -> None:
