@@ -13,6 +13,24 @@ fi
 
 cd "$CLAUDE_PROJECT_DIR/backend"
 
+# 떠야 하는 것을 기다리다 끝내 서지 않으면 **실패로 끝낸다.** 처음에는 기다리는 고리의
+# 마지막 `sleep` 이 0 을 돌려 데몬이 죽었는데도 훅이 성공으로 보고했다 — 세션은 준비된
+# 것처럼 보이고 검사는 그 뒤에 엉뚱한 자리에서 터진다(PR #66 Codex 리뷰, 가짜 `dockerd`
+# 로 재현했다). 이름과 로그 끝을 남겨 무엇이 왜 안 섰는지 말한다.
+wait_until() {  # 이름, 로그 파일(없으면 빈 값), 확인 명령…
+  local name=$1 log=$2
+  shift 2
+  for _ in $(seq 1 30); do
+    "$@" >/dev/null 2>&1 && return 0
+    sleep 1
+  done
+  echo "session-start: ${name} 이(가) 30초 안에 서지 않았다" >&2
+  if [ -n "$log" ] && [ -f "$log" ]; then
+    tail -n 20 "$log" >&2
+  fi
+  return 1
+}
+
 # 파이썬 — CI 와 같은 잠금에서 해시까지 맞춰 깐다(`backend/requirements.in` 머리)
 if [ ! -x .venv/bin/python ]; then
   python3 -m venv .venv
@@ -28,10 +46,8 @@ fi
 if ! pg_isready -q -h 127.0.0.1 -p 5432; then
   pg_ctlcluster 16 main start
 fi
-for _ in $(seq 1 30); do
-  pg_isready -q -h 127.0.0.1 -p 5432 && break
-  sleep 1
-done
+wait_until PostgreSQL /var/log/postgresql/postgresql-16-main.log \
+  pg_isready -q -h 127.0.0.1 -p 5432
 su postgres -c "psql -tAc \"SELECT 1 FROM pg_roles WHERE rolname = 'erp'\"" | grep -q 1 \
   || su postgres -c "psql -qc \"CREATE ROLE erp LOGIN PASSWORD 'erp' SUPERUSER\""
 su postgres -c "psql -tAc \"SELECT 1 FROM pg_database WHERE datname = 'erp_test'\"" | grep -q 1 \
@@ -44,8 +60,5 @@ fi
 # Docker — 이미지 빌드 · 기동 · 되돌림 실측이 쓴다. 바이너리는 있고 데몬만 떠 있지 않다
 if command -v dockerd >/dev/null && ! docker info >/dev/null 2>&1; then
   nohup dockerd >/tmp/dockerd.log 2>&1 &
-  for _ in $(seq 1 30); do
-    docker info >/dev/null 2>&1 && break
-    sleep 1
-  done
+  wait_until dockerd /tmp/dockerd.log docker info
 fi
