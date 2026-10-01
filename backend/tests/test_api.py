@@ -589,6 +589,14 @@ def test_a_break_does_not_carry_the_values_the_caller_sent(
     끄는데 그것만으로는 닫히지 않는다 — PostgreSQL 이 무결성 위반에 `DETAIL:
     Failing row contains (…)` 를 붙여 **줄의 값 전부**를 되비춘다. 이 검사가 그
     둘째 겹을 잡았다(첫 고침으로는 빨갰다).
+
+    **셋째 겹은 우리 로거 밖이었다** (감사 ㉚ 재감사). `Exception` 처리기는
+    `ServerErrorMiddleware` 에 놓여 응답 뒤 예외를 **다시 던지고**, uvicorn 이
+    그 트레이스백을 찍는다 — `DETAIL` 이 그대로 든 문자열이다. 이 검사가
+    `raise_server_exceptions=False` 로 그 다시 던짐을 삼키고 `app.api` 로거만
+    보아서 **그 층을 구조적으로 보지 못했다.** 그래서 **예외가 앱 밖으로 나오지
+    않는 것**을 문다 — uvicorn 은 앱 밖으로 나온 예외만 찍으므로, 그것이 그
+    층에 닿는 길 자체다.
     """
     secret = "검사원 아무개"
 
@@ -600,17 +608,24 @@ def test_a_break_does_not_carry_the_values_the_caller_sent(
 
     app.dependency_overrides[session_scope] = break_inside_the_database
     try:
-        broken = TestClient(app, raise_server_exceptions=False)
-        with caplog.at_level(logging.ERROR, logger="app.api"):
-            answer = broken.post("/inspections", json=_PAYLOAD)
+        # **다시 던진 예외를 삼키지 않는다** — 앱 밖으로 나오면 여기서 터진다.
+        within = TestClient(app, raise_server_exceptions=True)
+        with caplog.at_level(logging.WARNING, logger="app.api"):
+            answer = within.post(
+                "/inspections", json=_PAYLOAD, headers={"X-Request-Id": "probe500db"}
+            )
     finally:
         app.dependency_overrides.clear()
 
     assert answer.status_code == 500, answer.text
+    assert answer.headers["X-Request-Id"] == "probe500db", answer.headers
     # **까닭은 남는다** — NC-149 가 세운 것을 이 고침이 되돌리지 않는다.
     assert "db_error=" in caplog.text and "sqlstate=" in caplog.text, caplog.text
     assert "constraint=" in caplog.text, caplog.text
-    # **사람이 보낸 값은 남지 않는다 — 두 겹 다.**
+    # **한 요청은 한 줄이다** — 미들웨어를 지나오게 된 500 을 「거절했다」로 겹쳐
+    # 적지 않는다.
+    assert "거절했다" not in caplog.text, caplog.text
+    # **사람이 보낸 값은 남지 않는다 — 세 겹 다**(셋째는 위의 `True` 가 문다).
     assert secret not in caplog.text, caplog.text
     assert "[parameters:" not in caplog.text, caplog.text
     assert "Failing row contains" not in caplog.text, caplog.text

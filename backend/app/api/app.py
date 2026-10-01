@@ -175,7 +175,11 @@ async def carry_an_id_that_names_this_request(
     # 자리가 따로 있다)과, 미들웨어에 닿기 전에 끝나는 응답(끝 슬래시 307 ·
     # 전송 층이 내는 400). 그리고 부르는 쪽이 **같은 축을 계속 보내면** 여러
     # 요청이 한 줄에 겹친다 — 축의 유일성은 우리 것이 아니다.
-    if response.status_code >= 400:
+    #
+    # **500 은 이 줄이 아니라 처리기가 찍는다.** DB 오류의 500 이 이 미들웨어를
+    # 지나오게 된 뒤로(㉚ 재감사 · NC-164) 여기서도 찍으면 한 요청이 두 줄이 되고,
+    # 터진 것을 「거절했다」로 적는다.
+    if 400 <= response.status_code < 500:
         _log.warning(
             "거절했다 request_id=%s %r %r -> %s",
             request_id,
@@ -224,6 +228,63 @@ def _refusal(
     return JSONResponse(status_code=status_code, content={"detail": errors}, headers=headers)
 
 
+def _a_break(request_id: str) -> JSONResponse:
+    """**500 의 본문과 축은 한 모양이다** — 아래 두 처리기가 함께 쓴다.
+
+    **여기서 헤더를 다시 단다.** `Exception` 처리기의 500 은 위의 미들웨어를
+    지나오지 않는다 — `ServerErrorMiddleware` 가 사용자 미들웨어 **바깥**에 서므로
+    그 미들웨어의 `call_next` 가 예외로 끊기고 응답에 헤더를 달 자리가 오지 않는다.
+    하필 **축이 가장 필요한 응답**이 그렇다. (DB 오류 처리기의 500 은 미들웨어를
+    지나오므로 거기서 한 번 더 같은 값으로 달린다 — 덮어써도 같다.)
+    """
+    answer = _refusal(
+        status.HTTP_500_INTERNAL_SERVER_ERROR,
+        [{"loc": ["server"], "msg": "처리하지 못했다", "type": Transport.INTERNAL_ERROR}],
+    )
+    answer.headers[_REQUEST_ID_HEADER] = request_id
+    return answer
+
+
+@app.exception_handler(DBAPIError)
+def do_not_hand_what_the_database_echoed_to_the_server(
+    request: Request, exc: DBAPIError
+) -> JSONResponse:
+    """**데이터베이스 오류는 앱 안에서 끝낸다** (감사 ⑰ NC-164 · ㉚ 재감사).
+
+    `Exception` 처리기 하나로 받던 때는 **우리 로그 줄만 깨끗했다.** starlette 는
+    `Exception`(과 500) 처리기를 `ServerErrorMiddleware` 에 두는데, 그 미들웨어는
+    처리기로 응답을 보낸 뒤 **예외를 반드시 다시 던지고**, uvicorn 이 그것을
+    트레이스백째 `uvicorn.error` 에 찍는다 — 그 문자열에 PostgreSQL 의 `DETAIL:
+    Failing row contains (…)` 가 그대로 있어 **사람이 보낸 값 전부**가 실렸다
+    (㉚ 이 읽어 냈고, 다시 던진 예외의 문자열에 판정자 이름이 든 것을 찍어
+    확인했다). 처리기 안이 아니라 **처리기가 놓인 층**이 새는 자리였다.
+
+    `Exception` 이 아닌 처리기는 `ExceptionMiddleware` 에 놓이고 **거기서 끝난다**
+    — 다시 던지지 않으므로 uvicorn 층에 닿는 예외가 없다. 그래서 따로 등록한다.
+
+    **까닭만 적고 그 말을 옮기지 않는다.** `hide_parameters=True` 가 SQLAlchemy 의
+    `[parameters: …]` 를 끄지만 PostgreSQL 자신이 값을 되비추므로, 응답하는
+    사람이 실제로 쓰는 둘(SQLSTATE · 제약 이름)을 골라 적는다 — 제약 이름은
+    **어느 규칙이 걸렸는가**라 SQLAlchemy 프레임 스택보다 정확하다.
+
+    **이 처리기가 못 보는 부류**(W-6 ③): `ExceptionMiddleware` 바깥(사용자
+    미들웨어 · 응답을 보낸 뒤의 정리)에서 터진 DB 오류는 여기 오지 않고
+    `Exception` 처리기로 가서 다시 던져진다. 오늘 그 층은 DB 를 만지지 않는다.
+    """
+    request_id = getattr(request.state, "request_id", "-")
+    diagnosis = getattr(exc.orig, "diag", None)
+    _log.error(
+        "요청을 처리하지 못했다 request_id=%s %r %r db_error=%s sqlstate=%s constraint=%s",
+        request_id,
+        request.method,
+        request.url.path,
+        type(exc.orig).__name__,
+        getattr(exc.orig, "sqlstate", "-"),
+        getattr(diagnosis, "constraint_name", None) or "-",
+    )
+    return _a_break(request_id)
+
+
 @app.exception_handler(Exception)
 def do_not_answer_a_break_with_plain_text(request: Request, exc: Exception) -> JSONResponse:
     """**터져도 본문의 모양은 그대로다.**
@@ -238,60 +299,31 @@ def do_not_answer_a_break_with_plain_text(request: Request, exc: Exception) -> J
     NC-145 · 149 · 162 · 164 가 그것을 세우는 동안 이 문장만 그대로 남았다
     (감사 ⑱ NC-166). 500 을 좇는 사람이 처음 읽는 줄이라, 「로그가 없다」로
     읽으면 그 경로를 아예 찾지 않는다.
+
+    데이터베이스 오류는 여기 오지 않는다 — 위의 처리기가 받는다(NC-164).
     """
     # **여기서 한 줄 찍는다.** 트레이스백은 starlette 가 다시 던져 uvicorn 이
     # 찍지만, 그 줄에는 이 요청을 가리키는 것이 없다. 안을 싣지 않는 것은 본문의
     # 규칙이고 **로그는 그 규칙의 반대편**이다 — 밖으로 나가지 않는다.
-    request_id = getattr(request.state, "request_id", "-")
+    #
     # **`exception()` 을 쓰지 않는다.** 이 처리기는 동기라 starlette 가
     # `run_in_threadpool` 로 부르고, 그 워커 스레드에는 **활성 예외가 없다** —
     # `sys.exc_info()` 가 비어 `NoneType: None` 만 찍힌다(Codex 리뷰 P2, 실제로
     # 찍히는 것을 확인했다). 그러면 **축은 있는데 까닭이 없는** 줄이 남고, 이
     # 줄이 세우려던 것이 바로 그 둘을 한 자리에 두는 것이다. 예외를 손으로 넘긴다.
     #
-    # **데이터베이스 오류는 까닭만 적고 그 말을 옮기지 않는다** (감사 ⑰ NC-164).
-    # `hide_parameters=True` 가 SQLAlchemy 쪽 `[parameters: …]` 를 껐는데 **그것이
-    # 한 겹이었다** — PostgreSQL 자신이 무결성 위반에 `DETAIL: Failing row
-    # contains (…)` 를 붙여 **줄의 값 전부**를 되비춘다(검사가 그것을 잡았다).
-    # 그 말을 옮기지 않고, 응답하는 사람이 실제로 쓰는 둘(SQLSTATE · 제약 이름)을
-    # 골라 적는다 — 제약 이름은 **어느 규칙이 걸렸는가**라 SQLAlchemy 프레임
-    # 스택보다 정확하다.
-    #
-    # **다른 예외는 그대로 스택을 싣는다.** 그쪽 메시지는 우리가 쓴 말이고,
-    # NC-149 가 세운 것을 이 고침이 되돌리지 않는다.
-    #
     # **이 줄이 못 보는 부류**(W-6 ③): 우리가 지은 예외 메시지에 사람이 보낸
     # 값을 직접 끼워 넣는 것. 그것은 이 자리가 아니라 **그 메시지를 짓는 자리**가
-    # 막는다.
-    if isinstance(exc, DBAPIError):
-        diagnosis = getattr(exc.orig, "diag", None)
-        _log.error(
-            "요청을 처리하지 못했다 request_id=%s %r %r db_error=%s sqlstate=%s constraint=%s",
-            request_id,
-            request.method,
-            request.url.path,
-            type(exc.orig).__name__,
-            getattr(exc.orig, "sqlstate", "-"),
-            getattr(diagnosis, "constraint_name", None) or "-",
-        )
-    else:
-        _log.error(
-            "요청을 처리하지 못했다 request_id=%s %r %r",
-            request_id,
-            request.method,
-            request.url.path,
-            exc_info=exc,
-        )
-    # **여기서 헤더를 다시 단다.** 500 은 위의 미들웨어를 지나오지 않는다 —
-    # `ServerErrorMiddleware` 가 사용자 미들웨어 **바깥**에 서므로 그 미들웨어의
-    # `call_next` 가 예외로 끊기고 응답에 헤더를 달 자리가 오지 않는다. 하필
-    # **축이 가장 필요한 응답**이 그렇다.
-    answer = _refusal(
-        status.HTTP_500_INTERNAL_SERVER_ERROR,
-        [{"loc": ["server"], "msg": "처리하지 못했다", "type": Transport.INTERNAL_ERROR}],
+    # 막는다 — 이 예외는 위의 까닭대로 uvicorn 이 한 번 더 찍는다.
+    request_id = getattr(request.state, "request_id", "-")
+    _log.error(
+        "요청을 처리하지 못했다 request_id=%s %r %r",
+        request_id,
+        request.method,
+        request.url.path,
+        exc_info=exc,
     )
-    answer.headers[_REQUEST_ID_HEADER] = request_id
-    return answer
+    return _a_break(request_id)
 
 
 @app.exception_handler(StarletteHTTPException)
