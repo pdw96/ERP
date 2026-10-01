@@ -800,8 +800,12 @@ def test_a_row_still_waiting_does_not_wait_on_a_closed_nc() -> None:
     waiting = _section(_LEDGER.read_text(), "아직 아무도 보지 않은 것")
     rows = [_row_cells(row) for _, row in _table_rows(waiting)]
     live = [cells[0] for cells in rows[1:] if not cells[0].startswith("~~")]
-    assert any(_waiting_on(first) for first in live), (
-        "기다리는 NC 를 드는 줄을 찾지 못했다 — 이 게이트가 아무것도 견주지 않는다"
+    # **앵커는 파서가 읽었다는 것이다 — 기다리는 일이 남았다는 것이 아니다** (감사 ㉞).
+    # 처음에는 「살아 있는 줄 가운데 NC 를 기다리는 것이 있다」를 걸었는데, ㉞ 가 마지막
+    # 사슬을 닫자 **옳은 상태에서** 빨개졌다. 지운 줄까지 포함해 NC 를 드는 줄을 읽었는지를
+    # 건다 — 파서가 깨지면 그것도 0 이 된다.
+    assert any(_waiting_on(cells[0].strip("~")) for cells in rows[1:]), (
+        "NC 를 드는 줄을 하나도 읽지 못했다 — 이 게이트가 아무것도 견주지 않는다"
     )
 
     stale = [
@@ -836,8 +840,10 @@ def test_an_nc_waiting_for_a_reaudit_has_a_row_that_waits_for_it() -> None:
     재감사를 기다리는 줄(「부분 닫힘」은 잇는 NC 가 닫혀야 닫히므로 그 NC 가 대신 든다),
     그리고 줄이 번호를 들되 **담당이 틀린** 것 — 그 줄의 감사자 칸은 보지 않는다.
     """
+    # **앵커는 NC 줄을 읽었다는 것이다** (감사 ㉞) — 기다리는 NC 가 0 인 것은 옳은 상태일 수
+    # 있다(㉞ 가 마지막 사슬을 닫은 뒤가 그랬다). 파서가 깨지면 NC 줄 자체가 0 이 된다.
+    assert _all_nc_rows(), "대장에서 NC 줄을 찾지 못했다 — 이 게이트가 아무것도 견주지 않는다"
     awaiting = _awaiting_ncs()
-    assert awaiting, "재감사를 기다리는 NC 를 찾지 못했다 — 이 게이트가 아무것도 견주지 않는다"
 
     waiting = _section(_LEDGER.read_text(), "아직 아무도 보지 않은 것")
     rows = [_row_cells(row) for _, row in _table_rows(waiting)]
