@@ -22,7 +22,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.api import app as api
-from app.api import schemas
+from app.api import schemas, spec
 from app.api.app import API_VERSION, app, session_scope
 from app.core import codes
 from app.db.constraints import blank_characters, is_present
@@ -313,6 +313,38 @@ def test_a_path_error_answers_in_the_same_shape(client: TestClient) -> None:
         assert detail[0].keys() == {"loc", "msg", "type"}, detail
 
 
+def test_a_body_that_cannot_be_read_points_at_the_body(client: TestClient) -> None:
+    """**틀린 것이 본문이면 `loc` 도 본문을 가리킨다** (감사 ㉛ NC-220).
+
+    UTF-8 로 풀리지 않는 본문은 FastAPI 가 400 으로 던지고 덮개를 지난다. 덮개는
+    경로 · 메서드 오류를 위해 `loc` 을 `["path"]` 로 적었으므로, 그대로 두면
+    `loc` 으로 틀린 칸을 표시하는 소비자는 **본문 오류를 경로 오류로 읽는다.**
+    """
+    response = client.post(
+        "/inspections", content=b"\xff", headers={"content-type": "application/json"}
+    )
+
+    assert response.status_code == 400, response.text
+    assert response.json()["detail"][0]["loc"] == ["body"], response.json()
+    assert response.json()["detail"][0]["type"] == "http_error", response.json()
+    # 같은 덮개를 지나는 404 는 그대로 요청선을 가리킨다.
+    assert client.post("/inspection", json=_PAYLOAD).json()["detail"][0]["loc"] == ["path"]
+
+
+def test_a_trailing_slash_is_not_sent_elsewhere(client: TestClient) -> None:
+    """**끝 슬래시는 선언된 404 로 답한다 — 선언 밖의 307 이 아니다** (감사 ㉝ OB-1).
+
+    기본값은 `/inspections/` 에 본문 없는 307 을 `/inspections` 로 냈다. 스펙에 없는
+    응답이고, 리다이렉트를 따라가지 않는 클라이언트는 빈 본문을 받는다. 같은 관찰이
+    ⑯ · ㉛ · ㉝ 세 번 나서 저장소 소유자가 끄기로 정했다.
+    """
+    response = client.post("/inspections/", json=_PAYLOAD, follow_redirects=False)
+
+    assert response.status_code == 404, (response.status_code, response.headers)
+    assert response.json()["detail"][0]["type"] == "http_error", response.json()
+    assert "X-Request-Id" in response.headers, response.headers
+
+
 def test_the_spec_lists_every_refusal_name(client: TestClient) -> None:
     """**거절의 이름을 `/openapi.json` 만 읽고 셀 수 있다** (감사 ⑫ NC-134).
 
@@ -344,19 +376,31 @@ def test_the_spec_declares_every_answer_that_actually_goes_out(client: TestClien
     갈리므로, 라우트 밖 거절을 **실제로 일으켜** 그 상태 코드가 선언에 있는지를
     본다.
 
+    **400 도 일으킨다** (감사 ㉛ NC-220). 본문이 UTF-8 로 풀리지 않으면 FastAPI 가
+    400 을 던지는데, 처음에는 이 검사가 그 갈래를 「일으키지 못하는 응답」으로 두어
+    선언에서 빠진 채 초록이었다.
+
     **이 검사가 못 보는 부류**(W-6 ③): 이 검사가 일으키지 못하는 응답(500 은
-    다른 검사가 일으킨다)과, 선언은 있는데 **모양이 다른** 경우 — 모양은 위의
-    검사들이 본다.
+    다른 검사가 일으킨다), 프레임워크가 얹는데 **아무도 모르는** 갈래(400 이 그랬다),
+    그리고 선언은 있는데 **모양이 다른** 경우 — 모양은 위의 검사들이 본다.
     """
     spec = client.get("/openapi.json").json()
     declared = spec["paths"]["/inspections"]["post"]["responses"]
 
-    # 라우트 밖 거절을 실제로 일으킨다 — 404 와 405.
-    for response in (client.post("/inspection", json=_PAYLOAD), client.get("/inspections")):
+    # 라우트 밖 거절을 실제로 일으킨다 — 400 · 404 · 405.
+    for response in (
+        client.post(
+            "/inspections", content=b"\xff", headers={"content-type": "application/json"}
+        ),
+        client.post("/inspection", json=_PAYLOAD),
+        client.post("/inspections/", json=_PAYLOAD, follow_redirects=False),
+        client.get("/inspections"),
+    ):
+        assert response.status_code in (400, 404, 405), response.text
         assert str(response.status_code) in declared, (response.status_code, sorted(declared))
 
-    # 500 은 다른 검사가 일으키므로 선언만 본다. 세 상태가 같은 모양을 든다.
-    for code in ("404", "405", "500"):
+    # 500 은 다른 검사가 일으키므로 선언만 본다. 네 상태가 같은 모양을 든다.
+    for code in ("400", "404", "405", "500"):
         schema = declared[code]["content"]["application/json"]["schema"]
         assert schema["$ref"].endswith("/TransportRefused"), (code, schema)
 
@@ -376,15 +420,34 @@ def test_the_spec_lists_every_transport_name(client: TestClient) -> None:
     `$ref` 가 사라지거나, `responses=` 에서 모델이 빠지면 빨개진다.
 
     **그것으로 충분한 이유**는 NC-160 이 요구한 것이 「이름이 기계가 읽는 계약에
-    있을 것」이기 때문이다 — 이제 이름을 고치면 `/openapi.json` 이 **함께 바뀌어
-    diff 에 보인다.** 「이름이 바뀌면 검사가 문다」를 원하면 필요한 것은 **찍어 둔
-    스펙과의 대조**이고, 그것은 이 저장소에 없다(감사 ⑯ OB-1).
+    있을 것」이기 때문이다. 이름의 변동은 아래의 **찍어 둔 스펙과의 대조**가 문다
+    (ADR 0012) — 한때 「그것은 이 저장소에 없다」고 적혀 있었다(감사 ⑯ · ㉛ OB-1).
     """
     spec = client.get("/openapi.json").json()
 
     assert spec["components"]["schemas"]["Transport"]["enum"] == [
         name.value for name in schemas.Transport
     ]
+
+
+def test_the_spec_matches_the_snapshot_in_the_repository() -> None:
+    """**계약을 바꾸는 커밋은 그 변화를 diff 에 남긴다** (ADR 0012, 감사 ⑯ · ㉛ OB-1).
+
+    `/openapi.json` 은 실행할 때 지어져 저장소에 없었으므로, 오류 이름이나 응답 선언을
+    바꾸는 PR 에서 보이는 것은 `schemas.py` 의 한 줄뿐이었다 — 위의 이름 검사는 양변이
+    같은 원천이라 그 변동에 초록이다. 사진(`docs/openapi.json`)과 견주면 계약이 바뀌는
+    순간 빨갛고, 사진을 다시 지어야 초록이 되며 그 사진의 diff 가 리뷰에 남는다.
+
+    **이 검사가 못 보는 부류**(W-6 ③): 선언 밖으로 나가는 응답(NC-220 의 400 같은 것 —
+    선언이 없으니 사진에도 없다. 위의 「실제로 일으켜 견주는」 검사가 문다), 그리고
+    **생각 없이 다시 지은 사진** — 이 검사는 막지 않고 보이게 할 뿐이다. 깨는 변경인지
+    가르는 것은 읽는 엔드포인트가 서는 조각의 몫이다.
+    """
+    assert spec.SNAPSHOT.exists(), f"{spec.SNAPSHOT} 가 없다 — `python -m app.api.spec`"
+    assert spec.render() == spec.SNAPSHOT.read_text(encoding="utf-8"), (
+        "밖으로 나가는 계약이 `docs/openapi.json` 과 다르다 — 의도한 변경이면 "
+        "`cd backend && .venv/bin/python -m app.api.spec` 로 다시 짓고 그 diff 를 함께 올린다"
+    )
 
 
 def test_the_spec_says_which_header_names_the_request(client: TestClient) -> None:
@@ -397,7 +460,7 @@ def test_the_spec_says_which_header_names_the_request(client: TestClient) -> Non
     spec = client.get("/openapi.json").json()
     declared = spec["paths"]["/inspections"]["post"]["responses"]
 
-    for code in ("201", "404", "405", "422", "500"):
+    for code in ("201", "400", "404", "405", "422", "500"):
         assert "X-Request-Id" in declared[code]["headers"], (code, declared[code])
 
     assert "Allow" in declared["405"]["headers"], declared["405"]
@@ -589,6 +652,14 @@ def test_a_break_does_not_carry_the_values_the_caller_sent(
     끄는데 그것만으로는 닫히지 않는다 — PostgreSQL 이 무결성 위반에 `DETAIL:
     Failing row contains (…)` 를 붙여 **줄의 값 전부**를 되비춘다. 이 검사가 그
     둘째 겹을 잡았다(첫 고침으로는 빨갰다).
+
+    **셋째 겹은 우리 로거 밖이었다** (감사 ㉚ 재감사). `Exception` 처리기는
+    `ServerErrorMiddleware` 에 놓여 응답 뒤 예외를 **다시 던지고**, uvicorn 이
+    그 트레이스백을 찍는다 — `DETAIL` 이 그대로 든 문자열이다. 이 검사가
+    `raise_server_exceptions=False` 로 그 다시 던짐을 삼키고 `app.api` 로거만
+    보아서 **그 층을 구조적으로 보지 못했다.** 그래서 **예외가 앱 밖으로 나오지
+    않는 것**을 문다 — uvicorn 은 앱 밖으로 나온 예외만 찍으므로, 그것이 그
+    층에 닿는 길 자체다.
     """
     secret = "검사원 아무개"
 
@@ -600,17 +671,24 @@ def test_a_break_does_not_carry_the_values_the_caller_sent(
 
     app.dependency_overrides[session_scope] = break_inside_the_database
     try:
-        broken = TestClient(app, raise_server_exceptions=False)
-        with caplog.at_level(logging.ERROR, logger="app.api"):
-            answer = broken.post("/inspections", json=_PAYLOAD)
+        # **다시 던진 예외를 삼키지 않는다** — 앱 밖으로 나오면 여기서 터진다.
+        within = TestClient(app, raise_server_exceptions=True)
+        with caplog.at_level(logging.WARNING, logger="app.api"):
+            answer = within.post(
+                "/inspections", json=_PAYLOAD, headers={"X-Request-Id": "probe500db"}
+            )
     finally:
         app.dependency_overrides.clear()
 
     assert answer.status_code == 500, answer.text
+    assert answer.headers["X-Request-Id"] == "probe500db", answer.headers
     # **까닭은 남는다** — NC-149 가 세운 것을 이 고침이 되돌리지 않는다.
     assert "db_error=" in caplog.text and "sqlstate=" in caplog.text, caplog.text
     assert "constraint=" in caplog.text, caplog.text
-    # **사람이 보낸 값은 남지 않는다 — 두 겹 다.**
+    # **한 요청은 한 줄이다** — 미들웨어를 지나오게 된 500 을 「거절했다」로 겹쳐
+    # 적지 않는다.
+    assert "거절했다" not in caplog.text, caplog.text
+    # **사람이 보낸 값은 남지 않는다 — 세 겹 다**(셋째는 위의 `True` 가 문다).
     assert secret not in caplog.text, caplog.text
     assert "[parameters:" not in caplog.text, caplog.text
     assert "Failing row contains" not in caplog.text, caplog.text

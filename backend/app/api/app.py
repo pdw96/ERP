@@ -88,6 +88,13 @@ app = FastAPI(
         " 열거로 들고, **그 열거에 없는 값은 셋째 무리**다."
     ),
     version=API_VERSION,
+    # **끝 슬래시를 다른 경로로 돌려보내지 않는다** (감사 ㉝ OB-1 — ⑯ OB-3 · ㉛ OB-2 에
+    # 이은 세 번째). 기본값은 `/inspections/` 에 본문 없는 307 을 내는데, 그것은
+    # 선언 밖의 응답이었다 — 리다이렉트를 따라가지 않는 클라이언트(httpx 의 기본)는
+    # 빈 307 을 받는다. 끄면 그 요청은 **이미 선언된 404** 가 된다. 받던 요청을
+    # 거절하게 되는 좁히는 변경이지만 창이 열려 있다(위 판 고정). 저장소 소유자가
+    # 정했다(2026-10-01).
+    redirect_slashes=False,
 )
 
 # **요청 하나를 가리킬 것** (감사 ⑬ NC-145).
@@ -172,10 +179,16 @@ async def carry_an_id_that_names_this_request(
     # (찍어서 확인했다). 좁히기를 축에만 세우고 옆칸에 세우지 않은 자리다.
     #
     # **이 줄이 못 보는 부류**(W-6 ③): 성공한 요청(DB 에 줄이 남으므로 되짚을
-    # 자리가 따로 있다)과, 미들웨어에 닿기 전에 끝나는 응답(끝 슬래시 307 ·
-    # 전송 층이 내는 400). 그리고 부르는 쪽이 **같은 축을 계속 보내면** 여러
+    # 자리가 따로 있다)과, 미들웨어에 닿기 전에 끝나는 응답(전송 층이 내는 400 —
+    # uvicorn 의 `text/plain` 이다). 끝 슬래시 307 을 한때 여기 들었는데 그것은
+    # 라우터에서 나 미들웨어를 **지났다**(감사 ㉝ 에서 찍었다) — 지금은 307 자체가 없다.
+    # 그리고 부르는 쪽이 **같은 축을 계속 보내면** 여러
     # 요청이 한 줄에 겹친다 — 축의 유일성은 우리 것이 아니다.
-    if response.status_code >= 400:
+    #
+    # **500 은 이 줄이 아니라 처리기가 찍는다.** DB 오류의 500 이 이 미들웨어를
+    # 지나오게 된 뒤로(㉚ 재감사 · NC-164) 여기서도 찍으면 한 요청이 두 줄이 되고,
+    # 터진 것을 「거절했다」로 적는다.
+    if 400 <= response.status_code < 500:
         _log.warning(
             "거절했다 request_id=%s %r %r -> %s",
             request_id,
@@ -224,6 +237,71 @@ def _refusal(
     return JSONResponse(status_code=status_code, content={"detail": errors}, headers=headers)
 
 
+def _a_break(request_id: str) -> JSONResponse:
+    """**500 의 본문과 축은 한 모양이다** — 아래 두 처리기가 함께 쓴다.
+
+    **여기서 헤더를 다시 단다.** `Exception` 처리기의 500 은 위의 미들웨어를
+    지나오지 않는다 — `ServerErrorMiddleware` 가 사용자 미들웨어 **바깥**에 서므로
+    그 미들웨어의 `call_next` 가 예외로 끊기고 응답에 헤더를 달 자리가 오지 않는다.
+    하필 **축이 가장 필요한 응답**이 그렇다. (DB 오류 처리기의 500 은 미들웨어를
+    지나오므로 거기서 한 번 더 같은 값으로 달린다 — 덮어써도 같다.)
+    """
+    answer = _refusal(
+        status.HTTP_500_INTERNAL_SERVER_ERROR,
+        [{"loc": ["server"], "msg": "처리하지 못했다", "type": Transport.INTERNAL_ERROR}],
+    )
+    answer.headers[_REQUEST_ID_HEADER] = request_id
+    return answer
+
+
+@app.exception_handler(DBAPIError)
+def do_not_hand_what_the_database_echoed_to_the_server(
+    request: Request, exc: DBAPIError
+) -> JSONResponse:
+    """**데이터베이스 오류는 앱 안에서 끝낸다** (감사 ⑰ NC-164 · ㉚ 재감사).
+
+    `Exception` 처리기 하나로 받던 때는 **우리 로그 줄만 깨끗했다.** starlette 는
+    `Exception`(과 500) 처리기를 `ServerErrorMiddleware` 에 두는데, 그 미들웨어는
+    처리기로 응답을 보낸 뒤 **예외를 반드시 다시 던지고**, uvicorn 이 그것을
+    트레이스백째 `uvicorn.error` 에 찍는다 — 그 문자열에 PostgreSQL 의 `DETAIL:
+    Failing row contains (…)` 가 그대로 있어 **사람이 보낸 값 전부**가 실렸다
+    (㉚ 이 읽어 냈고, 다시 던진 예외의 문자열에 판정자 이름이 든 것을 찍어
+    확인했다). 처리기 안이 아니라 **처리기가 놓인 층**이 새는 자리였다.
+
+    `Exception` 이 아닌 처리기는 `ExceptionMiddleware` 에 놓이고 **거기서 끝난다**
+    — 다시 던지지 않으므로 uvicorn 층에 닿는 예외가 없다. 그래서 따로 등록한다.
+
+    **까닭만 적고 그 말을 옮기지 않는다.** `hide_parameters=True` 가 SQLAlchemy 의
+    `[parameters: …]` 를 끄지만 PostgreSQL 자신이 값을 되비추므로, 응답하는
+    사람이 실제로 쓰는 둘(SQLSTATE · 제약 이름)을 골라 적는다 — 제약 이름은
+    **어느 규칙이 걸렸는가**라 SQLAlchemy 프레임 스택보다 정확하다.
+
+    **이 처리기가 못 보는 부류**(W-6 ③): 사용자 미들웨어에서 터진 DB 오류는
+    `ExceptionMiddleware` 바깥이라 여기 오지 않는다 — 오늘 그 층은 DB 를 만지지
+    않는다. 그리고 **응답이 이미 나간 뒤**의 DB 오류. 422 는 예외를 던지지 않고
+    응답을 돌려주므로 `session_scope` 의 `close()` 가 응답 뒤에 rollback 을 돌고,
+    그것이 터지면 starlette 는 이 처리기를 **찾기만 하고 부르지 않는다** — 응답이
+    시작됐으므로 처리기를 부르기 전에 `RuntimeError` 로 바꿔 던지고, 그것이
+    `Exception` 처리기를 지나 uvicorn 이 찍는다. 그래서 `db_error=` 줄은 남지 않고
+    「처리하지 못했다」 줄(연쇄된 rollback 오류의 트레이스백)이 남는다. rollback
+    오류에는 행의 값이 없어 새는 것은 없다 — 부르는 쪽은 422 를 받았는데 로그에는
+    「처리하지 못했다」가 남는 어긋남이다(감사 ㉜ — #67, 처리기를 부른다고 적었던
+    것을 ㉞ 가 바로잡았다).
+    """
+    request_id = getattr(request.state, "request_id", "-")
+    diagnosis = getattr(exc.orig, "diag", None)
+    _log.error(
+        "요청을 처리하지 못했다 request_id=%s %r %r db_error=%s sqlstate=%s constraint=%s",
+        request_id,
+        request.method,
+        request.url.path,
+        type(exc.orig).__name__,
+        getattr(exc.orig, "sqlstate", "-"),
+        getattr(diagnosis, "constraint_name", None) or "-",
+    )
+    return _a_break(request_id)
+
+
 @app.exception_handler(Exception)
 def do_not_answer_a_break_with_plain_text(request: Request, exc: Exception) -> JSONResponse:
     """**터져도 본문의 모양은 그대로다.**
@@ -238,60 +316,32 @@ def do_not_answer_a_break_with_plain_text(request: Request, exc: Exception) -> J
     NC-145 · 149 · 162 · 164 가 그것을 세우는 동안 이 문장만 그대로 남았다
     (감사 ⑱ NC-166). 500 을 좇는 사람이 처음 읽는 줄이라, 「로그가 없다」로
     읽으면 그 경로를 아예 찾지 않는다.
+
+    데이터베이스 오류는 위의 처리기가 받는다(NC-164) — 응답이 이미 나간 뒤의 것만
+    `RuntimeError` 에 연쇄되어 여기로 온다(위 처리기의 「못 보는 부류」).
     """
     # **여기서 한 줄 찍는다.** 트레이스백은 starlette 가 다시 던져 uvicorn 이
     # 찍지만, 그 줄에는 이 요청을 가리키는 것이 없다. 안을 싣지 않는 것은 본문의
     # 규칙이고 **로그는 그 규칙의 반대편**이다 — 밖으로 나가지 않는다.
-    request_id = getattr(request.state, "request_id", "-")
+    #
     # **`exception()` 을 쓰지 않는다.** 이 처리기는 동기라 starlette 가
     # `run_in_threadpool` 로 부르고, 그 워커 스레드에는 **활성 예외가 없다** —
     # `sys.exc_info()` 가 비어 `NoneType: None` 만 찍힌다(Codex 리뷰 P2, 실제로
     # 찍히는 것을 확인했다). 그러면 **축은 있는데 까닭이 없는** 줄이 남고, 이
     # 줄이 세우려던 것이 바로 그 둘을 한 자리에 두는 것이다. 예외를 손으로 넘긴다.
     #
-    # **데이터베이스 오류는 까닭만 적고 그 말을 옮기지 않는다** (감사 ⑰ NC-164).
-    # `hide_parameters=True` 가 SQLAlchemy 쪽 `[parameters: …]` 를 껐는데 **그것이
-    # 한 겹이었다** — PostgreSQL 자신이 무결성 위반에 `DETAIL: Failing row
-    # contains (…)` 를 붙여 **줄의 값 전부**를 되비춘다(검사가 그것을 잡았다).
-    # 그 말을 옮기지 않고, 응답하는 사람이 실제로 쓰는 둘(SQLSTATE · 제약 이름)을
-    # 골라 적는다 — 제약 이름은 **어느 규칙이 걸렸는가**라 SQLAlchemy 프레임
-    # 스택보다 정확하다.
-    #
-    # **다른 예외는 그대로 스택을 싣는다.** 그쪽 메시지는 우리가 쓴 말이고,
-    # NC-149 가 세운 것을 이 고침이 되돌리지 않는다.
-    #
     # **이 줄이 못 보는 부류**(W-6 ③): 우리가 지은 예외 메시지에 사람이 보낸
     # 값을 직접 끼워 넣는 것. 그것은 이 자리가 아니라 **그 메시지를 짓는 자리**가
-    # 막는다.
-    if isinstance(exc, DBAPIError):
-        diagnosis = getattr(exc.orig, "diag", None)
-        _log.error(
-            "요청을 처리하지 못했다 request_id=%s %r %r db_error=%s sqlstate=%s constraint=%s",
-            request_id,
-            request.method,
-            request.url.path,
-            type(exc.orig).__name__,
-            getattr(exc.orig, "sqlstate", "-"),
-            getattr(diagnosis, "constraint_name", None) or "-",
-        )
-    else:
-        _log.error(
-            "요청을 처리하지 못했다 request_id=%s %r %r",
-            request_id,
-            request.method,
-            request.url.path,
-            exc_info=exc,
-        )
-    # **여기서 헤더를 다시 단다.** 500 은 위의 미들웨어를 지나오지 않는다 —
-    # `ServerErrorMiddleware` 가 사용자 미들웨어 **바깥**에 서므로 그 미들웨어의
-    # `call_next` 가 예외로 끊기고 응답에 헤더를 달 자리가 오지 않는다. 하필
-    # **축이 가장 필요한 응답**이 그렇다.
-    answer = _refusal(
-        status.HTTP_500_INTERNAL_SERVER_ERROR,
-        [{"loc": ["server"], "msg": "처리하지 못했다", "type": Transport.INTERNAL_ERROR}],
+    # 막는다 — 이 예외는 위의 까닭대로 uvicorn 이 한 번 더 찍는다.
+    request_id = getattr(request.state, "request_id", "-")
+    _log.error(
+        "요청을 처리하지 못했다 request_id=%s %r %r",
+        request_id,
+        request.method,
+        request.url.path,
+        exc_info=exc,
     )
-    answer.headers[_REQUEST_ID_HEADER] = request_id
-    return answer
+    return _a_break(request_id)
 
 
 @app.exception_handler(StarletteHTTPException)
@@ -308,7 +358,10 @@ def answer_a_path_error_in_the_same_shape(
     **처리기가 없어서가 아니다.** FastAPI 는 이 예외의 처리기를 기본으로 등록해
     두는데, 그 기본이 문자열을 싣는다. 그래서 **덮는다**(감사 ⑫ NC-135).
 
-    경로·메서드 오류라 `loc` 은 본문이 아니라 요청선을 가리킨다.
+    경로·메서드 오류라 `loc` 은 대개 요청선(`["path"]`)을 가리킨다. **400 만은
+    본문이다**(`["body"]`) — FastAPI 가 본문을 읽다 `JSONDecodeError` 가 아닌
+    예외(UTF-8 로 풀리지 않는 바이트)를 만나면 이 예외로 400 을 던지는데, 그때
+    틀린 것은 본문이다(감사 ㉛ NC-220). 이 앱에서 400 을 던지는 자리는 그것뿐이다.
 
     **덮으면 기본 처리기가 하던 것을 전부 떠안는다.** 그것은 둘이었다 — 헤더를
     넘기는 것과, **본문을 실으면 안 되는 상태 코드**를 본문 없이 돌려보내는 것.
@@ -323,9 +376,10 @@ def answer_a_path_error_in_the_same_shape(
     """
     if not is_body_allowed_for_status_code(exc.status_code):
         return Response(status_code=exc.status_code, headers=exc.headers)
+    where = "body" if exc.status_code == status.HTTP_400_BAD_REQUEST else "path"
     return _refusal(
         exc.status_code,
-        [{"loc": ["path"], "msg": str(exc.detail), "type": Transport.HTTP_ERROR}],
+        [{"loc": [where], "msg": str(exc.detail), "type": Transport.HTTP_ERROR}],
         headers=exc.headers,
     )
 
@@ -392,10 +446,15 @@ def session_scope() -> Iterator[Session]:
     # `X-Request-Id` 도 함께 적는다. NC-145 가 그것을 **「부르는 쪽이 『이 요청』
     # 이라고 말할 수 있게」** 세웠는데, 말할 자리가 스펙에 없으면 그 규약은
     # 우리끼리의 것이다. 받은 값을 존중하는 것까지가 그 규약이다.
+    #
+    # **400 을 빠뜨렸었다** (감사 ㉛ NC-220). 본문이 UTF-8 로 풀리지 않으면 FastAPI 가
+    # 400 을 던지는데, 위의 「다 적는다」를 쓰고도 그 갈래를 몰랐다 — 프레임워크가
+    # 얹은 응답이라 눈으로 센 목록에서 빠졌다(NC-84 와 같은 부류).
     responses={
         # **성공도 그 헤더를 단다.** 미들웨어가 모든 응답에 달므로 201 만 빼면
         # 선언이 다시 실제보다 좁아진다 — NC-160 이 낸 그 모양이다(찍어서 봤다).
         status.HTTP_201_CREATED: {"headers": _REQUEST_ID_SPEC},
+        status.HTTP_400_BAD_REQUEST: {"model": TransportRefused, "headers": _REQUEST_ID_SPEC},
         status.HTTP_404_NOT_FOUND: {"model": TransportRefused, "headers": _REQUEST_ID_SPEC},
         status.HTTP_405_METHOD_NOT_ALLOWED: {
             "model": TransportRefused,

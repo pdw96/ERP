@@ -217,10 +217,12 @@ def _test_database_url() -> str:
 def test_a_database_error_does_not_render_the_values_it_was_given() -> None:
     """**엔진 층에서도 사람이 보낸 값이 문자열에 실리지 않는다** (감사 ⑰ NC-164).
 
-    SQLAlchemy 는 `StatementError` 에 `[parameters: {…}]` 를 붙인다. 500 처리기는
-    DB 오류의 메시지를 아예 옮기지 않으므로 **오늘 그 문자열이 로그로 나가는
-    길은 없지만**, 그것은 처리기 한 자리가 막고 있는 것이고 이 칸은 **엔진이
-    만드는 모든 문자열**에 걸린다 — 다른 자리가 그 예외를 찍는 날 다시 열린다.
+    SQLAlchemy 는 `StatementError` 에 `[parameters: {…}]` 를 붙인다. DB 오류
+    처리기는 그 메시지를 옮기지 않고 예외를 앱 안에서 끝내므로 **오늘 그 문자열이
+    로그로 나가는 길은 없지만**, 그것은 처리기 한 자리가 막고 있는 것이고 이 칸은
+    **엔진이 만드는 모든 문자열**에 걸린다 — 다른 자리가 그 예외를 찍는 날 다시
+    열린다. 실제로 한 번 열려 있었다: 처리기가 `Exception` 에 붙어 있던 동안은
+    starlette 가 예외를 다시 던져 uvicorn 이 찍었다(감사 ㉚ 재감사 · NC-164).
 
     어긋내 확인했다: `hide_parameters` 만 떼면 처리기가 막아 주어 API 쪽 검사는
     **초록으로 남는다.** 두 겹을 각각 무는 자리가 필요하다.

@@ -45,7 +45,7 @@
 | 기록 | NC | 무엇이 초록이었나 | 담당 | 닫는 조건 · 지금 |
 |---|---|---|---|---|
 | `0d9a96d` | 147 | 엔트리포인트의 `set -euo pipefail` 을 지워도 `shellcheck` 가 통과한다 | `audit-quality` | **닫혔다** — 엔트리포인트의 첫 실행 줄을 보는 검사가 문다(감사 ㉕ NC-190, `4abd1b6` 묶음의 190 줄) |
-| `1e0a336` | 160 | 스펙의 열거 이름을 더하거나 바꿔도 대조가 통과한다 — 양변이 같은 원천이다 | `audit-contract` | 초록 — 찍어 둔 스펙과 견주는 검사가 서는 날(⑯ OB-1) |
+| `1e0a336` | 160 | 스펙의 열거 이름을 더하거나 바꿔도 대조가 통과한다 — 양변이 같은 원천이다 | `audit-contract` | **닫혔다** — 찍어 둔 스펙과 견주는 검사(ADR 0012)가 같은 둘을 빨갛게 한다(「ADR 0012」 묶음). 옛 조건은 「찍어 둔 스펙과 견주는 검사가 서는 날(⑯ OB-1)」 |
 | `6402ccb` | 191 | 두 잠금의 같은 하위 의존성을 함께 다른 실재 판으로 바꿔도 `lock.sh --check` 가 통과한다 | `audit-quality` | 초록 — 의도한 경계. 사람의 diff 검토가 그 자리다(`CHECKLIST.md` 「항상」 · ADR 0004) |
 | `6402ccb` | — | 잠금 스텝에 `continue-on-error: true` 를 달아도 통과한다(㉕ OB-2) | `audit-quality` | **닫혔다** — CI 의 검사 스텝마다 명령과 실패를 삼키는 장치를 보는 검사가 문다(`bbfb6e8` — 「감사 ㉕ OB-1 · OB-2 의 고침」 묶음) |
 | `30ef34f` | 196 | `_AWAITING` 에서 「열림」을 빼도 통과한다 — 뒤의 `0a92e57` 묶음 196 빨강 줄은 **다른** 어긋냄(상태 어휘)을 물어 이 초록을 닫지 않는다 | `audit-quality` | 초록 — 대장에 굵은 「열림」 줄이 서는 회차에 다시 잰다(감사 ㉘ NC-204 가 빠진 이 줄을 더했다) |
@@ -89,6 +89,7 @@
 | `584f5c9` | — | 보통인 줄의 뒤 판정이 잔여를 「심각도 낮음」으로 든다 | `audit-quality` | 초록이 맞다 — 낮음 게이트는 원 지적만 본다(「PR #65 Codex 리뷰 1 라운드의 고침」 묶음) |
 | `055fc4e` | — | 열린 줄의 원 지적에 「심각도: 낮음」(콜론 꼴)을 적어도 낮음 게이트가 통과한다 | `audit-quality` | **닫혔다** — `_LOW` 가 콜론 꼴을 받는다(「PR #65 Codex 리뷰 2 라운드의 고침」 묶음) |
 | `5f6803a` | — | 열린 줄의 원 지적이 「심각도 낮음이 아니다」 · 「낮음 아님」이다 | `audit-quality` | 초록이 맞다 — 부정형은 낮음이 아니다(「PR #65 Codex 리뷰 3 라운드의 고침」 묶음) |
+| `6001d28` | — | 두 NC 표의 머리 줄을 바꿔도 「아직」 표 게이트의 앵커가 통과한다 | `audit-quality` | 초록이 맞다 — 겨냥이 빗나간 어긋냄이다. 파서는 머리 줄이 아니라 절 이름으로 표를 찾고, 절 이름을 바꾸는 어긋냄은 같은 묶음에서 빨갛다 |
 
 ## ⑧ 의 고침 (`03b6c1f`)
 
@@ -926,3 +927,76 @@ PostgreSQL 16)도 초록이다(392 passed).
 **위 두 「고치기 전」 묶음의 분류를 바로잡는다**(PR #65 Codex 리뷰 4 라운드). 「PR #65 Codex 리뷰 1 라운드 — 고치기 전」과
 「3 라운드 — 고치기 전」은 낮음 게이트의 거짓 양성을 **기존 한계 · 시끄러운 실패**(1)로 적었다. 같은 입력을 `main` 은
 받아들이고(그 게이트가 없다) 이 PR 만 막으므로 `docs/리뷰-루프.md` 의 **회귀**(5)다 — 라운드 점수는 8 → 12, 5 → 9 다.
+
+## 감사 ㉚ 이 돌린 어긋냄 (`e53b091`)
+
+감사자는 읽기 전용이라 호출자가 돌렸다. 감사자가 코드로 읽어 낸 누출(NC-164 — `Exception` 처리기가
+`ServerErrorMiddleware` 에 놓여 예외를 다시 던진다)을 **어긋냄 없이** 그대로 재현했다 — 기존 검사
+`test_a_break_does_not_carry_the_values_the_caller_sent` 를 `raise_server_exceptions=True` 로만 바꿔 같은 트리에서
+돌렸다(임시 파일, 지웠다). 다시 던진 `IntegrityError` 의 문자열에 판정자 이름과 `Failing row contains` 가 둘 다 들었다.
+
+| NC | 무엇을 어긋냈나 | 빨개진 검사 |
+|---|---|---|
+| 164 | 어긋내지 않았다 — 검사의 `TestClient` 만 `raise_server_exceptions=True` 로 바꿨다 | **없다 — 통과했다** (`test_a_break_does_not_carry_the_values_the_caller_sent` 의 원래 형태) — 누출이 있는데 초록이었다. 다시 던진 예외를 삼키고 `app.api` 로거만 본다 |
+
+## 감사 ㉚ 의 고침 (`711e3a9`)
+
+`app.py` 의 `DBAPIError` 처리기와 미들웨어의 4xx 좁힘, 그것을 무는 `test_api.py` 의 검사. 어긋낸 뒤 그 검사만 돌렸다.
+어긋냄 없이 돌린 대조군은 초록이고, 같은 트리의 `pytest` 전체(실제 PostgreSQL 16)도 초록이다(392 passed).
+
+| NC | 무엇을 어긋냈나 | 빨개진 검사 |
+|---|---|---|
+| 164 | `app.py` 의 `@app.exception_handler(DBAPIError)` 줄을 주석으로 바꿨다(DB 오류가 다시 `Exception` 처리기로 간다) | `test_a_break_does_not_carry_the_values_the_caller_sent` — `IntegrityError` 가 앱 밖으로 나왔다 |
+| 164 | 미들웨어의 `400 <= response.status_code < 500` 을 옛 `response.status_code >= 400` 으로 되돌렸다 | 같은 검사 — DB 500 이 「거절했다」 줄을 한 번 더 남겼다 |
+
+## 감사 ㉛ 이 돌린 어긋냄 (`26e44ed`)
+
+감사자는 읽기 전용이라 호출자가 돌렸다. 감사자가 코드로 읽어 낸 400(NC-220)을 **어긋냄 없이** 찍었다 — 임시 검사로
+`b"\xff"` 를 `application/json` 으로 보내 상태 · 본문 · 스펙을 봤다(임시 파일, 지웠다). 400 · `loc:["path"]` 로 나갔고 스펙에
+`"400"` 이 없었다. 같은 트리의 `test_api.py` 는 초록이었다.
+
+| NC | 무엇을 어긋냈나 | 빨개진 검사 |
+|---|---|---|
+| 220 | 어긋내지 않았다 — 실제로 나가는 400 이 선언에 없는 채로 돌렸다 | **없다 — 통과했다** (`test_the_spec_declares_every_answer_that_actually_goes_out` 의 원래 형태) — 그 검사는 400 을 일으키지 않았다 |
+
+## 감사 ㉛ 의 고침 (`bb78260`)
+
+`app.py` 의 400 선언과 덮개의 `loc`, 그것을 무는 `test_api.py` 의 검사 둘. 어긋낸 뒤 `test_api.py` 를 돌렸다. 어긋냄 없이 돌린
+대조군은 초록이고, 같은 트리의 `pytest` 전체(실제 PostgreSQL 16)도 초록이다(393 passed).
+
+| NC | 무엇을 어긋냈나 | 빨개진 검사 |
+|---|---|---|
+| 220 | `responses` 에서 400 선언 줄을 지웠다 | `test_the_spec_declares_every_answer_that_actually_goes_out` · `test_the_spec_says_which_header_names_the_request` |
+| 220 | 덮개의 `loc` 을 늘 `"path"` 로 되돌렸다 | `test_a_body_that_cannot_be_read_points_at_the_body` |
+
+## ADR 0012 — 계약의 사진 (`ded3639`)
+
+`docs/openapi.json` 과 `test_the_spec_matches_the_snapshot_in_the_repository`. 어긋낸 뒤 `test_api.py` 를 돌렸다. 어긋냄 없이 돌린
+대조군은 초록이고, 같은 트리의 `pytest` 전체(실제 PostgreSQL 16)도 초록이다. 앞의 둘은 `1e0a336` 묶음에서 초록이던 그 어긋냄이다.
+
+| NC | 무엇을 어긋냈나 | 빨개진 검사 |
+|---|---|---|
+| 160 | `Transport` 의 `http_error` 를 `path_error` 로 고쳤다 | `test_the_spec_matches_the_snapshot_in_the_repository` · `test_a_body_that_cannot_be_read_points_at_the_body` |
+| 160 | `Transport` 열거에 이름(`ghost`)을 하나 더했다 | `test_the_spec_matches_the_snapshot_in_the_repository` |
+| — | 코드는 그대로 두고 `docs/openapi.json` 의 `http_error` 를 `path_error` 로 고쳤다 | `test_the_spec_matches_the_snapshot_in_the_repository` |
+
+## 감사 ㉝ OB-1 의 고침 — 끝 슬래시 (`4da8f80`)
+
+`app.py` 의 `redirect_slashes=False` 와 그것을 무는 `test_api.py` 의 검사 둘. 어긋낸 뒤 `test_api.py` 를 돌렸다. 어긋냄 없이 돌린
+대조군은 초록이고, 같은 트리의 `pytest` 전체(실제 PostgreSQL 16)도 초록이다.
+
+| NC | 무엇을 어긋냈나 | 빨개진 검사 |
+|---|---|---|
+| — | `FastAPI(...)` 의 `redirect_slashes=False` 줄을 지웠다(기본값 307 으로 돌아간다) | `test_a_trailing_slash_is_not_sent_elsewhere` · `test_the_spec_declares_every_answer_that_actually_goes_out` |
+
+## 감사 ㉞ — 「아직」 표 게이트 둘의 앵커 (`6001d28`)
+
+마지막 사슬이 닫혀 재감사를 기다리는 NC 가 0 이 되자 두 게이트가 앵커(「기다리는 것이 하나라도 있다」)에서 빨개졌다 — 옳은 상태를
+틀렸다고 한 것이다. 앵커를 「파서가 표를 읽었다」로 바꾸고, 파서를 깨는 어긋냄으로 빨개지는 것을 봤다. `test_prose.py` 만 돌렸다.
+어긋냄 없이 돌린 대조군은 초록이고, 같은 트리의 `pytest` 전체(실제 PostgreSQL 16)도 초록이다.
+
+| NC | 무엇을 어긋냈나 | 빨개진 검사 |
+|---|---|---|
+| — | 「아직 아무도 보지 않은 것」 절의 「자리(」를 「곳(」으로 바꿨다(파서가 NC 번호를 못 읽는다) | `test_a_row_still_waiting_does_not_wait_on_a_closed_nc` |
+| — | 두 NC 표의 머리 줄 `\| NC \| 무엇 \|` 을 `\| 번호 \| 무엇 \|` 으로 바꿨다 | **없다 — 통과했다** — 파서는 머리 줄이 아니라 절 이름으로 표를 찾는다. 겨냥이 빗나간 어긋냄이라 아래 줄로 다시 쟀다 |
+| — | 두 NC 표의 절 머리(`## 부적합 대장` · 「닫힌 부적합」)를 다른 이름으로 바꿨다 | `test_an_nc_waiting_for_a_reaudit_has_a_row_that_waits_for_it` · `test_a_row_still_waiting_does_not_wait_on_a_closed_nc` 와 NC 표를 읽는 게이트 셋 |

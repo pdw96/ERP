@@ -175,7 +175,7 @@ class Transport(StrEnum):
 
 
 class TransportDetail(BaseModel):
-    """라우트 밖 거절의 `detail[]` 한 줄. `loc` 은 본문이 아니라 요청선·서버다."""
+    """라우트 밖 거절의 `detail[]` 한 줄. `loc` 은 요청선 · 서버이고, 400 만 본문이다."""
 
     loc: list[str]
     msg: str
@@ -183,6 +183,6 @@ class TransportDetail(BaseModel):
 
 
 class TransportRefused(BaseModel):
-    """404 · 405 · 500 의 본문 — 422 와 **같은 모양이고 이름 공간만 다르다**."""
+    """400 · 404 · 405 · 500 의 본문 — 422 와 **같은 모양이고 이름 공간만 다르다**."""
 
     detail: list[TransportDetail]
