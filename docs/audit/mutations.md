@@ -978,3 +978,12 @@ PostgreSQL 16)도 초록이다(392 passed).
 | 160 | `Transport` 의 `http_error` 를 `path_error` 로 고쳤다 | `test_the_spec_matches_the_snapshot_in_the_repository` · `test_a_body_that_cannot_be_read_points_at_the_body` |
 | 160 | `Transport` 열거에 이름(`ghost`)을 하나 더했다 | `test_the_spec_matches_the_snapshot_in_the_repository` |
 | — | 코드는 그대로 두고 `docs/openapi.json` 의 `http_error` 를 `path_error` 로 고쳤다 | `test_the_spec_matches_the_snapshot_in_the_repository` |
+
+## 감사 ㉝ OB-1 의 고침 — 끝 슬래시 (`4da8f80`)
+
+`app.py` 의 `redirect_slashes=False` 와 그것을 무는 `test_api.py` 의 검사 둘. 어긋낸 뒤 `test_api.py` 를 돌렸다. 어긋냄 없이 돌린
+대조군은 초록이고, 같은 트리의 `pytest` 전체(실제 PostgreSQL 16)도 초록이다.
+
+| NC | 무엇을 어긋냈나 | 빨개진 검사 |
+|---|---|---|
+| — | `FastAPI(...)` 의 `redirect_slashes=False` 줄을 지웠다(기본값 307 으로 돌아간다) | `test_a_trailing_slash_is_not_sent_elsewhere` · `test_the_spec_declares_every_answer_that_actually_goes_out` |
