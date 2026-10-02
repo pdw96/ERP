@@ -141,8 +141,8 @@ def _must_be_a_reason_for_this_gate(session: Session, reason_code: str) -> None:
 
 
 def _as_counted(quantity: float) -> object:
-    """**트리거가 세는 자릿수로 옮긴다.** `double precision` 으로 빼면 100 − 33.3 − 66.7
-    이 0 이 아니라 −1.4e-14 쯤이 되어, 트리거는 받는 것을 여기서 거절한다."""
+    """**트리거가 세는 자릿수로 옮긴다.** `double precision` 으로 빼면 100 − 64.4 − 35.6
+    이 0 이 아니라 −7.1e-15 가 되어, 트리거는 받는 것을 여기서 거절한다."""
     return cast(literal(quantity, Float), Numeric)
 
 

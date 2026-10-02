@@ -191,12 +191,16 @@ def test_a_lot_taken_by_special_acceptance_goes_back_like_any_lot(planted: Sessi
 
 
 def test_a_lot_can_go_back_in_pieces_down_to_nothing(planted: Session) -> None:
-    """**사람이 넣은 수끼리의 합이 맞는다.** `double precision` 으로 빼면 100 − 33.3 −
-    66.7 이 음수가 되어, 다 빠진 로트의 마지막 반품을 쓰기 경로가 거절한다."""
+    """**사람이 넣은 수끼리의 합이 맞는다.** `double precision` 으로 빼면 100 − 64.4 −
+    35.6 이 0 이 아니라 −7.1e-15 가 되어, 다 빠지는 마지막 반품을 쓰기 경로가 거절한다.
+
+    **수를 고른 까닭** — 처음 쓴 33.3 · 66.7 은 `double` 로도 0 이 되어, 셈을 `double`
+    로 바꿔도 이 검사가 초록이었다(어긋내 확인했다).
+    """
     inspection_id = _passed(planted, quantity=100.0)
 
-    return_to_supplier(planted, _from_the_lot(inspection_id, 33.3))
-    return_to_supplier(planted, _from_the_lot(inspection_id, 66.7))
+    return_to_supplier(planted, _from_the_lot(inspection_id, 64.4))
+    return_to_supplier(planted, _from_the_lot(inspection_id, 35.6))
 
     assert _refused(planted, _from_the_lot(inspection_id, 0.001)) == (
         ReturnRefusal.MORE_THAN_THE_LOT_HOLDS
