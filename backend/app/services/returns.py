@@ -69,9 +69,11 @@ class ReturnRefusal(StrEnum):
 
     UNKNOWN_INSPECTION = "unknown_inspection"
     UNKNOWN_SETTLE_TYPE = "unknown_settle_type"
+    SETTLE_TYPE_IS_NOT_ACTIVE = "settle_type_is_not_active"
     REASON_IS_MISSING = "reason_is_missing"
     REASON_COMES_WITH_A_FAILED_INSPECTION = "reason_comes_with_a_failed_inspection"
     REASON_IS_NOT_USABLE_AT_THIS_GATE = "reason_is_not_usable_at_this_gate"
+    REASON_IS_NOT_ACTIVE = "reason_is_not_active"
     MORE_THAN_THE_LOT_HOLDS = "more_than_the_lot_holds"
     MORE_THAN_WAS_REJECTED = "more_than_was_rejected"
 
@@ -115,9 +117,17 @@ def _inspection(session: Session, inspection_id: int) -> Inspection:
 
 
 def _must_be_a_settle_type(session: Session, settle_type: str) -> None:
-    if session.get(CommonCode, (codes.SETTLE_TYPE, settle_type)) is None:
+    code = session.get(CommonCode, (codes.SETTLE_TYPE, settle_type))
+    if code is None:
         raise RefusedReturn(
             ReturnRefusal.UNKNOWN_SETTLE_TYPE, f"그런 정산 구분이 없다: {settle_type}"
+        )
+    if not code.is_active:
+        # **꺼진 코드는 새 기록에서 고르지 못한다**(Codex 리뷰) — 공통코드는 지우는 대신
+        # 끄고, 끈 코드는 옛 기록에서만 읽힌다(`CommonCode` 독스트링).
+        raise RefusedReturn(
+            ReturnRefusal.SETTLE_TYPE_IS_NOT_ACTIVE,
+            f"쓰지 않게 된 정산 구분이다: {settle_type}",
         )
 
 
@@ -137,6 +147,12 @@ def _must_be_a_reason_for_this_gate(session: Session, reason_code: str) -> None:
         raise RefusedReturn(
             ReturnRefusal.REASON_IS_NOT_USABLE_AT_THIS_GATE,
             f"관문 1 에서 쓸 수 있는 사유가 아니다: {reason_code}",
+        )
+    # 규칙 줄이 남아 있어도 **사유 코드가 꺼졌으면** 고르지 못한다 — 정산 구분과 같다.
+    reason = session.get(CommonCode, (codes.NC_REASON, reason_code))
+    if reason is not None and not reason.is_active:
+        raise RefusedReturn(
+            ReturnRefusal.REASON_IS_NOT_ACTIVE, f"쓰지 않게 된 사유다: {reason_code}"
         )
 
 

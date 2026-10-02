@@ -26,6 +26,7 @@ from sqlalchemy.pool import NullPool
 from app.core import codes
 from app.db.base import Base
 from app.db.code_attributes import TxnTypeAttribute
+from app.db.common_codes import CommonCode
 from app.db.inspection import Inspection
 from app.db.inventory import Lot, PurchaseReturn, StockLedgerEntry
 from app.services.incoming import IncomingInspection, Measurement, receive
@@ -258,6 +259,34 @@ def test_a_lot_return_uses_a_reason_the_incoming_gate_knows(planted: Session) ->
     assert _refused(
         planted, _from_the_lot(inspection_id, 1.0, nonconformity_code=NOT_AT_THIS_GATE)
     ) == (ReturnRefusal.REASON_IS_NOT_USABLE_AT_THIS_GATE)
+
+
+def _retire(session: Session, group: str, code: str) -> None:
+    retired = session.get(CommonCode, (group, code))
+    assert retired is not None
+    retired.is_active = False
+    session.flush()
+
+
+def test_a_retired_settle_type_is_named(planted: Session) -> None:
+    """**꺼진 코드는 새 기록에서 고르지 못한다**(Codex 리뷰). 공통코드는 지우는 대신 끄고, 끈
+    코드는 옛 기록에서만 읽힌다 — 있다는 것만 물으면 꺼진 정산 구분으로 새 반품이 선다."""
+    inspection_id = _failed(planted)
+    _retire(planted, codes.SETTLE_TYPE, IN_KIND)
+
+    assert _refused(planted, _back(inspection_id, 1.0)) == (
+        ReturnRefusal.SETTLE_TYPE_IS_NOT_ACTIVE
+    )
+
+
+def test_a_retired_reason_is_named(planted: Session) -> None:
+    """**사유도 같다** — 관문 1 의 규칙 줄이 남아 있어도 사유 코드가 꺼졌으면 고르지 못한다."""
+    inspection_id = _passed(planted)
+    _retire(planted, codes.NC_REASON, _FOREIGN_REASON)
+
+    assert _refused(planted, _from_the_lot(inspection_id, 1.0)) == (
+        ReturnRefusal.REASON_IS_NOT_ACTIVE
+    )
 
 
 def test_a_lot_does_not_give_back_more_than_it_holds(planted: Session) -> None:

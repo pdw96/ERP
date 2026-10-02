@@ -32,6 +32,10 @@ def _present(value: str) -> str:
     """
     if not value.strip(_BLANK):
         raise ValueError("공백만으로 이루어진 값은 받지 않는다")
+    # **NUL 은 PostgreSQL 의 `text` 에 들지 못한다**(Codex 리뷰, 3단계 조각 2). JSON 은
+    # `\u0000` 을 실어 올 수 있고, 경계가 놓치면 드라이버가 넣는 자리에서 거부해 500 이 된다.
+    if "\x00" in value:
+        raise ValueError("NUL 글자는 받지 않는다")
     return value
 
 

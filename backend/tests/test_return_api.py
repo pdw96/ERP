@@ -113,6 +113,10 @@ def test_a_business_refusal_names_itself_in_the_same_shape(
         ("settle_type", _TOO_LONG_TO_KEEP),
         ("returned_by", "　"),
         ("nonconformity_code", "\t"),
+        # PostgreSQL 의 `text` 는 NUL 을 담지 못한다 — 드라이버가 넣는 자리에서 거부한다.
+        ("returned_by", "자재\x00담당"),
+        ("settle_type", "대\x00물"),
+        ("nonconformity_code", "IQ\x00DOC"),
     ],
 )
 def test_what_the_database_would_break_on_is_refused_at_the_boundary(

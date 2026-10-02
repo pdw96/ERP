@@ -329,9 +329,11 @@
         "enum": [
           "unknown_inspection",
           "unknown_settle_type",
+          "settle_type_is_not_active",
           "reason_is_missing",
           "reason_comes_with_a_failed_inspection",
           "reason_is_not_usable_at_this_gate",
+          "reason_is_not_active",
           "more_than_the_lot_holds",
           "more_than_was_rejected"
         ],

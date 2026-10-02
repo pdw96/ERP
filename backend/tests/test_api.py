@@ -255,6 +255,21 @@ def test_the_boundary_refuses_what_only_looks_empty(
     assert response.status_code == 422, response.text
 
 
+@pytest.mark.parametrize("field", ["judged_by", "supplier_lot_number"])
+def test_the_boundary_refuses_a_nul_the_database_cannot_hold(
+    client: TestClient,
+    prepared: Session,  # noqa: F811
+    field: str,
+) -> None:
+    """**PostgreSQL 의 `text` 는 NUL 을 담지 못한다**(Codex 리뷰, 조각 2). JSON 은 `\\u0000` 을
+    실어 올 수 있고 공백 검사는 그것을 값으로 본다 — 경계가 놓치면 드라이버가 넣는 자리에서
+    거부하고 부르는 쪽은 500 을 받는다."""
+    response = client.post("/inspections", json=_PAYLOAD | {field: "검사원\x001"})
+
+    assert response.status_code == 422, response.text
+    assert response.json()["detail"][0]["loc"][-1] == field, response.json()
+
+
 @pytest.mark.parametrize("literal", ["NaN", "Infinity"])
 def test_the_boundary_refuses_a_number_you_cannot_count(
     client: TestClient, literal: str
