@@ -178,23 +178,26 @@ def _standards(session: Session, material_group: str) -> dict[str, ProcessInspec
     return {row.item_code: row for row in rows}
 
 
-def _measures(standard: ProcessInspectionStandard) -> bool:
+def measures(standard: ProcessInspectionStandard) -> bool:
     """재는 항목인가 — 규격이 한쪽이라도 있으면 잰다."""
     return standard.upper_spec_limit is not None or standard.lower_spec_limit is not None
 
 
-def _within_spec(value: float, standard: ProcessInspectionStandard) -> bool:
+def within_spec(value: float, standard: ProcessInspectionStandard) -> bool:
     if standard.upper_spec_limit is not None and value > standard.upper_spec_limit:
         return False
     return not (standard.lower_spec_limit is not None and value < standard.lower_spec_limit)
 
 
-def _reason_for(session: Session, item_code: str) -> str:
+def reason_for(session: Session, item_code: str, stage: str = codes.STAGE_INCOMING) -> str:
     """그 항목의 이탈을 적을 **불합격 사유** — 지어내지 않고 기준정보에서 끌어온다.
 
     사유 코드는 이미 검사 항목을 가리키고 있다(`nonconformity_attributes`). 그
     방향을 뒤집으면 「입도가 벗어났다」에서 `IQ-PSD` 가 나온다 — 항목마다 사유를
     다시 적어 두면 목록이 두 벌이 되고, 두 벌은 갈린다.
+
+    **단계마다 쓸 수 있는 사유가 다르다** — 재검사(`app/services/retests.py`)도 같은 길로
+    그 단계의 규칙 줄에서 고른다.
     """
     reason = session.scalars(
         select(NonconformityStageRule.reason_code)
@@ -204,7 +207,7 @@ def _reason_for(session: Session, item_code: str) -> str:
             & (NonconformityAttribute.code == NonconformityStageRule.reason_code),
         )
         .where(
-            NonconformityStageRule.stage_code == codes.STAGE_INCOMING,
+            NonconformityStageRule.stage_code == stage,
             NonconformityAttribute.inspection_item_code == item_code,
             NonconformityAttribute.measure_kind == codes.MEASURED_KIND,
         )
@@ -218,10 +221,11 @@ def _reason_for(session: Session, item_code: str) -> str:
     return reason
 
 
-def _must_be_a_reason_a_person_inspects(
+def must_be_a_reason_a_person_inspects(
     session: Session,
     reason_code: str,
     standards: dict[str, ProcessInspectionStandard],
+    scope: str = "수입 기준",
 ) -> None:
     """사람이 적을 수 있는 사유는 **사람이 보는 항목의 것뿐이다** (원칙 ③).
 
@@ -240,6 +244,10 @@ def _must_be_a_reason_a_person_inspects(
     **코드를 이름으로 세지 않는다.** 「`IQ-EXP` 는 안 된다」로 적으면 같은 성질의
     사유가 느는 날 이 자리가 낡는다 — 가르는 것은 코드값이 아니라 **그 사유가
     가리키는 검사 항목이 있는가**이고, 그것은 기준정보가 이미 들고 있다.
+
+    **재검사도 이 길을 지난다** — `standards` 에 그 재검사가 보는 기준(경시변화)만 넘기고,
+    `scope` 가 메시지에서 그 기준의 이름을 바꾼다. 거절의 이름은 두 경로에서 같은 값이다
+    (ADR 0014).
     """
     attribute = session.get(NonconformityAttribute, (codes.NC_REASON, reason_code))
     if attribute is None or attribute.measure_kind != codes.COUNTED_KIND:
@@ -266,9 +274,9 @@ def _must_be_a_reason_a_person_inspects(
         raise RefusedInspection(
             Refusal.REASON_IS_NOT_INSPECTED_FOR_THIS_MATERIAL,
             f"{reason_code} 가 가리키는 항목({attribute.inspection_item_code})은"
-            " 이 자재군의 수입 기준에 없다 — 보지 않는 것으로 떨어뜨릴 수 없다",
+            f" 이 자재군의 {scope}에 없다 — 보지 않는 것으로 떨어뜨릴 수 없다",
         )
-    if _measures(standards[attribute.inspection_item_code]):
+    if measures(standards[attribute.inspection_item_code]):
         # **④ 사유가 계수라고 말해도 그 항목의 기준이 재고 있으면 재는 것이다.**
         # 「어느 표가 맞는가」를 여기서 가르지 않고 **기준을 따른다** — 판정의
         # 근거는 기준이고, 사유의 성질 칸은 그것을 가리키는 표시일 뿐이다.
@@ -284,15 +292,18 @@ def _must_be_a_reason_a_person_inspects(
         )
 
 
-def _allows_special_acceptance(session: Session, reason_code: str) -> bool:
+def allows_special_acceptance(
+    session: Session, reason_code: str, stage: str = codes.STAGE_INCOMING
+) -> bool:
+    """그 단계에서 쓸 수 있는 사유인지 묻고, 특채가 열렸는지 답한다."""
     rule = session.get(
         NonconformityStageRule,
-        (codes.NC_REASON, reason_code, codes.INSP_STAGE, codes.STAGE_INCOMING),
+        (codes.NC_REASON, reason_code, codes.INSP_STAGE, stage),
     )
     if rule is None:
         raise RefusedInspection(
             Refusal.REASON_IS_NOT_USABLE_AT_THIS_GATE,
-            f"관문 1 에서 쓸 수 있는 사유가 아니다: {reason_code}",
+            f"{stage} 에서 쓸 수 있는 사유가 아니다: {reason_code}",
         )
     return rule.special_acceptance_allowed
 
@@ -385,7 +396,7 @@ def receive(session: Session, request: IncomingInspection) -> Judged:
             " 기준을 먼저 세우지 않으면 무엇을 보고 판정하는지 표가 말하지 못한다",
         )
 
-    if not any(_measures(standard) for standard in standards.values()):
+    if not any(measures(standard) for standard in standards.values()):
         # **같은 자리의 한 겹 아래다.** 위의 가드는 「기준이 0줄」만 보므로, 세는
         # 항목(`이물` · `포장`)만 걸린 무리는 통과하고 **측정값이 한 줄도 없는
         # 합격**이 서서 로트와 입고 줄을 만든다. 결정은 위와 같다 — 재지 않은
@@ -417,7 +428,7 @@ def receive(session: Session, request: IncomingInspection) -> Judged:
             Refusal.ITEM_IS_NOT_IN_THE_STANDARD,
             f"{item.material_group} 의 수입 기준에 없는 항목을 쟀다: {', '.join(unknown)}",
         )
-    counted_items = sorted(code for code in measured if not _measures(standards[code]))
+    counted_items = sorted(code for code in measured if not measures(standards[code]))
     if counted_items:
         # **세는 항목에는 잰 값이 없다.** 그 무리의 기준에 있으므로 위의 검사는
         # 지나가고, 규격 두 칸이 다 빈 측정 줄이 만들어져
@@ -431,7 +442,7 @@ def receive(session: Session, request: IncomingInspection) -> Judged:
     missing = sorted(
         code
         for code, standard in standards.items()
-        if _measures(standard) and code not in measured
+        if measures(standard) and code not in measured
     )
     if missing:
         raise RefusedInspection(
@@ -443,7 +454,7 @@ def receive(session: Session, request: IncomingInspection) -> Judged:
     # 여럿이 벗어나면 **항목 코드 순서로 첫 하나**를 사유로 적는다. 검사 기록의
     # 사유 칸은 하나이고, 나머지 이탈은 측정값 줄에 박힌 규격에 그대로 남는다.
     out_of_spec = sorted(
-        code for code, value in measured.items() if not _within_spec(value, standards[code])
+        code for code, value in measured.items() if not within_spec(value, standards[code])
     )
 
     reason: str | None = None
@@ -459,11 +470,11 @@ def receive(session: Session, request: IncomingInspection) -> Judged:
                 f" 사유 칸은 하나라 {request.nonconformity_code} 를 함께 적을 수 없다."
                 " 측정값만 보내면 계산이 사유를 고른다",
             )
-        reason = _reason_for(session, out_of_spec[0])
+        reason = reason_for(session, out_of_spec[0])
     elif request.nonconformity_code is not None:
         # **계산이 보지 못하는 것은 사람이 적는다** — 세는 항목의 결함이다.
-        _allows_special_acceptance(session, request.nonconformity_code)
-        _must_be_a_reason_a_person_inspects(session, request.nonconformity_code, standards)
+        allows_special_acceptance(session, request.nonconformity_code)
+        must_be_a_reason_a_person_inspects(session, request.nonconformity_code, standards)
         reason = request.nonconformity_code
 
     if reason is None:
@@ -473,7 +484,7 @@ def receive(session: Session, request: IncomingInspection) -> Judged:
             )
         result = codes.JUDGMENT_PASSED
     elif request.special_acceptance:
-        if not _allows_special_acceptance(session, reason):
+        if not allows_special_acceptance(session, reason):
             raise RefusedInspection(
                 Refusal.SPECIAL_ACCEPTANCE_IS_NOT_OPEN,
                 f"특채가 열려 있지 않은 사유다: {reason}",

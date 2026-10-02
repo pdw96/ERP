@@ -1,7 +1,8 @@
-"""쓰기 엔드포인트 — 관문 1 과 구매반품.
+"""쓰기 엔드포인트 — 관문 1 · 구매반품 · 만료 재검사.
 
 **사건 하나가 요청 하나이고 트랜잭션 하나다.** 수입검사 한 건은 판정 · 로트 · 원장
-줄을, 구매반품 한 건은 문서 · 원장 줄을 한 번에 남긴다. 「검사를 적는다 · 로트를
+줄을, 구매반품 한 건은 문서 · 원장 줄을, 재검사 한 건은 판정과 (떨어지면) 폐기 줄을
+한 번에 남긴다. 「검사를 적는다 · 로트를
 만든다 · 원장에 적는다」를 셋으로 나누면 **둘까지만 성공한 상태**가 생기고, 그것이
 원칙 ⑦ 이 없애려는 것이다.
 
@@ -30,6 +31,9 @@ from app.api.schemas import (
     PurchaseReturnIn,
     PurchaseReturnOut,
     Refused,
+    RetestIn,
+    RetestOut,
+    RetestRefused,
     ReturnRefused,
     Transport,
     TransportRefused,
@@ -41,6 +45,7 @@ from app.services.incoming import (
     RefusedInspection,
     receive,
 )
+from app.services.retests import IncomingRetest, retest
 from app.services.returns import IncomingReturn, RefusedReturn, return_to_supplier
 
 # **이 API 의 판이다 — 패키지의 판과 다른 축이다.** 같은 코드가 계약을 깨지 않고
@@ -76,10 +81,11 @@ from app.services.returns import IncomingReturn, RefusedReturn, return_to_suppli
 API_VERSION = "0.1"
 
 app = FastAPI(
-    title="조기경보 ERP — 관문 1 · 구매반품",
+    title="조기경보 ERP — 관문 1 · 구매반품 · 재검사",
     summary=(
         "수입검사 한 건을 받아 판정하고, 합격이면 로트를 만든다."
         " 공급사에 돌려보낸 것을 적고, 재고 로트였으면 원장에서 뺀다."
+        " 만료된 로트를 다시 검사해, 합격이면 새 만료일을 내고 불합격이면 잔량을 버린다."
     ),
     # **창이 열려 있다는 것을 밖이 읽는 자리에 적는다** (감사 ⑯ NC-158). 밖에서
     # 보이는 것이 `info.version` 하나뿐이면 **소비자는 이 계약이 좁혀도 되는 창
@@ -92,7 +98,8 @@ app = FastAPI(
         "\n\n거절의 본문은 어느 경로에서나 `detail[]` 한 모양이다."
         " `detail[].type` 이 기계가 읽는 자리이고 이름 공간이 셋이다 —"
         " 업무 규칙의 이름(경로마다 자기 열거를 든다 — 검사는 `Refusal`,"
-        " 반품은 `ReturnRefusal`), 라우트 밖의 `Transport`, 그리고 pydantic 이"
+        " 반품은 `ReturnRefusal`, 재검사는 `RetestRefusal`), 라우트 밖의 `Transport`,"
+        " 그리고 pydantic 이"
         " 정한 이름(`missing` · `extra_forbidden` 등). 앞의 둘은 이 스펙이"
         " 열거로 들고, **그 열거에 없는 값은 셋째 무리**다."
     ),
@@ -439,7 +446,9 @@ def session_scope() -> Iterator[Session]:
         session.close()
 
 
-def _answers(refused: type[Refused] | type[ReturnRefused]) -> dict[int | str, dict[str, Any]]:
+def _answers(
+    refused: type[Refused] | type[ReturnRefused] | type[RetestRefused],
+) -> dict[int | str, dict[str, Any]]:
     """쓰기 라우트가 **실제로 내는 응답**의 선언 — 라우트마다 다른 것은 422 의 이름뿐이다.
 
     **한 벌로 둔다.** 라우트마다 손으로 적으면 하나를 고칠 때 다른 하나가 남는다 —
@@ -583,4 +592,51 @@ def post_purchase_return(
     return PurchaseReturnOut(
         purchase_return_id=returned.purchase_return_id,
         ledger_entry_id=returned.ledger_entry_id,
+    )
+
+
+@app.post(
+    "/retests",
+    response_model=RetestOut,
+    status_code=status.HTTP_201_CREATED,
+    responses=_answers(RetestRefused),
+)
+def post_retest(
+    payload: RetestIn, session: Annotated[Session, Depends(session_scope)]
+) -> RetestOut | JSONResponse:
+    """만료된 로트 하나를 다시 검사한다.
+
+    합격이면 새 만료일이 그 재검사에 박히고, 불합격이면 그 로트의 잔량 전부가 원장에 폐기출고
+    한 줄로 나간다. **어떤 갈래를 무엇이 막는지는** `app/services/retests.py` 의
+    `RetestRefusal` 이 든다 — 검사와 같은 예외(`RefusedInspection`)로 온다.
+    """
+    try:
+        retested = retest(
+            session,
+            IncomingRetest(
+                lot_id=payload.lot_id,
+                judged_by=payload.judged_by,
+                measurements=tuple(
+                    Measurement(item_code=row.item_code, value=row.value)
+                    for row in payload.measurements
+                ),
+                nonconformity_code=payload.nonconformity_code,
+            ),
+        )
+    except RefusedInspection as refused:
+        return _refusal(
+            status.HTTP_422_UNPROCESSABLE_CONTENT,
+            [{"loc": ["body"], "msg": refused.message, "type": refused.code}],
+        )
+
+    # **응답을 만들기 전에 커밋한다** — 떨어진 재검사의 폐기 줄을 묻는 지연 트리거도 여기서
+    # 돈다. 터지면 500 이고, 그것이 「저장되지 않았다」의 올바른 모양이다.
+    session.commit()
+
+    return RetestOut(
+        inspection_id=retested.inspection_id,
+        result=retested.result,
+        nonconformity_code=retested.nonconformity_code,
+        renewed_expiry_date=retested.renewed_expiry_date,
+        ledger_entry_id=retested.ledger_entry_id,
     )
