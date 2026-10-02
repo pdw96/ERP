@@ -1161,3 +1161,12 @@ PostgreSQL 16)도 초록이다(392 passed).
 | — | 꺼진 정산 구분의 거절을 껐다 | `test_a_retired_settle_type_is_named` |
 | — | 꺼진 사유의 거절을 껐다 | `test_a_retired_reason_is_named` |
 | — | 경계의 NUL 거절을 껐다 | `test_the_boundary_refuses_a_nul_the_database_cannot_hold` 둘 · `test_what_the_database_would_break_on_is_refused_at_the_boundary` 의 NUL 셋 — `nonconformity_code` 는 500 이 아니라 다른 까닭의 업무 거절(`loc` 가 `body`)로 빨갛다. 불합격 검사로 재는 자리라 사유가 경계를 지나면 그 거절이 먼저 문다 |
+
+## 거절 본문의 문장 — CodeQL 경고의 고침 (`951c6a6`)
+
+라우트가 싣는 문장을 상수(`"x"`)로 바꾼 뒤 `tests/test_api.py` · `tests/test_return_api.py` 를 돌렸다. 대조군과 같은 트리의
+`pytest` 전체(실제 PostgreSQL 16)는 초록이다. 반품 쪽 단언은 이 커밋이 더했고, 그 앞에서는 같은 어긋냄이 반품 쪽에서 초록이었다.
+
+| NC | 무엇을 어긋냈나 | 빨개진 검사 |
+|---|---|---|
+| — | 두 라우트가 `refused.message` 대신 상수를 싣게 했다 | `test_something_we_cannot_judge_comes_back_named` · `test_a_business_refusal_names_itself_in_the_same_shape` |
