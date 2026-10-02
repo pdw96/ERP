@@ -90,6 +90,8 @@
 | `055fc4e` | — | 열린 줄의 원 지적에 「심각도: 낮음」(콜론 꼴)을 적어도 낮음 게이트가 통과한다 | `audit-quality` | **닫혔다** — `_LOW` 가 콜론 꼴을 받는다(「PR #65 Codex 리뷰 2 라운드의 고침」 묶음) |
 | `5f6803a` | — | 열린 줄의 원 지적이 「심각도 낮음이 아니다」 · 「낮음 아님」이다 | `audit-quality` | 초록이 맞다 — 부정형은 낮음이 아니다(「PR #65 Codex 리뷰 3 라운드의 고침」 묶음) |
 | `6001d28` | — | 두 NC 표의 머리 줄을 바꿔도 「아직」 표 게이트의 앵커가 통과한다 | `audit-quality` | 초록이 맞다 — 겨냥이 빗나간 어긋냄이다. 파서는 머리 줄이 아니라 절 이름으로 표를 찾고, 절 이름을 바꾸는 어긋냄은 같은 묶음에서 빨갛다 |
+| `f2f39e3` | — | 원장 트리거의 로트 잠금만 `FOR UPDATE` 로 되돌려도 엇갈림 검사가 통과한다 | `audit-quality` | 초록이 맞다 — 겹친 방어. 반품 문서 트리거가 검사 줄을 먼저 잡아 같은 검사의 반품이 줄을 서므로 엇갈림 자체가 서지 않는다. 둘 다 되돌리면(같은 묶음의 7c) 빨갛다 |
+| `f2f39e3` | — | 반품 문서 트리거의 검사 잠금만 빼도 엇갈림 검사가 통과한다 | `audit-quality` | 초록이 맞다 — 겹친 방어. `FOR NO KEY UPDATE` 는 외래키의 `KEY SHARE` 와 부딪치지 않아 교착이 나지 않는다. 둘 다 되돌리면 빨갛다 |
 
 ## ⑧ 의 고침 (`03b6c1f`)
 
@@ -1000,3 +1002,95 @@ PostgreSQL 16)도 초록이다(392 passed).
 | — | 「아직 아무도 보지 않은 것」 절의 「자리(」를 「곳(」으로 바꿨다(파서가 NC 번호를 못 읽는다) | `test_a_row_still_waiting_does_not_wait_on_a_closed_nc` |
 | — | 두 NC 표의 머리 줄 `\| NC \| 무엇 \|` 을 `\| 번호 \| 무엇 \|` 으로 바꿨다 | **없다 — 통과했다** — 파서는 머리 줄이 아니라 절 이름으로 표를 찾는다. 겨냥이 빗나간 어긋냄이라 아래 줄로 다시 쟀다 |
 | — | 두 NC 표의 절 머리(`## 부적합 대장` · 「닫힌 부적합」)를 다른 이름으로 바꿨다 | `test_an_nc_waiting_for_a_reaudit_has_a_row_that_waits_for_it` · `test_a_row_still_waiting_does_not_wait_on_a_closed_nc` 와 NC 표를 읽는 게이트 셋 |
+
+## 3단계 조각 1 — 원장 트리거 (`f925faa`)
+
+구매반품이 원장에 닿는 조각의 트리거 셋(`app/db/ledger_guards.py`)과 마이그레이션 `85d4ad8b3f1f`, 그리고 반품 줄의 짝
+외래키. 하나씩 어긋낸 뒤 그것을 물어야 할 검사만 돌렸다(`tests/test_purchase_returns.py` · `tests/test_migrations.py`). 어긋냄
+없이 돌린 대조군은 초록이고, 같은 트리의 `pytest` 전체(실제 PostgreSQL 16)도 초록이다.
+
+| NC | 무엇을 어긋냈나 | 빨개진 검사 |
+|---|---|---|
+| 70 | 원장 트리거가 로트 줄을 잠그지 않게 했다(`FOR UPDATE` 를 뺐다) | `test_two_returns_at_once_cannot_both_take_the_last_of_a_lot` |
+| — | 반품 문서 트리거가 검사 줄을 잠그지 않게 했다 | `test_two_failed_returns_at_once_cannot_exceed_what_came` |
+| 70 | 원장의 합을 `numeric` 이 아니라 `double precision` 으로 셌다 | **없다 — 통과했다** — 검사가 쓴 수(33.3 · 66.7 · 400)는 부동소수점 합이 공교롭게 0 보다 크게 남는다. 겨냥이 빗나간 검사라 수를 고쳐 아래 묶음에서 다시 쟀다 |
+| 70 | 「입고 줄의 수량 = 로트 수량」 비교를 `FALSE` 로 바꿨다 | `test_a_receipt_carries_the_lots_quantity` |
+| 70 | 원장 트리거의 고치기 · 지우기 거부를 껐다 | `test_a_ledger_line_is_never_rewritten` |
+| 70 | 로트 수량 트리거를 걸지 않았다(모델 쪽 `install()` 에서 뺐다) | `test_a_lots_quantity_stays_once_the_ledger_has_spoken` |
+| 70 | 잔량의 하한을 0 에서 −1,000,000 으로 내렸다 | `test_a_return_cannot_take_more_than_is_left` |
+| — | 총량 영향을 셀 수 없는 유형의 거부를 껐다 | `test_a_type_whose_direction_is_unknown_is_not_counted` |
+| — | 불합격분 반품 합의 상한을 받은 수량의 1000 배로 늘렸다 | `test_failed_returns_add_up_to_no_more_than_what_came` |
+| — | 반품 문서 트리거의 고치기 · 지우기 거부를 껐다 | `test_a_return_document_is_never_rewritten` |
+| — | 반품 문서 트리거가 셀 수 없는 수를 건너뛰지 않게 했다 | `test_a_return_sends_back_something_countable` — `nan` · `inf` 가 CHECK 이름이 아니라 「돌려보낸 합이」로 거부된다 |
+| — | 마이그레이션에 굳힌 원장 함수의 메시지 한 글자(「있는 것보다」의 띄어쓰기)를 바꿨다 | `test_the_migration_builds_the_same_tables_as_the_models` |
+| — | 마이그레이션이 로트 수량 트리거를 걸지 않게 했다 | `test_the_migration_builds_the_same_tables_as_the_models` |
+| 70 | 올릴 때의 가드(입고 줄과 로트 수량이 갈린 로트)를 껐다 | `test_upgrading_stops_when_a_receipt_disagrees_with_its_lot` |
+| — | 내릴 때의 가드 문턱을 반품 0 건에서 100 건으로 올렸다 | `test_downgrade_counts_the_returns_that_would_vanish` |
+| — | 「구매반품출고」 설명 고침이 사람이 고친 글자도 덮게 했다 | `test_the_return_type_description_is_corrected_only_where_the_seed_left_it` — `edited-by-a-person` 쪽 |
+| — | 반품 줄의 짝 외래키에서 수량을 뺐다(모델) | `test_a_return_line_says_what_its_document_says` — `quantity` 쪽 |
+
+## 3단계 조각 1 — 빗나간 겨냥을 고친 뒤 (`e810965`)
+
+위 묶음에서 초록이던 어긋냄 하나를, 부동소수점 합이 실제로 음수가 되는 수(0.1 · 0.3 · 499.6)로 고친 검사에 대고 다시
+쟀다. 어긋냄 없이 돌린 대조군은 초록이다.
+
+| NC | 무엇을 어긋냈나 | 빨개진 검사 |
+|---|---|---|
+| 70 | 원장의 합을 `numeric` 이 아니라 `double precision` 으로 셌다 | `test_returns_can_empty_a_lot_to_the_last_gram` |
+
+## 조각 1 리뷰 라운드 — Codex 리뷰 · 감사 ㉟ 의 고침 (`f2f39e3`)
+
+이번 라운드가 더한 지킴(트리거 넷 · 쌍 외래키 · 사유의 단계 외래키 · 마이그레이션 가드)을 하나씩 어긋낸 뒤 그것을 물어야 할 검사만
+돌렸다(`tests/test_purchase_returns.py` · `tests/test_migrations.py`). 어긋냄 없이 돌린 대조군은 초록이고, 같은 트리의 `pytest`
+전체(실제 PostgreSQL 16)도 초록이다. 잠금은 둘 중 무엇이 교착을 막는지 가르려고 셋으로 나눠 쟀다.
+
+| NC | 무엇을 어긋냈나 | 빨개진 검사 |
+|---|---|---|
+| 222 | 반품 문서의 지연 트리거(문서 → 원장 줄)를 걸지 않았다 | `test_a_lot_return_cannot_stand_without_its_ledger_line` |
+| 223 | 유형의 방향을 고정하는 트리거를 걸지 않았다 | `test_a_types_direction_is_fixed_once_the_ledger_uses_it` |
+| 223 | 반품이 가리키는 검사를 고정하는 트리거를 걸지 않았다 | `test_a_returned_inspection_stays_as_it_was` — 다섯 칸 모두 |
+| — | 반품 시각과 판정 시각의 비교를 껐다 | `test_nothing_goes_back_before_it_was_judged` |
+| — | 반품 사유의 외래키를 공통코드로 되돌렸다(모델) | `test_a_lot_return_uses_a_reason_the_incoming_stage_knows` |
+| 225 | 로트 · 검사 수량의 쌍 외래키를 뺐다(모델) | `test_a_lot_carries_its_inspections_quantity` · `test_an_inspection_that_made_a_lot_keeps_its_quantity` |
+| — | 원장 트리거의 로트 잠금만 `FOR UPDATE` 로 되돌렸다(7a) | **없다 — 통과했다** — 겹친 방어. 반품 문서 트리거의 검사 잠금이 같은 검사의 반품을 줄 세워 엇갈림이 서지 않는다 |
+| — | 반품 문서 트리거의 검사 잠금만 뺐다(7b) | **없다 — 통과했다** — 겹친 방어. `FOR NO KEY UPDATE` 가 외래키의 `KEY SHARE` 와 부딪치지 않는다 |
+| — | 둘 다 처음 모양으로 되돌렸다 — 로트 `FOR UPDATE`, 검사 잠금 없음(7c) | `test_two_returns_written_document_first_do_not_deadlock` — 교착으로 둘째가 끊긴다 |
+| 225 | 올릴 때의 가드(로트 수량 ≠ 검사 수량)를 껐다 | `test_upgrading_stops_when_a_lot_disagrees_with_its_inspection` |
+| — | 마이그레이션이 유형 방향 고정 트리거를 걸지 않게 했다 | `test_the_migration_builds_the_same_tables_as_the_models` |
+
+
+## 조각 1 리뷰 2 라운드 — Codex 리뷰의 고침 (`cab7fc7`)
+
+2 라운드가 더한 지킴 넷을 하나씩 어긋낸 뒤 그것을 물어야 할 검사만 돌렸다(`tests/test_purchase_returns.py`). 어긋냄 없이 돌린
+대조군은 초록이고, 같은 트리의 `pytest` 전체(실제 PostgreSQL 16)도 초록이다.
+
+| NC | 무엇을 어긋냈나 | 빨개진 검사 |
+|---|---|---|
+| — | 재고 로트 반품의 입고 시각 비교를 껐다 | `test_nothing_goes_back_before_it_came_in` |
+| 223 | 원장 트리거가 유형 속성 줄을 `FOR SHARE` 없이 읽게 했다 | `test_a_direction_change_waits_for_the_first_line_of_its_type` — 둘째의 방향 변경이 커밋되고 잔량이 510 이 된다 |
+| — | `lot_id` 인덱스를 뺐다(모델) | `test_the_balance_is_looked_up_by_lot` |
+| 223 | 검사 고정에서 불합격 사유를 뺐다 | `test_a_returned_inspection_stays_as_it_was` — `reason` 쪽만 |
+
+## 조각 1 리뷰 3 라운드 — Codex 리뷰의 고침 (`0a48994`)
+
+3 라운드가 더한 지킴 넷을 하나씩 어긋낸 뒤 그것을 물어야 할 검사만 돌렸다. 어긋냄 없이 돌린 대조군은 초록이고, 같은 트리의
+`pytest` 전체(실제 PostgreSQL 16)도 초록이다. 내릴 때 잠금과 방향 가드의 검사는 고침보다 먼저 써서, 고치기 전의 코드에서
+빨간 것을 봤다(재현).
+
+| NC | 무엇을 어긋냈나 | 빨개진 검사 |
+|---|---|---|
+| 223 | 검사 고정을 줄 통째에서 옛 칸 목록(수량 · 공급사 · 품목 · 시각 · 도착일)으로 되돌렸다 | `test_a_returned_inspection_stays_as_it_was` — `reason` · `supplier_lot` · `judged_by` 셋 |
+| — | 반품 문서의 `inspection_id` 인덱스를 뺐다(모델) | `test_failed_returns_are_looked_up_by_inspection` |
+| — | 올릴 때 원장 유형의 방향 가드를 껐다 | `test_upgrading_stops_when_a_ledger_type_runs_the_wrong_way` |
+| — | 내릴 때 반품 표 잠금을 뺐다 | `test_downgrade_does_not_miss_a_return_still_being_written` — 가드가 0 을 보고 지나간 뒤 옛 CHECK 를 다시 세우다 터진다 |
+
+## 조각 1 리뷰 4 라운드 — Codex 리뷰의 고침 (`9523f7f`)
+
+4 라운드가 더한 지킴 셋을 하나씩 어긋낸 뒤 그것을 물어야 할 검사만 돌렸다. 어긋냄 없이 돌린 대조군은 초록이고, 같은 트리의
+`pytest` 전체(실제 PostgreSQL 16)도 초록이다. 세 검사 모두 고침보다 먼저 써서, 고치기 전의 코드에서 빨간 것을 봤다(재현).
+
+| NC | 무엇을 어긋냈나 | 빨개진 검사 |
+|---|---|---|
+| — | 잔량 트리거의 방향 비교(`codes.LEDGER_EFFECTS`)를 껐다 | `test_a_type_running_the_wrong_way_takes_no_line` — 증가 · 양방향 둘 다 |
+| — | 잔량 트리거의 나가는 줄 시각 비교를 껐다 | `test_a_receipt_written_later_does_not_launder_an_earlier_return` — 문서 쪽 비교만 무는 `test_nothing_goes_back_before_it_came_in` 은 초록으로 남는다(겹친 방어가 아니라 입고 줄이 있을 때의 자리) |
+| — | 올릴 때 방향 가드 앞의 `txn_type_attributes` 잠금을 뺐다 | `test_upgrading_does_not_check_a_direction_still_being_changed` — 올리기가 고쳐진 방향째 지나간다 |

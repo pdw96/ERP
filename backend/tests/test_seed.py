@@ -122,30 +122,33 @@ def test_the_groups_in_the_database_match_the_ones_the_program_calls(
     assert planted == set(codes.GROUP_CODES)
 
 
-def test_the_transaction_type_the_program_names_is_in_the_seed(blank: Engine) -> None:
+def test_the_transaction_types_the_program_names_are_in_the_seed(blank: Engine) -> None:
     """**프로그램이 이름으로 부르는 수불유형이 시드에 있어야 한다.**
 
-    수불유형 열둘의 값은 시드에만 있고 `codes.py` 에는 **부르는 쪽이 있는 하나만**
-    적혀 있다(`TXN_PURCHASE_RECEIPT`). 한 벌 반이라 갈릴 수 있는 자리이므로 —
-    시드에서 그 줄의 이름을 바꾸면 원장의 CHECK 가 아무 줄도 받지 않게 되고,
+    수불유형 열둘의 값은 시드에만 있고 `codes.py` 에는 **부르는 쪽이 있는 것만**
+    적혀 있다(`LEDGER_EFFECTS`). 한 벌 반이라 갈릴 수 있는 자리이므로 —
+    시드에서 그 줄의 이름을 바꾸면 원장의 CHECK 가 그 줄을 받지 않게 되고,
     그것은 **아무도 터지지 않는 고장**이다 — 여기서 둘을 견준다.
 
-    **속성 줄까지 본다.** 코드만 있고 속성이 없으면 원장이 가리킬 수 없다.
+    **속성 줄까지 본다.** 코드만 있고 속성이 없으면 원장이 가리킬 수 없고, 방향이
+    틀리면 잔량 트리거가 그 유형의 첫 줄을 막는다 — 반품을 하나도 낼 수 없다.
     """
     seed_module.seed(blank)
 
     with blank.connect() as conn:
-        planted = conn.execute(
-            text(
-                "SELECT a.total_effect FROM txn_type_attributes AS a"
-                " JOIN common_codes AS c"
-                " ON c.group_code = a.group_code AND c.code = a.code"
-                " WHERE a.code = :code"
-            ),
-            {"code": codes.TXN_PURCHASE_RECEIPT},
-        ).all()
+        planted = dict(
+            conn.execute(
+                text(
+                    "SELECT a.code, a.total_effect FROM txn_type_attributes AS a"
+                    " JOIN common_codes AS c"
+                    " ON c.group_code = a.group_code AND c.code = a.code"
+                    " WHERE a.code = ANY(:codes)"
+                ),
+                {"codes": list(codes.LEDGER_TXN_TYPES)},
+            ).all()
+        )
 
-    assert planted == [(codes.EFFECT_INCREASE,)], planted
+    assert planted == codes.LEDGER_EFFECTS, planted
 
 
 def test_every_measured_reason_points_at_an_item_that_exists(blank: Engine) -> None:
@@ -217,7 +220,7 @@ def test_every_sigma_is_left_undecided(blank: Engine) -> None:
 def test_no_lot_is_planted(blank: Engine) -> None:
     """로트는 거래 표다 — **비어 있는 것이 정상 상태**다.
 
-    로트가 생기는 것은 IQC 합격이고, 그것은 2단계의 일이다.
+    로트가 생기는 것은 IQC 합격이고, 그 길은 2단계가 세웠다.
     """
     seed_module.seed(blank)
 

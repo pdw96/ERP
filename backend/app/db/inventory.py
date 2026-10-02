@@ -29,7 +29,8 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core import codes
 from app.db.base import Base
-from app.db.constraints import is_finite, is_present
+from app.db.constraints import code_reference, is_finite, is_present
+from app.db.ledger_guards import install as install_ledger_guards
 from app.db.master import Item
 
 
@@ -156,6 +157,15 @@ class Lot(Base):
             ["inspections.id", "inspections.item_id"],
             name="fk_lot_inspection_item",
         ),
+        # **수량도 쌍으로 묶는다**(감사 ㉟ NC-225). 검사 한 건은 로트 하나를 통째로
+        # 만든다 — 일부만 받는 일은 없고, 받지 않은 것은 반품 문서가 든다(저장소 소유자가
+        # 정했다, 2026-10-02). 같은 수량이 검사와 로트에 나뉘어 살므로 쌍으로 가리켜 갈릴 수
+        # 없게 한다. 검사를 모르는 로트(기초재고)는 `inspection_id` 가 비어 빠진다.
+        ForeignKeyConstraint(
+            ["inspection_id", "quantity"],
+            ["inspections.id", "inspections.quantity"],
+            name="fk_lot_inspection_quantity",
+        ),
         # **주석은 규칙이 아니다.** 처음에는 「자사 로트가 검사를 가리키게 되는 날
         # 이 자리를 다시 봐야 한다」고 적어 두었는데, 적어 두기만 하고 강제하지
         # 않는 규칙을 만들지 않는 것이 이 저장소의 규칙이다 — 자사 로트는
@@ -248,6 +258,145 @@ class Lot(Base):
     item: Mapped[Item] = relationship(foreign_keys=[item_id, item_type])
 
 
+class PurchaseReturn(Base):
+    """구매반품 문서 — **무엇을 얼마나 왜 공급사에 돌려보냈나.**
+
+    돌려보내는 것은 둘 중 하나다 —
+
+    - **재고가 된 로트** — 원장에 구매반품출고 한 줄이 함께 나고 그 로트의 잔량이 준다
+    - **불합격해 재고가 된 적 없는 입고분** — 로트가 없으므로(원칙 ①) 원장 줄도 없다
+
+    ### 언제나 검사를 가리킨다
+
+    초안(`docs/schema-3단계.md`)은 「로트와 검사 가운데 정확히 하나」였다. 지으면서
+    **검사를 언제나 가리키는 쪽**으로 갈랐다 — 재고 로트도 자기를 만든 검사를 알고,
+    그러면 공급사 · 품목이 **검사 쪽에 한 번만** 산다(원칙 ⑥). 반품 문서에 공급사 칸을
+    따로 두면 「남의 공급사에게 반품했다」는 줄이 설 수 있고, 그것을 막는 쌍을 또 세워야
+    한다. 가리키면 갈릴 칸이 없다.
+
+    대가 — **검사를 모르는 로트(기초재고)는 반품할 수 없다.** 그런 로트를 만드는 쓰기
+    경로가 아직 없고(전기이월은 범위 밖이다), 그 경로가 서는 날 이 제약을 함께 본다.
+
+    ### 판정을 쌍으로 들고 로트 유무를 거기 묶는다
+
+    로트가 판정을 쌍으로 가리키는 것과 같은 방식이다(`lots.inspection_result`).
+    「불합격이면 로트가 없고, 합격 · 특채면 로트가 있다」를 이 줄만 보고 CHECK 가 건다.
+
+    ### 고치지 않는다
+
+    반품은 일어난 일이다(원칙 ⑦). 트리거가 고치기와 지우기를 거부한다 — 고칠 수 있으면
+    원장의 반품 줄과 갈리고, 지울 수 있으면 공급사에게 간 물건이 장부에서 돌아온다.
+    """
+
+    __tablename__ = "purchase_returns"
+    __table_args__ = (
+        # **판정과 쌍으로.** 검사 쪽 판정이 바뀌면 가리키던 짝이 사라져 그 수정이
+        # 막힌다 — 로트가 판정을 가리키는 것과 같은 자리다.
+        ForeignKeyConstraint(
+            ["inspection_id", "inspection_result"],
+            ["inspections.id", "inspections.result"],
+            name="fk_purchase_return_inspection",
+        ),
+        # **그 로트를 만든 검사여야 한다.** 따로 가리키면 둘 다 실재한다는 것까지만
+        # 증명되고, 남의 검사를 들고 그 공급사에게 반품한 줄이 선다.
+        ForeignKeyConstraint(
+            ["lot_id", "inspection_id"],
+            ["lots.id", "lots.inspection_id"],
+            name="fk_purchase_return_lot",
+        ),
+        # **불합격이면 로트가 없고, 아니면 있다.** 위의 쌍 외래키는 `lot_id` 가 비면
+        # 통째로 건너뛰므로 그 빔이 판정과 묶여 있어야 한다 — 합격 검사를 들고 로트를
+        # 비우면 재고에서 빠지지 않는 반품이 선다.
+        CheckConstraint(
+            f"(lot_id IS NULL) = (inspection_result = '{codes.JUDGMENT_FAILED}')",
+            name="ck_purchase_return_lot_unless_failed",
+        ),
+        *code_reference(
+            group_column="settle_type_group",
+            code_column="settle_type",
+            group_code=codes.SETTLE_TYPE,
+            name="purchase_return_settle_type",
+        ),
+        # **사유는 재고 로트를 돌려보낼 때만 적는다.** 불합격분은 그 검사가 이미
+        # 사유를 들고 있다 — 다시 적으면 같은 사실이 두 곳에 산다.
+        #
+        # **그 단계에서 쓸 수 있는 사유만**(Codex 리뷰). 공통코드를 가리키면 「그 코드가
+        # 있다」까지만 증명되어, 사 온 자재를 완제품 접착력 불량으로 돌려보낸 기록이 선다.
+        # 검사 기록이 `(사유 × 단계)` 로 규칙 표를 가리키는 것과 같은 방식이고, 단계는
+        # 반품이 가리키는 검사의 단계(IQC)로 못박는다.
+        ForeignKeyConstraint(
+            ["nonconformity_group", "nonconformity_code", "reason_stage_group", "reason_stage"],
+            [
+                "nonconformity_stage_rules.reason_group",
+                "nonconformity_stage_rules.reason_code",
+                "nonconformity_stage_rules.stage_group",
+                "nonconformity_stage_rules.stage_code",
+            ],
+            name="fk_purchase_return_reason",
+        ),
+        CheckConstraint(
+            f"nonconformity_group = '{codes.NC_REASON}'", name="ck_purchase_return_reason_group"
+        ),
+        CheckConstraint(
+            f"reason_stage_group = '{codes.INSP_STAGE}'"
+            f" AND reason_stage = '{codes.STAGE_INCOMING}'",
+            name="ck_purchase_return_reason_stage",
+        ),
+        CheckConstraint(
+            "(lot_id IS NULL) = (nonconformity_code IS NULL)",
+            name="ck_purchase_return_reason_only_for_a_lot",
+        ),
+        # **0 은 반품이 아니다.** 원장 줄은 0 을 받지만(재고구분 대체처럼 양이 없는
+        # 사실이 있다) 돌려보낸 것이 없는 반품 문서는 사건이 아니다.
+        CheckConstraint(
+            f"quantity > 0 AND {is_finite('quantity')}", name="ck_purchase_return_quantity"
+        ),
+        CheckConstraint(
+            is_present("returned_by"), name="ck_purchase_return_returned_by_is_present"
+        ),
+        # **불합격분의 합을 세는 자리.** 트리거가 그 검사 줄을 잠근 채 같은 검사의 반품을
+        # 합하므로 `inspection_id` 로 찾을 길이 있어야 한다 — 없으면 반품이 쌓일수록 표를 훑으며
+        # 잠금을 쥔다(Codex 리뷰 3 라운드). 외래키 칸에 인덱스는 저절로 서지 않는다.
+        Index("ix_purchase_return_inspection", "inspection_id"),
+        # `id` 가 이미 기본키라 행을 좁히지 않는다 — **원장의 반품 줄이 가리킬 상대**다.
+        # 같은 로트 · 같은 수량 · 같은 시각을 함께 가리키면 문서와 원장 줄이 갈릴 수 없다.
+        UniqueConstraint(
+            "id", "lot_id", "quantity", "returned_at", name="uq_purchase_return_ledger_match"
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+
+    # **언제나 찬다.** 공급사와 품목은 여기서 따라간다.
+    inspection_id: Mapped[int] = mapped_column(Integer)
+    # **값을 나르는 칸이 아니라 외래키의 자리다** — `lots.inspection_result` 와 같다.
+    inspection_result: Mapped[str] = mapped_column(String(10))
+    # 재고가 된 것을 돌려보낼 때만 찬다.
+    lot_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+
+    settle_type: Mapped[str] = mapped_column(String(10))
+    settle_type_group: Mapped[str] = mapped_column(
+        String(20), default=codes.SETTLE_TYPE, server_default=codes.SETTLE_TYPE
+    )
+
+    nonconformity_code: Mapped[str | None] = mapped_column(String(30), nullable=True)
+    nonconformity_group: Mapped[str] = mapped_column(
+        String(20), default=codes.NC_REASON, server_default=codes.NC_REASON
+    )
+    # 사유가 쓰일 수 있는 단계 — 값이 아니라 위의 외래키의 **자리**다(`ck_…_reason_stage`).
+    reason_stage: Mapped[str] = mapped_column(
+        String(30), default=codes.STAGE_INCOMING, server_default=codes.STAGE_INCOMING
+    )
+    reason_stage_group: Mapped[str] = mapped_column(
+        String(20), default=codes.INSP_STAGE, server_default=codes.INSP_STAGE
+    )
+
+    quantity: Mapped[float] = mapped_column(Float)
+    returned_at: Mapped[datetime] = mapped_column(DateTime)
+    # **낸 사람.** 판정자와 같이 사용자 표 없이 식별 칸 하나로 적는다.
+    returned_by: Mapped[str] = mapped_column(String(50))
+
+
 class StockLedgerEntry(Base):
     """수불 원장 한 줄 — **로트가 생기고 움직인 사실.**
 
@@ -270,12 +419,19 @@ class StockLedgerEntry(Base):
     문서도 없는 유형이 원장에 서고, 그러면 잔량을 세는 쪽이 **그 줄을 더해야
     하는지 빼야 하는지 모른다.** 속성 줄을 가리키면 그 한 겹이 더 막힌다.
 
-    ### 이 조각의 원장에 나는 줄은 구매입고 하나다
+    ### 원장에 나는 줄은 구매입고와 구매반품출고다
 
-    합격이 로트를 만들고 그 자리에 입고 한 줄이 남는다. 나머지 열한 유형은 내는
-    쪽이 3~8단계에 있으므로, 받아 두면 **근거 문서가 없는 줄**이 서고 화면에서는
-    실제로 일어난 일처럼 보인다. 그 유형을 내는 조각이 설 때 CHECK 가 함께
-    넓어진다.
+    합격이 로트를 만들고 그 자리에 입고 한 줄이 남는다. 공급사에 돌려보낸 재고는
+    반품 문서와 함께 반품 한 줄로 빠진다. 나머지 유형은 내는 쪽이 아직 없으므로,
+    받아 두면 **근거 문서가 없는 줄**이 서고 화면에서는 실제로 일어난 일처럼 보인다.
+    그 유형을 내는 조각이 설 때 CHECK 가 함께 넓어진다.
+
+    ### 잔량은 트리거가 지킨다
+
+    「한 로트의 줄을 합한 잔량이 0 밑으로 내려가지 않는다」와 「입고 줄의 수량은 로트
+    수량과 같다」는 다른 줄 · 다른 표를 보는 규칙이라 CHECK 로 적을 수 없다. 트리거가
+    건다 — `app/db/ledger_guards.py`, ADR 0013. 같은 트리거가 줄을 고치거나 지우는 것을
+    거부한다: 고칠 수 있으면 잔량 규칙을 그 길로 우회한다.
 
     > **이 줄이 가리키는 검사는 그 로트를 만든 검사다.** 표가 설 때는 로트가
     > 검사를 몰라 묶을 수 없었고 미결로 들어 두었던 자리이며, 쓰기 경로가
@@ -304,10 +460,28 @@ class StockLedgerEntry(Base):
         CheckConstraint(
             f"txn_type_group = '{codes.TXN_TYPE}'", name="ck_stock_ledger_entry_txn_type_group"
         ),
-        # 이 조각이 내는 유형은 하나다. 넓히는 것은 마이그레이션이다.
+        # 근거 문서가 선 유형만 받는다. 넓히는 것은 마이그레이션이다.
         CheckConstraint(
-            f"txn_type = '{codes.TXN_PURCHASE_RECEIPT}'",
-            name="ck_stock_ledger_entry_is_a_purchase_receipt",
+            f"txn_type IN ({_quoted(codes.LEDGER_TXN_TYPES)})",
+            name="ck_stock_ledger_entry_txn_type_has_a_source",
+        ),
+        # **반품 줄은 자기 문서를 가리킨다 — 같은 로트 · 같은 수량 · 같은 시각까지.**
+        # 문서만 가리키면 문서는 100 을 돌려보냈는데 원장은 50 을 빼는 줄이 선다.
+        ForeignKeyConstraint(
+            ["purchase_return_id", "lot_id", "quantity", "occurred_at"],
+            [
+                "purchase_returns.id",
+                "purchase_returns.lot_id",
+                "purchase_returns.quantity",
+                "purchase_returns.returned_at",
+            ],
+            name="fk_stock_ledger_entry_purchase_return",
+        ),
+        # **양방향이다.** 반품 줄인데 문서가 비면 위의 외래키가 통째로 건너뛰어지고,
+        # 반품이 아닌데 문서가 차면 입고 줄이 반품의 근거를 들고 있다.
+        CheckConstraint(
+            f"(txn_type = '{codes.TXN_PURCHASE_RETURN}') = (purchase_return_id IS NOT NULL)",
+            name="ck_stock_ledger_entry_return_names_its_document",
         ),
         # `NaN >= 0` 이 참이라 하한만으로는 막지 못한다. 한 줄이 들어오면 이후의
         # **모든 잔량 합계가 `NaN`** 이 되고 비교가 전부 거짓이라 재고가 조용히
@@ -328,6 +502,19 @@ class StockLedgerEntry(Base):
             unique=True,
             postgresql_where=text(f"txn_type = '{codes.TXN_PURCHASE_RECEIPT}'"),
         ),
+        # **잔량을 세는 자리.** 트리거가 줄마다 그 로트의 줄을 합하므로 `lot_id` 로 찾을
+        # 길이 있어야 한다 — 위의 부분 유일 인덱스는 입고 줄만 담아 반품 줄을 함께 세는 합에
+        # 쓰이지 못하고, PostgreSQL 은 외래키 칸에 인덱스를 저절로 두지 않는다. 없으면 줄이
+        # 늘수록 넣을 때마다 표 전체를 훑고 그동안 로트 잠금을 쥔다(Codex 리뷰 2 라운드).
+        Index("ix_stock_ledger_entry_lot", "lot_id"),
+        # **반품 문서 하나에 원장 줄은 하나다.** 둘이 서면 한 번 돌려보낸 것을 두 번
+        # 뺀다.
+        Index(
+            "uq_stock_ledger_entry_one_line_per_return",
+            "purchase_return_id",
+            unique=True,
+            postgresql_where=text("purchase_return_id IS NOT NULL"),
+        ),
     )
 
     id: Mapped[int] = mapped_column(primary_key=True)
@@ -342,7 +529,14 @@ class StockLedgerEntry(Base):
     quantity: Mapped[float] = mapped_column(Float)
     occurred_at: Mapped[datetime] = mapped_column(DateTime)
 
-    # **입고 줄은 자기를 만든 검사를 가리킨다.** 이 조각의 줄은 전부 판정에서
-    # 나오므로 비어 있을 수 없다 — 비워 두면 근거 없는 입고가 선다. 판정에서
-    # 나지 않는 줄(전기이월 · 생산입고)이 서는 날 함께 넓어진다.
+    # **그 로트를 만든 검사를 가리킨다.** 입고 줄에는 그것이 근거이고, 반품 줄에는
+    # 「어느 판정으로 들어온 물건을 돌려보냈는가」다. 반품은 검사를 아는 로트만
+    # 하므로(`PurchaseReturn`) 비어 있을 수 없다 — 판정에서 나지 않은 로트의
+    # 줄(전기이월 · 생산입고 · 그 로트의 폐기)이 서는 날 함께 넓어진다.
     inspection_id: Mapped[int] = mapped_column(Integer)
+
+    # 반품 줄에서만 찬다 — 위의 양방향 CHECK 가 그것을 건다.
+    purchase_return_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+
+
+install_ledger_guards(ledger=StockLedgerEntry.__table__, returns=PurchaseReturn.__table__)

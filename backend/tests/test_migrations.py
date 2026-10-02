@@ -16,6 +16,8 @@
 import os
 import subprocess
 import sys
+import threading
+import time
 from collections.abc import Iterator
 from contextlib import contextmanager
 from datetime import date
@@ -159,6 +161,41 @@ def _indexes(engine: Engine, schema: str) -> dict[tuple[str, str], str]:
     }
 
 
+def _routines(engine: Engine, schema: str) -> dict[str, str]:
+    """그 스키마의 함수 전부 — **본문까지.**
+
+    트리거가 부르는 함수는 메타데이터에 없다. 그래서 칸 · 제약 · 인덱스를 견주는 것만으로는
+    모델 쪽(`app/db/ledger_guards.py`)과 마이그레이션 쪽이 다른 본문을 들고 있어도 통과한다
+    (ADR 0013 「결과」). `pg_get_functiondef` 는 저장된 본문을 공백까지 그대로 돌려주므로
+    **이 비교는 글자를 견준다** — 제약과 달리 정규화가 없다.
+    """
+    sql = text(
+        "SELECT p.proname, pg_get_functiondef(p.oid)"
+        "  FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace"
+        " WHERE n.nspname = :schema"
+    )
+    with engine.connect() as conn:
+        rows = conn.execute(sql, {"schema": schema}).all()
+    return {str(row[0]): str(row[1]).replace(f"{schema}.", "") for row in rows}
+
+
+def _triggers(engine: Engine, schema: str) -> dict[tuple[str, str], str]:
+    """그 스키마의 트리거 전부 — 어느 표에 · 언제 · 무엇을 부르는가.
+
+    외래키가 만드는 내부 트리거(`tgisinternal`)는 뺀다 — 그것은 제약 쪽에서 이미 견준다.
+    """
+    sql = text(
+        "SELECT c.relname, t.tgname, pg_get_triggerdef(t.oid)"
+        "  FROM pg_trigger t"
+        "  JOIN pg_class c ON c.oid = t.tgrelid"
+        "  JOIN pg_namespace n ON n.oid = c.relnamespace"
+        " WHERE n.nspname = :schema AND NOT t.tgisinternal"
+    )
+    with engine.connect() as conn:
+        rows = conn.execute(sql, {"schema": schema}).all()
+    return {(str(row[0]), str(row[1])): str(row[2]).replace(f"{schema}.", "") for row in rows}
+
+
 @contextmanager
 def _schema(engine: Engine, name: str) -> Iterator[None]:
     """빈 스키마 하나를 만들고 쓰고 지운다."""
@@ -225,6 +262,13 @@ def test_the_migration_builds_the_same_tables_as_the_models(engine: Engine) -> N
 
         assert _constraints(engine, "from_migration") == _constraints(engine, "from_models")
         assert _indexes(engine, "from_migration") == _indexes(engine, "from_models")
+
+        # **메타데이터 밖의 것** — 트리거와 그 함수(ADR 0013). 비어 있는 채로 같으면 아무것도
+        # 견주지 않은 것이므로 있다는 것부터 본다.
+        migrated_triggers = _triggers(engine, "from_migration")
+        assert migrated_triggers, "트리거가 하나도 없다 — 이 비교가 아무것도 견주지 않는다"
+        assert migrated_triggers == _triggers(engine, "from_models")
+        assert _routines(engine, "from_migration") == _routines(engine, "from_models")
 
 
 def test_downgrade_takes_every_table_back_out(engine: Engine) -> None:
@@ -402,7 +446,7 @@ def _incoming_standards(engine: Engine) -> set[tuple[object, ...]]:
     배정만 견주면 픽스처가 옛 시드와 달라도 초록이 뜬다. 실제로 그랬다 —
     `_BEFORE_MATERIAL_GROUP` 이 `time_variant` 를 적지 않아 여덟 줄이 전부
     `FALSE` 로 섰는데 아무도 잡지 않았다. 만료 재검사가 보는 유일한 잣대라
-    2단계에 그것이 들어오면 **한 번도 존재한 적 없는 상태 위에서 초록이 뜬다.**
+    2단계가 그것을 읽게 되면서 **한 번도 존재한 적 없는 상태 위에서 초록이 뜬다.**
 
     두 길의 값이 같아야 하는 이유는 마이그레이션이 옛 줄을 **옮기기** 때문이다 —
     지우고 다시 심지 않으므로 옛 시드의 값이 그대로 따라온다.
@@ -1763,3 +1807,272 @@ def test_upgrading_says_which_standard_holds_a_unit_that_only_looks_like_one(
 
         with pytest.raises(Exception, match="단위가 비어 보이는데 비어 있지 않다"):
             command.upgrade(config, "head")
+
+
+# ── 구매반품이 원장에 닿는다 — `85d4ad8b3f1f` ─────────────────────────────
+
+
+def test_upgrading_stops_when_a_receipt_disagrees_with_its_lot(engine: Engine) -> None:
+    """**조이기 전에 묻는다** — 입고 줄과 로트 수량이 이미 갈린 로트를 이름으로 말한다.
+
+    앞 스키마는 둘을 묶지 않았으므로(NC-70) 그런 로트가 실재할 수 있다. 트리거를 그대로
+    걸면 그 로트는 갈린 채로 남고, 다음 반품부터 잔량이 어느 쪽 수에서 출발하는지
+    아무도 모른다.
+    """
+    schema = "purchase_return_receipt_guard"
+    with _schema(engine, schema):
+        config = _upgrade_with(
+            engine,
+            schema,
+            "e84fbec436c0",
+            _WITH_A_LEDGER_LINE + ";\nUPDATE stock_ledger_entries SET quantity = 400.0",
+        )
+
+        with pytest.raises(Exception, match="SL-2026-0001"):
+            command.upgrade(config, "head")
+
+
+# 머리까지 올린 뒤 반품 한 건 — 문서와 그 원장 줄.
+_ONE_RETURN = """
+INSERT INTO code_groups (group_code, name, value_fixed, description) VALUES
+  ('SETTLE_TYPE', '반품정산', TRUE, '시험'), ('NC_REASON', '불합격사유', FALSE, '시험');
+
+INSERT INTO common_codes (group_code, code, name) VALUES
+  ('SETTLE_TYPE', '대물', '대물정산'), ('NC_REASON', 'IQ-FM', '이물'),
+  ('TXN_TYPE', '구매반품출고', '구매반품출고');
+
+INSERT INTO txn_type_attributes (group_code, code, total_effect, source_document_type)
+VALUES ('TXN_TYPE', '구매반품출고', '감소', '구매반품관리');
+
+INSERT INTO nonconformity_attributes (group_code, code, measure_kind)
+VALUES ('NC_REASON', 'IQ-FM', '계수');
+
+INSERT INTO nonconformity_stage_rules (reason_code, stage_code, disposition)
+VALUES ('IQ-FM', 'IQC', '반품');
+
+INSERT INTO purchase_returns (inspection_id, inspection_result, lot_id, settle_type,
+                              nonconformity_code, quantity, returned_at, returned_by)
+SELECT l.inspection_id, l.inspection_result, l.id, '대물', 'IQ-FM', 100.0,
+       TIMESTAMP '2026-09-25 14:00', '자재 담당 1'
+FROM lots AS l;
+
+INSERT INTO stock_ledger_entries (lot_id, txn_type, txn_type_group, quantity, occurred_at,
+                                  inspection_id, purchase_return_id)
+SELECT r.lot_id, '구매반품출고', 'TXN_TYPE', r.quantity, r.returned_at, r.inspection_id, r.id
+FROM purchase_returns AS r
+"""
+
+
+def test_downgrade_counts_the_returns_that_would_vanish(engine: Engine) -> None:
+    """**반품은 공급사에게 간 물건의 기록이다** — 되돌리면 그 물건이 장부에서 돌아온다.
+
+    이 리비전은 구조만 세우므로 사라지는 것은 사람이 나중에 넣은 반품뿐이고, 무엇을 왜
+    돌려보냈는지는 이 표에만 있어 **다시 만들 수 없다**(W-6 ①). 누가 냈는지가 아니라
+    몇 건인지를 말한다 — 메시지는 서버 로그에도 남는다(NC-173).
+    """
+    schema = "purchase_return_downgrade_guard"
+    with _schema(engine, schema):
+        config = _upgrade_with(engine, schema, "e84fbec436c0", _WITH_A_LEDGER_LINE)
+        command.upgrade(config, "head")
+        scoped = _engine_for_schema(engine, schema)
+        with scoped.begin() as conn:
+            for statement in _ONE_RETURN.strip().split(";"):
+                if statement.strip():
+                    conn.execute(text(statement))
+
+        with pytest.raises(Exception, match="반품 1건"):
+            command.downgrade(config, "b41d7c8e5a92")
+
+
+@pytest.mark.parametrize(
+    ("planted", "after_upgrade"),
+    [
+        ("대물정산", "대물 · 대금 모두 — 정산 구분은 반품 문서가 든다"),
+        ("사람이 고친 설명", "사람이 고친 설명"),
+    ],
+    ids=["seeded", "edited-by-a-person"],
+)
+def test_the_return_type_description_is_corrected_only_where_the_seed_left_it(
+    engine: Engine, planted: str, after_upgrade: str
+) -> None:
+    """**기준정보 변경은 시드가 아니라 마이그레이션으로 낸다** — 이미 심긴 DB 에는 시드가
+    다시 닿지 않는다. 다만 **시드가 심은 글자일 때만** 고친다: 사람이 고친 설명을 덮으면
+    재시드가 사람의 값을 덮는 것과 같은 사고다. 내릴 때도 이 리비전이 쓴 글자만 되돌린다.
+    """
+    schema = "purchase_return_description"
+    with _schema(engine, schema):
+        config = _upgrade_with(
+            engine,
+            schema,
+            "b41d7c8e5a92",
+            "INSERT INTO code_groups (group_code, name, value_fixed, description) VALUES"
+            " ('TXN_TYPE', '수불유형', TRUE, '시험');"
+            " INSERT INTO common_codes (group_code, code, name, description) VALUES"
+            f" ('TXN_TYPE', '구매반품출고', '구매반품출고', '{planted}')",
+        )
+        scoped = _engine_for_schema(engine, schema)
+        read = text(
+            "SELECT description FROM common_codes"
+            " WHERE group_code = 'TXN_TYPE' AND code = '구매반품출고'"
+        )
+
+        command.upgrade(config, "head")
+        with scoped.connect() as conn:
+            assert conn.execute(read).scalar_one() == after_upgrade
+
+        command.downgrade(config, "b41d7c8e5a92")
+        with scoped.connect() as conn:
+            assert conn.execute(read).scalar_one() == planted
+
+
+def test_upgrading_stops_when_a_lot_disagrees_with_its_inspection(engine: Engine) -> None:
+    """**검사 한 건은 로트 하나를 통째로 만든다**(감사 ㉟ NC-225) — 갈린 짝을 이름으로 말한다.
+
+    입고 줄과 로트는 같게 두고 검사만 다르게 심는다. 그래야 앞의 가드(입고 줄 ≠ 로트)를
+    지나 이 가드에 닿는다 — 둘 다 다르면 앞의 가드가 먼저 물어 이 가드는 불리지 않는다.
+    """
+    schema = "purchase_return_lot_quantity_guard"
+    with _schema(engine, schema):
+        config = _upgrade_with(
+            engine,
+            schema,
+            "e84fbec436c0",
+            _WITH_A_LEDGER_LINE
+            + ";\nUPDATE lots SET quantity = 400.0"
+            + ";\nUPDATE stock_ledger_entries SET quantity = 400.0",
+        )
+
+        with pytest.raises(Exception, match=r"SL-2026-0001 \(로트 400 · 검사 500\)"):
+            command.upgrade(config, "head")
+
+
+def test_downgrade_does_not_miss_a_return_still_being_written(engine: Engine) -> None:
+    """**쓰는 중인 반품을 세지 못하고 지나가지 않는다**(Codex 리뷰 3 라운드).
+
+    반품을 넣는 트랜잭션이 커밋되기 전에 내리기가 시작되면, 가드의 `count(*)` 는 0 을 보고
+    지나가고 뒤의 `DROP TRIGGER` 가 그 트랜잭션을 기다렸다가 커밋된 반품째 표를 지운다. 가드가
+    세기 전에 표를 잠가 쓰는 쪽이 끝나기를 기다리게 한다 — 그러면 커밋된 줄을 세고 멈춘다.
+    """
+    schema = "purchase_return_downgrade_race"
+    with _schema(engine, schema):
+        config = _upgrade_with(engine, schema, "e84fbec436c0", _WITH_A_LEDGER_LINE)
+        command.upgrade(config, "head")
+        scoped = _engine_for_schema(engine, schema)
+        writer = scoped.connect()
+        outcome: dict[str, object] = {}
+        try:
+            writer.begin()
+            for statement in _ONE_RETURN.strip().split(";"):
+                if statement.strip():
+                    writer.execute(text(statement))
+
+            def go() -> None:
+                try:
+                    command.downgrade(config, "b41d7c8e5a92")
+                    outcome["downgrade"] = "went through"
+                except Exception as error:
+                    outcome["downgrade"] = error
+
+            runner = threading.Thread(target=go)
+            runner.start()
+            deadline = time.monotonic() + 10
+            with scoped.connect() as watcher:
+                while runner.is_alive() and time.monotonic() < deadline:
+                    waiting = watcher.execute(
+                        text(
+                            "SELECT count(*) FROM pg_locks AS l"
+                            " JOIN pg_class AS c ON c.oid = l.relation"
+                            " JOIN pg_namespace AS n ON n.oid = c.relnamespace"
+                            " WHERE NOT l.granted AND n.nspname = :schema"
+                        ),
+                        {"schema": schema},
+                    ).scalar_one()
+                    if waiting:
+                        break
+                    time.sleep(0.02)
+            writer.commit()
+            runner.join(30)
+            assert not runner.is_alive(), "내리기가 끝나지 않았다"
+        finally:
+            writer.close()
+            scoped.dispose()
+
+        assert isinstance(outcome["downgrade"], Exception), outcome["downgrade"]
+        assert "반품 1건" in str(outcome["downgrade"])
+
+
+def test_upgrading_stops_when_a_ledger_type_runs_the_wrong_way(engine: Engine) -> None:
+    """**고정하기 전에 지금의 방향을 묻는다**(Codex 리뷰 3 라운드).
+
+    앞 스키마는 원장 줄이 선 유형의 방향도 고칠 수 있었다. 구매입고가 「감소」로 고쳐진 채
+    올리면 지나간 잔량이 음수로 읽히고, 방금 건 고정 트리거가 그 방향을 고치지 못하게 막는다.
+    """
+    schema = "purchase_return_effect_guard"
+    with _schema(engine, schema):
+        config = _upgrade_with(
+            engine,
+            schema,
+            "e84fbec436c0",
+            _WITH_A_LEDGER_LINE + ";\nUPDATE txn_type_attributes SET total_effect = '감소'",
+        )
+
+        with pytest.raises(Exception, match="구매입고"):
+            command.upgrade(config, "head")
+
+
+def test_upgrading_does_not_check_a_direction_still_being_changed(engine: Engine) -> None:
+    """**묻기 전에 잠근다**(Codex 리뷰 4 라운드).
+
+    방향을 바꾸는 트랜잭션이 커밋되기 전에 올리기가 시작되면, 가드는 옛 방향(증가)을 보고
+    지나가고 뒤의 `CREATE TRIGGER` 가 그 트랜잭션을 기다렸다가 거꾸로 선 방향째 고정한다.
+    가드가 묻기 전에 표를 잠가 고치는 쪽이 끝나기를 기다리게 한다 — 그러면 커밋된 방향을 보고
+    멈춘다.
+    """
+    schema = "purchase_return_effect_race"
+    with _schema(engine, schema):
+        config = _upgrade_with(engine, schema, "e84fbec436c0", _WITH_A_LEDGER_LINE)
+        scoped = _engine_for_schema(engine, schema)
+        writer = scoped.connect()
+        outcome: dict[str, object] = {}
+        try:
+            writer.begin()
+            writer.execute(
+                text(
+                    "UPDATE txn_type_attributes SET total_effect = '감소'"
+                    " WHERE code = '구매입고'"
+                )
+            )
+
+            def go() -> None:
+                try:
+                    command.upgrade(config, "head")
+                    outcome["upgrade"] = "went through"
+                except Exception as error:
+                    outcome["upgrade"] = error
+
+            runner = threading.Thread(target=go)
+            runner.start()
+            deadline = time.monotonic() + 10
+            with scoped.connect() as watcher:
+                while runner.is_alive() and time.monotonic() < deadline:
+                    waiting = watcher.execute(
+                        text(
+                            "SELECT count(*) FROM pg_locks AS l"
+                            " JOIN pg_class AS c ON c.oid = l.relation"
+                            " JOIN pg_namespace AS n ON n.oid = c.relnamespace"
+                            " WHERE NOT l.granted AND n.nspname = :schema"
+                        ),
+                        {"schema": schema},
+                    ).scalar_one()
+                    if waiting:
+                        break
+                    time.sleep(0.02)
+            writer.commit()
+            runner.join(30)
+            assert not runner.is_alive(), "올리기가 끝나지 않았다"
+        finally:
+            writer.close()
+            scoped.dispose()
+
+        assert isinstance(outcome["upgrade"], Exception), outcome["upgrade"]
+        assert "구매입고 (감소)" in str(outcome["upgrade"])

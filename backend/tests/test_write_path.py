@@ -851,25 +851,58 @@ def test_a_receipt_line_cannot_name_someone_elses_judgement(prepared: Session) -
     겹이 닫힌다 — 둘을 따로 가리키면 둘 다 실재한다는 것까지만 증명된다.
     """
     first = receive(prepared, _request())
-    second = receive(prepared, _request(supplier_lot_number="SL-2026-0002"))
+    other = receive(prepared, _request(supplier_lot_number="SL-2026-0002"))
 
-    # **그 로트의 입고 줄을 비우고 잰다.** 두면 「로트 하나에 입고 줄 하나」가
-    # **먼저** 물어, 이 테스트가 통과하면서도 짝이 맞는지는 한 번도 묻지 않게
-    # 된다 — 돌연변이를 돌려 아무것도 물지 않는 것을 보고 고친 자리다.
-    prepared.query(StockLedgerEntry).filter_by(lot_id=first.lot_id).delete()
+    # **입고 줄이 아직 없는 로트에 대고 잰다.** 줄이 있는 로트에 대면 「로트 하나에
+    # 입고 줄 하나」가 **먼저** 물어, 이 테스트가 통과하면서도 짝이 맞는지는 한 번도
+    # 묻지 않게 된다 — 돌연변이를 돌려 아무것도 물지 않는 것을 보고 고친 자리다.
+    # 처음에는 그 로트의 입고 줄을 지워서 비웠는데, 원장 줄은 이제 트리거가 지우지
+    # 못하게 한다(ADR 0013). 그래서 줄이 서기 전의 로트를 직접 세운다.
+    made = prepared.get(Inspection, first.inspection_id)
+    assert made is not None
+    bare_inspection = Inspection(
+        item_id=made.item_id,
+        item_type=made.item_type,
+        material_group=made.material_group,
+        supplier_id=made.supplier_id,
+        supplier_type=made.supplier_type,
+        supplier_lot_number="SL-2026-0003",
+        quantity=500.0,
+        received_date=RECEIVED,
+        judged_at=made.judged_at,
+        judged_by="검사원 1",
+        result=codes.JUDGMENT_PASSED,
+    )
+    prepared.add(bare_inspection)
+    prepared.flush()
+    bare_lot = Lot(
+        item_id=made.item_id,
+        item_type=made.item_type,
+        lot_number="RM-01-260921-99",
+        lot_origin=codes.LOT_FROM_SUPPLIER,
+        warehouse=codes.WAREHOUSE_RAW,
+        stock_type=codes.STOCK_GOOD,
+        quantity=500.0,
+        received_date=RECEIVED,
+        inspection_id=bare_inspection.id,
+        inspection_result=bare_inspection.result,
+    )
+    prepared.add(bare_lot)
     prepared.flush()
 
     prepared.add(
         StockLedgerEntry(
-            lot_id=first.lot_id,
+            lot_id=bare_lot.id,
             txn_type=codes.TXN_PURCHASE_RECEIPT,
-            quantity=1.0,
+            # **로트 수량과 같게 둔다** — 다르면 잔량 트리거가 **먼저** 물어 짝은
+            # 묻지 않게 된다.
+            quantity=500.0,
             occurred_at=datetime(2026, 9, 21, 10, 0),
             # 실재하는 검사이지만 **저 로트를 만든 검사가 아니다.**
-            inspection_id=second.inspection_id,
+            inspection_id=other.inspection_id,
         )
     )
-    with pytest.raises(IntegrityError):
+    with pytest.raises(IntegrityError, match="fk_stock_ledger_entry_lot"):
         prepared.flush()
 
 

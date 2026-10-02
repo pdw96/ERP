@@ -162,8 +162,10 @@ def test_a_lot_receives_only_once(prepared: Session) -> None:
     prepared.add(_entry(prepared))
     prepared.flush()
 
-    prepared.add(_entry(prepared, quantity=1.0))
-    with pytest.raises(IntegrityError):
+    # **같은 수량으로 넣는다.** 다르면 「입고 줄은 로트 수량과 같다」(잔량 트리거)가
+    # **먼저** 물어, 이 테스트가 통과하면서도 유일 인덱스는 한 번도 불리지 않는다.
+    prepared.add(_entry(prepared))
+    with pytest.raises(IntegrityError, match="uq_stock_ledger_entry_one_receipt_per_lot"):
         prepared.flush()
 
 
