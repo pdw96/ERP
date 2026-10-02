@@ -26,8 +26,9 @@
 **3단계가 착공했다 — 재고가 줄어드는 길.** 구매반품과 만료 재검사로 원장이 처음 줄어든다.
 범위는 `PRD.md`, 표의 초안은 `docs/schema-3단계.md` 가 들고, 어느 조각이 섰는지는 그 문서의 상태 칸이 말한다.
 첫 조각으로 **구매반품이 원장에 닿았다** — 반품 문서가 서고, 원장이 구매반품출고를 받으며,
-잔량이 음수가 되는 줄을 **데이터베이스의 트리거가** 거부한다(ADR 0013). 반품을 내는 쓰기
-엔드포인트는 다음 조각이다.
+잔량이 음수가 되는 줄을 **데이터베이스의 트리거가** 거부한다(ADR 0013). 둘째 조각으로
+**반품을 내는 쓰기 엔드포인트**가 섰다 — 검사를 가리켜 한 건을 받고, 재고 로트였으면 문서와
+원장 줄을 한 트랜잭션으로 남긴다. 트리거가 막는 것을 쓰기 경로가 먼저 이름으로 막는다.
 
 테스트는 PostgreSQL 16 위에서 돈다. **수는 여기 적지 않는다** — CI 출력이 그것을
 말하고, 산문에 적어 둔 수는 다음 커밋에서 낡는다.
@@ -37,7 +38,7 @@
 
 **공개 API 는 섰고 화면은 없다.** `migrate` 는 여전히 마이그레이션과 시드를
 돌리고 끝나는 일회성 잡이며, 그것이 끝난 뒤 `api` 가 뜬다 — 우리가 쓴 엔드포인트는
-`POST /inspections` 하나이고 **루프백에만 연다.** 부르는 것은 사람의 브라우저가
+쓰기뿐이고(`POST /inspections` · `POST /purchase-returns`) **루프백에만 연다.** 부르는 것은 사람의 브라우저가
 아니라 다음 층이고, 화면은 그 뒤다.
 
 **다만 공개면은 그것만이 아니다.** FastAPI 가 `/docs` · `/redoc` ·
@@ -106,7 +107,8 @@ backend/
   app/db/quality.py      공정별 검사 기준
   app/db/inventory.py    로트 한 표와 수불 원장
   app/services/incoming.py  관문 1 — 판정 · 채번 · 한 트랜잭션
-  app/api/app.py         첫 쓰기 엔드포인트 (POST /inspections)
+  app/services/returns.py   구매반품 — 문서 · 원장 줄 · 한 트랜잭션
+  app/api/app.py         쓰기 엔드포인트 (POST /inspections · /purchase-returns)
   app/db/inspection.py   검사 기록과 측정값 줄 — 관문 1
   app/core/locks.py      자문 잠금 키 — 한 곳에 모은다
   app/core/alembic_url.py  Alembic 에 넘기는 URL

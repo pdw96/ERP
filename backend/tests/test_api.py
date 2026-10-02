@@ -364,7 +364,10 @@ def test_the_spec_lists_every_refusal_name(client: TestClient) -> None:
     ]
 
 
-def test_the_spec_declares_every_answer_that_actually_goes_out(client: TestClient) -> None:
+@pytest.mark.parametrize("path", ["/inspections", "/purchase-returns"])
+def test_the_spec_declares_every_answer_that_actually_goes_out(
+    client: TestClient, path: str
+) -> None:
     """**기계가 읽는 계약만 보는 소비자가 이 API 의 전부를 본다** (감사 ⑯ NC-160).
 
     처음에는 `201` 과 `422` 만 선언했는데, 그때도 404 · 405 · 500 이 같은
@@ -383,18 +386,19 @@ def test_the_spec_declares_every_answer_that_actually_goes_out(client: TestClien
     **이 검사가 못 보는 부류**(W-6 ③): 이 검사가 일으키지 못하는 응답(500 은
     다른 검사가 일으킨다), 프레임워크가 얹는데 **아무도 모르는** 갈래(400 이 그랬다),
     그리고 선언은 있는데 **모양이 다른** 경우 — 모양은 위의 검사들이 본다.
+
+    **쓰기 경로마다 잰다** — 선언이 한 벌(`app._answers`)이어도, 한 경로에서 그것을
+    빼먹는 것은 그 경로의 일이다.
     """
     spec = client.get("/openapi.json").json()
-    declared = spec["paths"]["/inspections"]["post"]["responses"]
+    declared = spec["paths"][path]["post"]["responses"]
 
     # 라우트 밖 거절을 실제로 일으킨다 — 400 · 404 · 405.
     for response in (
-        client.post(
-            "/inspections", content=b"\xff", headers={"content-type": "application/json"}
-        ),
-        client.post("/inspection", json=_PAYLOAD),
-        client.post("/inspections/", json=_PAYLOAD, follow_redirects=False),
-        client.get("/inspections"),
+        client.post(path, content=b"\xff", headers={"content-type": "application/json"}),
+        client.post(path[:-1], json=_PAYLOAD),
+        client.post(f"{path}/", json=_PAYLOAD, follow_redirects=False),
+        client.get(path),
     ):
         assert response.status_code in (400, 404, 405), response.text
         assert str(response.status_code) in declared, (response.status_code, sorted(declared))
@@ -450,7 +454,8 @@ def test_the_spec_matches_the_snapshot_in_the_repository() -> None:
     )
 
 
-def test_the_spec_says_which_header_names_the_request(client: TestClient) -> None:
+@pytest.mark.parametrize("path", ["/inspections", "/purchase-returns"])
+def test_the_spec_says_which_header_names_the_request(client: TestClient, path: str) -> None:
     """**`X-Request-Id` 의 규약이 밖이 읽는 자리에 있다** (감사 ⑯ NC-160).
 
     NC-145 가 그것을 「부르는 쪽이 『이 요청』이라고 말할 수 있게」 세웠는데,
@@ -458,7 +463,7 @@ def test_the_spec_says_which_header_names_the_request(client: TestClient) -> Non
     존중하는 것까지가 그 규약이라 그것도 설명에 적힌다.
     """
     spec = client.get("/openapi.json").json()
-    declared = spec["paths"]["/inspections"]["post"]["responses"]
+    declared = spec["paths"][path]["post"]["responses"]
 
     for code in ("201", "400", "404", "405", "422", "500"):
         assert "X-Request-Id" in declared[code]["headers"], (code, declared[code])
