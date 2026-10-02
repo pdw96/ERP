@@ -1070,3 +1070,16 @@ PostgreSQL 16)도 초록이다(392 passed).
 | 223 | 원장 트리거가 유형 속성 줄을 `FOR SHARE` 없이 읽게 했다 | `test_a_direction_change_waits_for_the_first_line_of_its_type` — 둘째의 방향 변경이 커밋되고 잔량이 510 이 된다 |
 | — | `lot_id` 인덱스를 뺐다(모델) | `test_the_balance_is_looked_up_by_lot` |
 | 223 | 검사 고정에서 불합격 사유를 뺐다 | `test_a_returned_inspection_stays_as_it_was` — `reason` 쪽만 |
+
+## 조각 1 리뷰 3 라운드 — Codex 리뷰의 고침 (`0a48994`)
+
+3 라운드가 더한 지킴 넷을 하나씩 어긋낸 뒤 그것을 물어야 할 검사만 돌렸다. 어긋냄 없이 돌린 대조군은 초록이고, 같은 트리의
+`pytest` 전체(실제 PostgreSQL 16)도 초록이다. 내릴 때 잠금과 방향 가드의 검사는 고침보다 먼저 써서, 고치기 전의 코드에서
+빨간 것을 봤다(재현).
+
+| NC | 무엇을 어긋냈나 | 빨개진 검사 |
+|---|---|---|
+| 223 | 검사 고정을 줄 통째에서 옛 칸 목록(수량 · 공급사 · 품목 · 시각 · 도착일)으로 되돌렸다 | `test_a_returned_inspection_stays_as_it_was` — `reason` · `supplier_lot` · `judged_by` 셋 |
+| — | 반품 문서의 `inspection_id` 인덱스를 뺐다(모델) | `test_failed_returns_are_looked_up_by_inspection` |
+| — | 올릴 때 원장 유형의 방향 가드를 껐다 | `test_upgrading_stops_when_a_ledger_type_runs_the_wrong_way` |
+| — | 내릴 때 반품 표 잠금을 뺐다 | `test_downgrade_does_not_miss_a_return_still_being_written` — 가드가 0 을 보고 지나간 뒤 옛 CHECK 를 다시 세우다 터진다 |
