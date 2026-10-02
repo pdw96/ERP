@@ -17,7 +17,9 @@
 **올릴 때 멈출 수 있다 — 아래의 자리에서, 이름을 말하고.** 입고 줄의 수량이 로트 수량과
 다른 로트가 있으면, 트리거를 거는 순간부터 그 로트는 「입고 줄과 로트가 갈린」 채로
 남는다. 로트 수량이 그 로트를 만든 검사의 수량과 다른 로트도 같다 — 쌍 외래키가 먼저
-걸리면 나오는 말은 제약 이름뿐이다. 앞 스키마는 둘 다 막지 않았으므로 실재할 수 있고,
+걸리면 나오는 말은 제약 이름뿐이다. 원장 줄이 선 유형의 방향도 같다 — 트리거가 그 방향을
+고정하므로 지금 거꾸로 선 방향을 그대로 고정하면 고칠 길도 함께 닫힌다. 앞 스키마는 셋 다
+막지 않았으므로 실재할 수 있고,
 **조이기 전에 묻는다.** 잔량이 음수인 로트는 물을 필요가 없다 — 이 리비전 전의 원장은
 구매입고(증가) 하나만 받았다.
 
@@ -33,6 +35,9 @@ ACCESS EXCLUSIVE 가 커밋까지 유지되고, 그 사이 원장의 쓰기가 �
 사라지는 것은 사람이 나중에 넣은 반품뿐이고, 그것은 **다시 만들 수 없다** — 무엇을 왜
 돌려보냈는지는 이 표에만 있다. 원장의 반품 줄은 문서 없이 설 수 없으므로(외래키) 문서를
 세면 둘 다 센다(W-6 ①).
+
+**내릴 때는 세기 전에 잠근다**(Codex 리뷰 3 라운드). 반품을 넣는 트랜잭션이 커밋되기 전에 세면
+0 을 보고 지나가고, 뒤의 `DROP TRIGGER` 가 그 트랜잭션을 기다렸다가 커밋된 반품째 표를 지운다.
 
 **내릴 때도 잠근다**(감사 ㉟ NC-224). `DROP TRIGGER` 는 그 트리거가 걸린 표에 ACCESS
 EXCLUSIVE 를 잡는다 — `lots` · `inspections` · `txn_type_attributes` 의 **읽기까지** 커밋까지
@@ -270,14 +275,10 @@ _INSPECTION_FUNCTION = """
 CREATE OR REPLACE FUNCTION inspection_stays_behind_its_returns() RETURNS trigger
 LANGUAGE plpgsql AS $$
 BEGIN
-  IF (NEW.quantity, NEW.supplier_id, NEW.item_id, NEW.judged_at, NEW.received_date,
-      NEW.nonconformity_code)
-       IS DISTINCT FROM
-     (OLD.quantity, OLD.supplier_id, OLD.item_id, OLD.judged_at, OLD.received_date,
-      OLD.nonconformity_code)
+  IF NEW IS DISTINCT FROM OLD
      AND EXISTS (SELECT 1 FROM purchase_returns WHERE inspection_id = OLD.id) THEN
     RAISE EXCEPTION
-      '검사 %를 반품이 가리킨다 — 수량 · 공급사 · 품목 · 시각 · 도착일 · 사유를 고치지 않는다',
+      '검사 %를 반품이 가리킨다 — 그 판정 기록은 어느 칸도 고치지 않는다',
       OLD.id
       USING ERRCODE = 'restrict_violation';
   END IF;
@@ -287,8 +288,7 @@ END $$
 
 _INSPECTION_TRIGGER = """
 CREATE TRIGGER inspection_stays_behind_its_returns
-BEFORE UPDATE OF quantity, supplier_id, item_id, judged_at, received_date, nonconformity_code
-ON inspections
+BEFORE UPDATE ON inspections
 FOR EACH ROW EXECUTE FUNCTION inspection_stays_behind_its_returns()
 """
 
@@ -389,6 +389,8 @@ def upgrade() -> None:
         ),
     )
 
+    op.create_index("ix_purchase_return_inspection", "purchase_returns", ["inspection_id"])
+
     # ── 원장 — 반품 줄을 받는다 ────────────────────────────────────────────
     op.add_column(
         "stock_ledger_entries",
@@ -471,6 +473,28 @@ def upgrade() -> None:
         ["id", "quantity"],
     )
 
+    # ── 조이기 전에 묻는다 — 원장 줄이 선 유형의 방향(Codex 리뷰 3 라운드) ──
+    # 앞 스키마는 원장 줄이 선 유형의 방향도 고칠 수 있었다. 아래 트리거가 그 방향을 고정하므로,
+    # 지금 셀 수 없거나 거꾸로 선 방향을 그대로 고정하면 고칠 길도 함께 닫힌다. 이 리비전 전의
+    # 원장이 받던 유형은 구매입고 하나이고, 그 방향은 증가다.
+    op.execute(
+        """
+        DO $$
+        DECLARE wrong text;
+        BEGIN
+          SELECT string_agg(DISTINCT a.code || ' (' || a.total_effect || ')', ', ') INTO wrong
+          FROM stock_ledger_entries AS e
+          JOIN txn_type_attributes AS a ON a.group_code = e.txn_type_group AND a.code = e.txn_type
+          WHERE NOT (a.code = '구매입고' AND a.total_effect = '증가');
+          IF wrong IS NOT NULL THEN
+            RAISE EXCEPTION
+              '원장 줄이 선 유형의 방향이 잔량을 셀 수 없게 서 있다: %. 고정하기 전에 사람이 먼저 바로잡는다',
+              wrong;
+          END IF;
+        END $$;
+        """
+    )
+
     for statement in (
         _LEDGER_GUARD_FUNCTION,
         _LEDGER_GUARD_TRIGGER,
@@ -496,6 +520,11 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
+    # **세기 전에 잠근다**(Codex 리뷰 3 라운드). 반품을 넣는 트랜잭션이 커밋되기 전에 세면 0 을 보고
+    # 지나가고, 뒤의 `DROP TRIGGER` 가 그 트랜잭션을 기다렸다가 커밋된 반품째 표를 지운다. `SHARE`
+    # 는 넣기(`ROW EXCLUSIVE`)와 부딪쳐 쓰는 쪽이 끝나기를 기다린 뒤 세게 하고, 그 뒤의 쓰기는 이
+    # 트랜잭션이 끝날 때까지 막는다.
+    op.execute("LOCK TABLE purchase_returns IN SHARE MODE")
     # **사라지는 것을 먼저 세고 멈춘다.** 반품은 공급사에게 간 물건의 기록이고 다시
     # 만들 수 없다. 누가 냈는지가 아니라 몇 건인지를 말한다 — 이 메시지는 서버 로그에도
     # 남는다(감사 ⑲ NC-173).

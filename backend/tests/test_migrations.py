@@ -16,6 +16,8 @@
 import os
 import subprocess
 import sys
+import threading
+import time
 from collections.abc import Iterator
 from contextlib import contextmanager
 from datetime import date
@@ -1941,4 +1943,78 @@ def test_upgrading_stops_when_a_lot_disagrees_with_its_inspection(engine: Engine
         )
 
         with pytest.raises(Exception, match=r"SL-2026-0001 \(로트 400 · 검사 500\)"):
+            command.upgrade(config, "head")
+
+
+def test_downgrade_does_not_miss_a_return_still_being_written(engine: Engine) -> None:
+    """**쓰는 중인 반품을 세지 못하고 지나가지 않는다**(Codex 리뷰 3 라운드).
+
+    반품을 넣는 트랜잭션이 커밋되기 전에 내리기가 시작되면, 가드의 `count(*)` 는 0 을 보고
+    지나가고 뒤의 `DROP TRIGGER` 가 그 트랜잭션을 기다렸다가 커밋된 반품째 표를 지운다. 가드가
+    세기 전에 표를 잠가 쓰는 쪽이 끝나기를 기다리게 한다 — 그러면 커밋된 줄을 세고 멈춘다.
+    """
+    schema = "purchase_return_downgrade_race"
+    with _schema(engine, schema):
+        config = _upgrade_with(engine, schema, "e84fbec436c0", _WITH_A_LEDGER_LINE)
+        command.upgrade(config, "head")
+        scoped = _engine_for_schema(engine, schema)
+        writer = scoped.connect()
+        outcome: dict[str, object] = {}
+        try:
+            writer.begin()
+            for statement in _ONE_RETURN.strip().split(";"):
+                if statement.strip():
+                    writer.execute(text(statement))
+
+            def go() -> None:
+                try:
+                    command.downgrade(config, "b41d7c8e5a92")
+                    outcome["downgrade"] = "went through"
+                except Exception as error:
+                    outcome["downgrade"] = error
+
+            runner = threading.Thread(target=go)
+            runner.start()
+            deadline = time.monotonic() + 10
+            with scoped.connect() as watcher:
+                while runner.is_alive() and time.monotonic() < deadline:
+                    waiting = watcher.execute(
+                        text(
+                            "SELECT count(*) FROM pg_locks AS l"
+                            " JOIN pg_class AS c ON c.oid = l.relation"
+                            " JOIN pg_namespace AS n ON n.oid = c.relnamespace"
+                            " WHERE NOT l.granted AND n.nspname = :schema"
+                        ),
+                        {"schema": schema},
+                    ).scalar_one()
+                    if waiting:
+                        break
+                    time.sleep(0.02)
+            writer.commit()
+            runner.join(30)
+            assert not runner.is_alive(), "내리기가 끝나지 않았다"
+        finally:
+            writer.close()
+            scoped.dispose()
+
+        assert isinstance(outcome["downgrade"], Exception), outcome["downgrade"]
+        assert "반품 1건" in str(outcome["downgrade"])
+
+
+def test_upgrading_stops_when_a_ledger_type_runs_the_wrong_way(engine: Engine) -> None:
+    """**고정하기 전에 지금의 방향을 묻는다**(Codex 리뷰 3 라운드).
+
+    앞 스키마는 원장 줄이 선 유형의 방향도 고칠 수 있었다. 구매입고가 「감소」로 고쳐진 채
+    올리면 지나간 잔량이 음수로 읽히고, 방금 건 고정 트리거가 그 방향을 고치지 못하게 막는다.
+    """
+    schema = "purchase_return_effect_guard"
+    with _schema(engine, schema):
+        config = _upgrade_with(
+            engine,
+            schema,
+            "e84fbec436c0",
+            _WITH_A_LEDGER_LINE + ";\nUPDATE txn_type_attributes SET total_effect = '감소'",
+        )
+
+        with pytest.raises(Exception, match="구매입고"):
             command.upgrade(config, "head")

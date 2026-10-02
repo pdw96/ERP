@@ -354,6 +354,10 @@ class PurchaseReturn(Base):
         CheckConstraint(
             is_present("returned_by"), name="ck_purchase_return_returned_by_is_present"
         ),
+        # **불합격분의 합을 세는 자리.** 트리거가 그 검사 줄을 잠근 채 같은 검사의 반품을
+        # 합하므로 `inspection_id` 로 찾을 길이 있어야 한다 — 없으면 반품이 쌓일수록 표를 훑으며
+        # 잠금을 쥔다(Codex 리뷰 3 라운드). 외래키 칸에 인덱스는 저절로 서지 않는다.
+        Index("ix_purchase_return_inspection", "inspection_id"),
         # `id` 가 이미 기본키라 행을 좁히지 않는다 — **원장의 반품 줄이 가리킬 상대**다.
         # 같은 로트 · 같은 수량 · 같은 시각을 함께 가리키면 문서와 원장 줄이 갈릴 수 없다.
         UniqueConstraint(

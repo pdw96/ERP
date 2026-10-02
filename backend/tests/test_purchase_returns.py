@@ -744,13 +744,26 @@ def test_a_types_direction_is_fixed_once_the_ledger_uses_it(prepared: Session) -
         "supplier_id = (SELECT max(id) FROM partners)",
         "item_id = (SELECT max(id) FROM items)",
         "nonconformity_code = 'IQ-PKG'",
+        "supplier_lot_number = 'SL-다른-배치'",
+        "judged_by = '검사원 2'",
     ],
-    ids=["quantity", "judged_at", "received_date", "supplier", "item", "reason"],
+    ids=[
+        "quantity",
+        "judged_at",
+        "received_date",
+        "supplier",
+        "item",
+        "reason",
+        "supplier_lot",
+        "judged_by",
+    ],
 )
 def test_a_returned_inspection_stays_as_it_was(prepared: Session, change: str) -> None:
     """**반품은 공급사 · 품목 · 수량 · 사유를 검사에서 따라간다**(NC-223 · Codex). 반품이 선 뒤
     검사가 움직이면 그 반품이 다른 공급사로 간 것이 되거나, 합 규칙의 분모가 바뀌거나, 지나간
-    반품의 이유가 바뀐다(사유는 Codex 리뷰 2 라운드).
+    반품의 이유가 바뀐다(사유는 Codex 리뷰 2 라운드). 3 라운드가 공급사 로트번호를 더 냈을
+    때 칸을 골라 고정하는 대신 줄을 통째로 고정했다 — 그래서 판정자처럼 아무도 짚지 않은
+    칸도 여기서 잰다.
 
     값이 실제로 달라지도록 다른 공급사 · 품목을 하나씩 더 둔다 — 같은 값으로 고치면 트리거가
     「달라지지 않았다」로 넘겨 이 검사가 아무것도 묻지 않는다.
@@ -978,3 +991,19 @@ def test_a_direction_change_waits_for_the_first_line_of_its_type(engine: Engine)
         assert isinstance(outcome["second"], IntegrityError), outcome["second"]
         with Session(scoped) as session:
             assert _balance(session, _the_lot(session).id) == 490.0
+
+
+def test_failed_returns_are_looked_up_by_inspection(prepared: Session) -> None:
+    """**불합격분의 합을 셀 길이 있다**(Codex 리뷰 3 라운드). 트리거가 검사 줄을 잠근 채 같은
+    검사의 반품을 합하는데 `inspection_id` 로 찾을 인덱스가 없으면, 반품이 쌓일수록 표를 훑으며
+    잠금을 쥔다."""
+    indexes = {
+        name
+        for (name,) in prepared.execute(
+            text(
+                "SELECT indexname FROM pg_indexes"
+                " WHERE tablename = 'purchase_returns' AND indexdef LIKE '%(inspection_id)'"
+            )
+        )
+    }
+    assert indexes == {"ix_purchase_return_inspection"}, indexes

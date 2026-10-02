@@ -300,21 +300,21 @@ FOR EACH ROW EXECUTE FUNCTION purchase_return_has_its_ledger_line()
 # **반품 문서는 공급사 · 품목을 검사에서 따라간다**(칸을 두지 않았다). 그러니 반품이 선 뒤에
 # 검사의 공급사를 고치면 그 반품이 다른 공급사로 간 것이 되고, 수량을 고치면 불합격분의 합
 # 규칙이 기대는 분모가 움직이며, 판정 시각을 고치면 위의 시각 규칙이 비켜 간다(감사 ㉟ NC-223 ·
-# Codex 리뷰). **불합격 사유도 고정한다**(Codex 리뷰 2 라운드) — 불합격분 반품은 자기 사유를
-# 두지 않고 검사의 사유를 따라가므로, 고치면 지나간 반품의 이유가 바뀐다. 유형 칸(`item_type` ·
-# `supplier_type`)은 쌍 외래키를 따라 함께 움직이므로 식별 칸만 본다.
+# Codex 리뷰).
+#
+# **칸을 골라 고정하지 않고 줄을 통째로 고정한다.** 처음에는 수량 · 공급사 · 품목 ·
+# 시각을, 2 라운드에 사유를, 3 라운드에 공급사 로트번호를 더하라는 지적이 차례로 났다 —
+# 반품 문서가 검사에서 따라가는 칸은 결국 검사 줄 전부다(불합격분은 로트가 없어 공급사의
+# 배치도 검사가 든다). 판정 기록을 반품 뒤에 고칠 정당한 경로가 없으므로 어느 칸이든
+# 바뀌면 거부한다.
 INSPECTION_FUNCTION = """
 CREATE OR REPLACE FUNCTION inspection_stays_behind_its_returns() RETURNS trigger
 LANGUAGE plpgsql AS $$
 BEGIN
-  IF (NEW.quantity, NEW.supplier_id, NEW.item_id, NEW.judged_at, NEW.received_date,
-      NEW.nonconformity_code)
-       IS DISTINCT FROM
-     (OLD.quantity, OLD.supplier_id, OLD.item_id, OLD.judged_at, OLD.received_date,
-      OLD.nonconformity_code)
+  IF NEW IS DISTINCT FROM OLD
      AND EXISTS (SELECT 1 FROM purchase_returns WHERE inspection_id = OLD.id) THEN
     RAISE EXCEPTION
-      '검사 %를 반품이 가리킨다 — 수량 · 공급사 · 품목 · 시각 · 도착일 · 사유를 고치지 않는다',
+      '검사 %를 반품이 가리킨다 — 그 판정 기록은 어느 칸도 고치지 않는다',
       OLD.id
       USING ERRCODE = 'restrict_violation';
   END IF;
@@ -324,8 +324,7 @@ END $$
 
 INSPECTION_TRIGGER = """
 CREATE TRIGGER inspection_stays_behind_its_returns
-BEFORE UPDATE OF quantity, supplier_id, item_id, judged_at, received_date, nonconformity_code
-ON inspections
+BEFORE UPDATE ON inspections
 FOR EACH ROW EXECUTE FUNCTION inspection_stays_behind_its_returns()
 """
 
