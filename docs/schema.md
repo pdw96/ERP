@@ -428,7 +428,7 @@ PostgreSQL 의 기본키는 `NULL` 을 받지 않으므로 자재군을 PK 에 �
 - `UNIQUE (id, received_date)` — 행을 좁히지 않는다. **로트가 도착일을 가리킬 상대**다 (14번의 `fk_lot_inspection_received_date`)
 - `UNIQUE (id, item_id)` — 같은 이유로 **로트가 품목을 가리킬 상대**다 (14번의 `fk_lot_inspection_item`)
 - `UNIQUE (id, quantity)` — **로트가 수량을 가리킬 상대**다 (14번의 `fk_lot_inspection_quantity`)
-- **트리거** `inspection_stays_behind_its_returns` — 반품이 가리키는 검사의 수량 · 공급사 · 품목 · 판정 시각 · 도착일을 고치지 않는다. 반품 문서는 그 값을 검사에서 따라가므로, 움직이면 반품이 다른 공급사로 간 것이 되거나 합 규칙의 분모가 바뀐다(감사 ㉟ NC-223 · Codex 리뷰)
+- **트리거** `inspection_stays_behind_its_returns` — 반품이 가리키는 검사의 수량 · 공급사 · 품목 · 판정 시각 · 도착일 · 불합격 사유를 고치지 않는다. 반품 문서는 그 값을 검사에서 따라가므로, 움직이면 반품이 다른 공급사로 간 것이 되거나 합 규칙의 분모가 바뀐다(감사 ㉟ NC-223 · Codex 리뷰)
 
 ### 도착일이 로트에만 살던 자리 — 불합격에서만 사라졌다
 
@@ -552,7 +552,8 @@ PostgreSQL 의 외래키가 기본키나 유일키에만 붙기 때문이다.
 - `FK (purchase_return_id, lot_id, quantity, occurred_at) → purchase_returns (id, lot_id, quantity, returned_at)` — 반품 줄은 자기 문서를 **같은 로트 · 같은 수량 · 같은 시각까지** 가리킨다
 - **양방향** — `(txn_type = '구매반품출고') = (purchase_return_id IS NOT NULL)`
 - **부분 유일 인덱스** `(purchase_return_id) WHERE purchase_return_id IS NOT NULL` — 문서 하나에 원장 줄은 하나다
-- **트리거** `stock_ledger_entry_keeps_the_balance` — 한 로트의 줄을 합한 잔량이 0 밑으로 내려가지 않고, 입고 줄의 수량은 로트 수량과 같으며, 줄을 고치거나 지우지 않는다. 같은 자리를 로트 쪽에서 `lot_quantity_stays_with_its_ledger` 가 지킨다 — 원장에 줄이 선 로트의 수량을 고치지 않는다. **CHECK 로 적을 수 없는 규칙이라 트리거다**(ADR 0013, `app/db/ledger_guards.py`). 로트 줄을 `FOR NO KEY UPDATE` 로 잠근다 — `FOR UPDATE` 는 반품 문서의 외래키가 잡는 `KEY SHARE` 와 부딪쳐 교착이 났다
+- **인덱스** `ix_stock_ledger_entry_lot (lot_id)` — 트리거가 줄마다 그 로트의 줄을 합하는 자리다. 입고 줄만 담은 부분 유일 인덱스는 그 합에 쓰이지 못한다(Codex 리뷰 2 라운드)
+- **트리거** `stock_ledger_entry_keeps_the_balance` — 한 로트의 줄을 합한 잔량이 0 밑으로 내려가지 않고, 입고 줄의 수량은 로트 수량과 같으며, 줄을 고치거나 지우지 않는다. 같은 자리를 로트 쪽에서 `lot_quantity_stays_with_its_ledger` 가 지킨다 — 원장에 줄이 선 로트의 수량을 고치지 않는다. **CHECK 로 적을 수 없는 규칙이라 트리거다**(ADR 0013, `app/db/ledger_guards.py`). 로트 줄을 `FOR NO KEY UPDATE` 로 잠근다 — `FOR UPDATE` 는 반품 문서의 외래키가 잡는 `KEY SHARE` 와 부딪쳐 교착이 났다. 유형 속성 줄은 `FOR SHARE` 로 읽어, 그 유형의 첫 줄이 커밋되기 전에 방향을 바꾸는 갱신을 그 뒤로 세운다
 - `CHECK quantity >= 0` **이고 유한한 수** — 원장은 합으로 읽는 표라 `NaN` 한 줄의 피해가 표 하나에 그치지 않는다
 - **부분 유일 인덱스** `(lot_id) WHERE txn_type = '구매입고'` — 로트 하나에 입고 줄은 하나다
 
@@ -609,7 +610,7 @@ PostgreSQL 의 외래키가 기본키나 유일키에만 붙기 때문이다.
 - `CHECK (lot_id IS NULL) = (nonconformity_code IS NULL)`
 - `FK (nonconformity_group, nonconformity_code, reason_stage_group, reason_stage) → nonconformity_stage_rules` — **IQC 에서 쓸 수 있는 사유만.** 공통코드를 가리키면 사 온 자재를 완제품 불량 사유로 돌려보낸 기록이 선다(Codex 리뷰). 검사 기록과 같은 방식이다
 - `UNIQUE (id, lot_id, quantity, returned_at)` — 행을 좁히지 않는다. **원장의 반품 줄이 가리킬 상대**다
-- **트리거** `purchase_return_stays_within_what_came` — 반품 시각이 그 검사의 판정 시각보다 앞서지 않고, 한 불합격 검사에서 돌려보낸 합이 그 검사가 받은 수량을 넘지 않는다(원장 밖의 합이라 원장 트리거가 보지 못한다). 문서를 고치거나 지우지 않는다. 그 검사 줄을 `FOR NO KEY UPDATE` 로 잠가 같은 검사의 반품이 줄을 선다
+- **트리거** `purchase_return_stays_within_what_came` — 반품 시각이 그 검사의 판정 시각보다, 재고 로트면 그 로트의 입고 줄 시각보다 앞서지 않고, 한 불합격 검사에서 돌려보낸 합이 그 검사가 받은 수량을 넘지 않는다(원장 밖의 합이라 원장 트리거가 보지 못한다). 문서를 고치거나 지우지 않는다. 그 검사 줄을 `FOR NO KEY UPDATE` 로 잠가 같은 검사의 반품이 줄을 선다
 - **지연 제약 트리거** `purchase_return_has_its_ledger_line` — 재고 로트를 돌려보낸 문서는 **커밋할 때** 원장 줄이 있어야 한다. 원장 쪽 제약은 줄 → 문서 방향만 보므로 문서가 홀로 서면 잔량에서 빠지지 않는다(감사 ㉟ NC-222 · Codex 리뷰). 문서를 먼저, 줄을 나중에 넣는 순서가 그래서 선다
 
 **검사를 모르는 로트(기초재고)는 반품할 수 없다** — 언제나 검사를 가리키기로 한 대가다.

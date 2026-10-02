@@ -95,7 +95,7 @@ BEGIN
   END IF;
 
   SELECT total_effect INTO effect FROM txn_type_attributes
-  WHERE group_code = NEW.txn_type_group AND code = NEW.txn_type;
+  WHERE group_code = NEW.txn_type_group AND code = NEW.txn_type FOR SHARE;
   IF NOT FOUND THEN
     RETURN NEW;
   END IF;
@@ -183,6 +183,7 @@ DECLARE
   received double precision;
   judged_result text;
   judged timestamp;
+  came_in timestamp;
   returned numeric;
 BEGIN
   IF TG_OP <> 'INSERT' THEN
@@ -207,7 +208,19 @@ BEGIN
       USING ERRCODE = 'check_violation';
   END IF;
 
-  IF NEW.lot_id IS NOT NULL OR judged_result <> '불합격' THEN
+  IF NEW.lot_id IS NOT NULL THEN
+    SELECT occurred_at INTO came_in FROM stock_ledger_entries
+    WHERE lot_id = NEW.lot_id AND txn_type = '구매입고';
+    IF NEW.returned_at < came_in THEN
+      RAISE EXCEPTION
+        '반품 시각(%)이 그 로트의 입고 시각(%)보다 앞선다 — 들어오기 전의 물건이다',
+        NEW.returned_at, came_in
+        USING ERRCODE = 'check_violation';
+    END IF;
+    RETURN NEW;
+  END IF;
+
+  IF judged_result <> '불합격' THEN
     RETURN NEW;
   END IF;
 
@@ -257,12 +270,14 @@ _INSPECTION_FUNCTION = """
 CREATE OR REPLACE FUNCTION inspection_stays_behind_its_returns() RETURNS trigger
 LANGUAGE plpgsql AS $$
 BEGIN
-  IF (NEW.quantity, NEW.supplier_id, NEW.item_id, NEW.judged_at, NEW.received_date)
+  IF (NEW.quantity, NEW.supplier_id, NEW.item_id, NEW.judged_at, NEW.received_date,
+      NEW.nonconformity_code)
        IS DISTINCT FROM
-     (OLD.quantity, OLD.supplier_id, OLD.item_id, OLD.judged_at, OLD.received_date)
+     (OLD.quantity, OLD.supplier_id, OLD.item_id, OLD.judged_at, OLD.received_date,
+      OLD.nonconformity_code)
      AND EXISTS (SELECT 1 FROM purchase_returns WHERE inspection_id = OLD.id) THEN
     RAISE EXCEPTION
-      '검사 %를 반품이 가리킨다 — 수량 · 공급사 · 품목 · 시각 · 도착일을 고치지 않는다',
+      '검사 %를 반품이 가리킨다 — 수량 · 공급사 · 품목 · 시각 · 도착일 · 사유를 고치지 않는다',
       OLD.id
       USING ERRCODE = 'restrict_violation';
   END IF;
@@ -272,7 +287,8 @@ END $$
 
 _INSPECTION_TRIGGER = """
 CREATE TRIGGER inspection_stays_behind_its_returns
-BEFORE UPDATE OF quantity, supplier_id, item_id, judged_at, received_date ON inspections
+BEFORE UPDATE OF quantity, supplier_id, item_id, judged_at, received_date, nonconformity_code
+ON inspections
 FOR EACH ROW EXECUTE FUNCTION inspection_stays_behind_its_returns()
 """
 
@@ -398,6 +414,7 @@ def upgrade() -> None:
         ["purchase_return_id", "lot_id", "quantity", "occurred_at"],
         ["id", "lot_id", "quantity", "returned_at"],
     )
+    op.create_index("ix_stock_ledger_entry_lot", "stock_ledger_entries", ["lot_id"])
     op.create_index(
         "uq_stock_ledger_entry_one_line_per_return",
         "stock_ledger_entries",
@@ -523,6 +540,7 @@ def downgrade() -> None:
     op.drop_index(
         "uq_stock_ledger_entry_one_line_per_return", table_name="stock_ledger_entries"
     )
+    op.drop_index("ix_stock_ledger_entry_lot", table_name="stock_ledger_entries")
     op.drop_constraint(
         "fk_stock_ledger_entry_purchase_return", "stock_ledger_entries", type_="foreignkey"
     )

@@ -498,6 +498,11 @@ class StockLedgerEntry(Base):
             unique=True,
             postgresql_where=text(f"txn_type = '{codes.TXN_PURCHASE_RECEIPT}'"),
         ),
+        # **잔량을 세는 자리.** 트리거가 줄마다 그 로트의 줄을 합하므로 `lot_id` 로 찾을
+        # 길이 있어야 한다 — 위의 부분 유일 인덱스는 입고 줄만 담아 반품 줄을 함께 세는 합에
+        # 쓰이지 못하고, PostgreSQL 은 외래키 칸에 인덱스를 저절로 두지 않는다. 없으면 줄이
+        # 늘수록 넣을 때마다 표 전체를 훑고 그동안 로트 잠금을 쥔다(Codex 리뷰 2 라운드).
+        Index("ix_stock_ledger_entry_lot", "lot_id"),
         # **반품 문서 하나에 원장 줄은 하나다.** 둘이 서면 한 번 돌려보낸 것을 두 번
         # 뺀다.
         Index(

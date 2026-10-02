@@ -50,6 +50,12 @@ from app.core import codes
 # `READ COMMITTED` 에서 트리거 안의 각 문장은 새 스냅숏을 받으므로, 잠금을 얻은 뒤의
 # 합은 앞서 커밋된 줄을 본다.
 #
+# **유형 속성 줄을 `FOR SHARE` 로 읽는다**(Codex 리뷰 2 라운드). 그 유형의 첫 줄이 커밋되기 전에
+# 방향을 바꾸는 갱신이 끼면, 고정 트리거는 「아직 줄이 없다」를 보고 통과시키고 이 트리거는 옛
+# 방향으로 셌다 — 둘 다 커밋되면 새 줄이 바뀐 방향으로 읽힌다. `FOR SHARE` 는 그 갱신이 잡는
+# `NO KEY UPDATE` 와 부딪쳐 갱신을 이 줄의 커밋 뒤로 세우고, 그때 고정 트리거가 줄을 본다.
+# 줄끼리는 `FOR SHARE` 가 서로 부딪치지 않는다.
+#
 # **유형이 없거나 로트가 없으면 아무 말 없이 넘긴다.** 그 줄은 외래키가 거부하고,
 # 거기서 나오는 말(제약 이름)이 더 정확하다. **셀 수 없는 수(`NaN` · 무한대)도
 # 넘긴다** — 넘기지 않으면 합이 `NaN` 이나 무한대가 되어 트리거가 엉뚱한 말(「잔량이
@@ -87,7 +93,7 @@ BEGIN
   END IF;
 
   SELECT total_effect INTO effect FROM txn_type_attributes
-  WHERE group_code = NEW.txn_type_group AND code = NEW.txn_type;
+  WHERE group_code = NEW.txn_type_group AND code = NEW.txn_type FOR SHARE;
   IF NOT FOUND THEN
     RETURN NEW;
   END IF;
@@ -187,8 +193,10 @@ FOR EACH ROW EXECUTE FUNCTION txn_type_effect_stays_behind_its_lines()
 #
 # **판정보다 앞선 반품은 없다**(Codex 리뷰). 들어와 판정받기 전의 물건은 돌려보낼 수 없다 —
 # 도착일은 판정일보다 늦을 수 없으므로(`ck_inspection_judged_after_arrival`) 판정 시각
-# 하나로 둘 다 지켜진다. 원장의 반품 줄은 문서와 같은 시각을 들어야 하므로(4칸 외래키) 이
-# 한 자리가 원장 쪽도 지킨다.
+# 하나로 둘 다 지켜진다. **재고 로트는 입고 줄의 시각과도 견준다**(Codex 리뷰 2 라운드) —
+# 쓰기 경로는 입고 시각을 판정 시각으로 적지만, 그것을 묶는 제약은 없어 입고가 판정보다 늦은
+# 줄이 설 수 있다. 원장의 반품 줄은 문서와 같은 시각을 들어야 하므로(4칸 외래키) 이 자리가
+# 원장 쪽도 지킨다.
 #
 # **잠그는 것은 그 검사 줄이다** — 반품이 가리키는 쪽이 하나뿐이라 갈래마다 같다.
 RETURN_GUARD_FUNCTION = f"""
@@ -198,6 +206,7 @@ DECLARE
   received double precision;
   judged_result text;
   judged timestamp;
+  came_in timestamp;
   returned numeric;
 BEGIN
   IF TG_OP <> 'INSERT' THEN
@@ -222,7 +231,19 @@ BEGIN
       USING ERRCODE = 'check_violation';
   END IF;
 
-  IF NEW.lot_id IS NOT NULL OR judged_result <> '{codes.JUDGMENT_FAILED}' THEN
+  IF NEW.lot_id IS NOT NULL THEN
+    SELECT occurred_at INTO came_in FROM stock_ledger_entries
+    WHERE lot_id = NEW.lot_id AND txn_type = '{codes.TXN_PURCHASE_RECEIPT}';
+    IF NEW.returned_at < came_in THEN
+      RAISE EXCEPTION
+        '반품 시각(%)이 그 로트의 입고 시각(%)보다 앞선다 — 들어오기 전의 물건이다',
+        NEW.returned_at, came_in
+        USING ERRCODE = 'check_violation';
+    END IF;
+    RETURN NEW;
+  END IF;
+
+  IF judged_result <> '{codes.JUDGMENT_FAILED}' THEN
     RETURN NEW;
   END IF;
 
@@ -279,18 +300,21 @@ FOR EACH ROW EXECUTE FUNCTION purchase_return_has_its_ledger_line()
 # **반품 문서는 공급사 · 품목을 검사에서 따라간다**(칸을 두지 않았다). 그러니 반품이 선 뒤에
 # 검사의 공급사를 고치면 그 반품이 다른 공급사로 간 것이 되고, 수량을 고치면 불합격분의 합
 # 규칙이 기대는 분모가 움직이며, 판정 시각을 고치면 위의 시각 규칙이 비켜 간다(감사 ㉟ NC-223 ·
-# Codex 리뷰). 유형 칸(`item_type` · `supplier_type`)은 쌍 외래키를 따라 함께 움직이므로
-# 식별 칸만 본다.
+# Codex 리뷰). **불합격 사유도 고정한다**(Codex 리뷰 2 라운드) — 불합격분 반품은 자기 사유를
+# 두지 않고 검사의 사유를 따라가므로, 고치면 지나간 반품의 이유가 바뀐다. 유형 칸(`item_type` ·
+# `supplier_type`)은 쌍 외래키를 따라 함께 움직이므로 식별 칸만 본다.
 INSPECTION_FUNCTION = """
 CREATE OR REPLACE FUNCTION inspection_stays_behind_its_returns() RETURNS trigger
 LANGUAGE plpgsql AS $$
 BEGIN
-  IF (NEW.quantity, NEW.supplier_id, NEW.item_id, NEW.judged_at, NEW.received_date)
+  IF (NEW.quantity, NEW.supplier_id, NEW.item_id, NEW.judged_at, NEW.received_date,
+      NEW.nonconformity_code)
        IS DISTINCT FROM
-     (OLD.quantity, OLD.supplier_id, OLD.item_id, OLD.judged_at, OLD.received_date)
+     (OLD.quantity, OLD.supplier_id, OLD.item_id, OLD.judged_at, OLD.received_date,
+      OLD.nonconformity_code)
      AND EXISTS (SELECT 1 FROM purchase_returns WHERE inspection_id = OLD.id) THEN
     RAISE EXCEPTION
-      '검사 %를 반품이 가리킨다 — 수량 · 공급사 · 품목 · 시각 · 도착일을 고치지 않는다',
+      '검사 %를 반품이 가리킨다 — 수량 · 공급사 · 품목 · 시각 · 도착일 · 사유를 고치지 않는다',
       OLD.id
       USING ERRCODE = 'restrict_violation';
   END IF;
@@ -300,7 +324,8 @@ END $$
 
 INSPECTION_TRIGGER = """
 CREATE TRIGGER inspection_stays_behind_its_returns
-BEFORE UPDATE OF quantity, supplier_id, item_id, judged_at, received_date ON inspections
+BEFORE UPDATE OF quantity, supplier_id, item_id, judged_at, received_date, nonconformity_code
+ON inspections
 FOR EACH ROW EXECUTE FUNCTION inspection_stays_behind_its_returns()
 """
 

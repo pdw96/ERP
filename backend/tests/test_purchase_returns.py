@@ -743,17 +743,31 @@ def test_a_types_direction_is_fixed_once_the_ledger_uses_it(prepared: Session) -
         "received_date = DATE '2026-09-20'",
         "supplier_id = (SELECT max(id) FROM partners)",
         "item_id = (SELECT max(id) FROM items)",
+        "nonconformity_code = 'IQ-PKG'",
     ],
-    ids=["quantity", "judged_at", "received_date", "supplier", "item"],
+    ids=["quantity", "judged_at", "received_date", "supplier", "item", "reason"],
 )
 def test_a_returned_inspection_stays_as_it_was(prepared: Session, change: str) -> None:
-    """**반품은 공급사 · 품목 · 수량을 검사에서 따라간다**(NC-223 · Codex). 반품이 선 뒤 검사가
-    움직이면 그 반품이 다른 공급사로 간 것이 되거나, 합 규칙의 분모가 바뀐다.
+    """**반품은 공급사 · 품목 · 수량 · 사유를 검사에서 따라간다**(NC-223 · Codex). 반품이 선 뒤
+    검사가 움직이면 그 반품이 다른 공급사로 간 것이 되거나, 합 규칙의 분모가 바뀌거나, 지나간
+    반품의 이유가 바뀐다(사유는 Codex 리뷰 2 라운드).
 
     값이 실제로 달라지도록 다른 공급사 · 품목을 하나씩 더 둔다 — 같은 값으로 고치면 트리거가
     「달라지지 않았다」로 넘겨 이 검사가 아무것도 묻지 않는다.
     """
     prepared.add_all([make_partner(codes.SUPPLIER, code="SUP-02"), make_item(code="RM-02")])
+    add_code(prepared, codes.NC_REASON, "IQ-PKG", "포장")
+    prepared.flush()
+    prepared.add(NonconformityAttribute(code="IQ-PKG", measure_kind=codes.COUNTED_KIND))
+    prepared.flush()
+    prepared.add(
+        NonconformityStageRule(
+            reason_code="IQ-PKG",
+            stage_code=codes.STAGE_INCOMING,
+            disposition="반품",
+            special_acceptance_allowed=False,
+        )
+    )
     prepared.flush()
     prepared.add(_failed_return(prepared, 100.0))
     prepared.flush()
@@ -881,3 +895,86 @@ def test_two_returns_written_document_first_do_not_deadlock(engine: Engine) -> N
         assert outcome["second"] == "committed", outcome["second"]
         with Session(scoped) as session:
             assert _balance(session, _the_lot(session).id) == 480.0
+
+
+# ── Codex 리뷰 2 라운드 ──────────────────────────────────────────────────
+
+
+def test_nothing_goes_back_before_it_came_in(prepared: Session) -> None:
+    """**입고 줄의 시각과도 견준다.** 판정(09:00) 뒤 입고(09:30) 전인 09:15 의 반품은 들어오기
+    전의 물건이다 — 판정 시각만 보면 통과하고, 잔량 합은 시각을 보지 않아 뒤의 입고를 먹는다."""
+    prepared.add(_lot_return(prepared, 10.0, returned_at=datetime(2026, 9, 21, 9, 15)))
+    with pytest.raises(IntegrityError, match="입고 시각"):
+        prepared.flush()
+
+
+def test_the_balance_is_looked_up_by_lot(prepared: Session) -> None:
+    """**잔량을 셀 길이 있다.** 트리거가 줄마다 그 로트의 줄을 합하는데 `lot_id` 로 찾을
+    인덱스가 입고 줄만 담은 부분 인덱스뿐이면, 줄이 늘수록 넣을 때마다 표를 훑으며 로트 잠금을
+    쥔다.
+    작은 표에서는 계획기가 인덱스를 고르지 않으므로 인덱스가 있다는 것을 직접 본다."""
+    indexes = {
+        name
+        for (name,) in prepared.execute(
+            text(
+                "SELECT indexname FROM pg_indexes"
+                " WHERE tablename = 'stock_ledger_entries' AND indexdef NOT LIKE '%WHERE%'"
+                " AND indexdef LIKE '%(lot_id)'"
+            )
+        )
+    }
+    assert indexes == {"ix_stock_ledger_entry_lot"}, indexes
+
+
+def test_a_direction_change_waits_for_the_first_line_of_its_type(engine: Engine) -> None:
+    """**첫 줄과 방향 변경이 엇갈려도 고정이 비켜 가지 않는다**(Codex 리뷰 2 라운드).
+
+    그 유형의 첫 줄이 커밋되기 전에 방향을 바꾸면, 고정 트리거는 「줄이 없다」를 보고 통과시키고
+    원장 트리거는 옛 방향으로 셌다 — 둘 다 커밋되면 잔량이 거꾸로 읽힌다. 원장 트리거가 유형
+    속성 줄을 `FOR SHARE` 로 읽어 그 갱신을 첫 줄의 커밋 뒤로 세운다.
+    """
+    with _committed_schema(engine, "effect_race") as scoped:
+        first = Session(scoped)
+        second = Session(scoped)
+        outcome: dict[str, object] = {}
+        try:
+            _return_from_the_lot(first, 10.0)
+            pid = second.execute(text("SELECT pg_backend_pid()")).scalar_one()
+
+            def go() -> None:
+                try:
+                    second.execute(
+                        text(
+                            "UPDATE txn_type_attributes SET total_effect = :effect"
+                            " WHERE code = :code"
+                        ),
+                        {"effect": codes.EFFECT_INCREASE, "code": codes.TXN_PURCHASE_RETURN},
+                    )
+                    second.commit()
+                    outcome["second"] = "committed"
+                except IntegrityError as error:
+                    second.rollback()
+                    outcome["second"] = error
+
+            racer = threading.Thread(target=go)
+            racer.start()
+            deadline = time.monotonic() + 10
+            with scoped.connect() as watcher:
+                while racer.is_alive() and time.monotonic() < deadline:
+                    waiting = watcher.execute(
+                        text("SELECT wait_event_type FROM pg_stat_activity WHERE pid = :pid"),
+                        {"pid": pid},
+                    ).scalar_one_or_none()
+                    if waiting == "Lock":
+                        break
+                    time.sleep(0.02)
+            first.commit()
+            racer.join(10)
+            assert not racer.is_alive(), "둘째가 끝나지 않았다"
+        finally:
+            first.close()
+            second.close()
+
+        assert isinstance(outcome["second"], IntegrityError), outcome["second"]
+        with Session(scoped) as session:
+            assert _balance(session, _the_lot(session).id) == 490.0
