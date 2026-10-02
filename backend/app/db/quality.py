@@ -105,6 +105,16 @@ class ProcessInspectionStandard(Base):
             name="uq_inspection_standard_unit",
             postgresql_nulls_not_distinct=True,
         ),
+        # **행을 좁히지 않는다** — 재검사 측정 줄이 「경시변화 항목」을 가리킬 상대다
+        # (`fk_inspection_measurement_time_variant`).
+        UniqueConstraint(
+            "process_code",
+            "item_code",
+            "material_group",
+            "time_variant",
+            name="uq_inspection_standard_time_variant",
+            postgresql_nulls_not_distinct=True,
+        ),
         # **양방향이다.** 수입인데 자재군이 없으면 기준 여덟이 원자재 열다섯
         # 전부에 걸리던 옛 자리로 돌아가고, 수입이 아닌데 자재군이 있으면
         # 반제품·완제품 기준에 「무슨 자재인가」가 적힌 것이다.

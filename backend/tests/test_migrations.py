@@ -1347,7 +1347,10 @@ def test_downgrade_says_whose_measurements_would_vanish(engine: Engine) -> None:
     """
     schema = "measurement_downgrade_guard"
     with _schema(engine, schema):
-        config = _upgrade_with(engine, schema, "head", _JUDGED_AND_MEASURED)
+        # 측정 줄이 검사의 단계를 들기 전(`53bd4c97a00e`)의 모양으로 심고 머리까지 올린다 —
+        # 그 리비전이 단계를 옮겨 채우는 길도 함께 지난다.
+        config = _upgrade_with(engine, schema, "85d4ad8b3f1f", _JUDGED_AND_MEASURED)
+        command.upgrade(config, "head")
 
         with pytest.raises(Exception, match="측정값과 그때 쓴 규격"):
             command.downgrade(config, "992bb442d985")
@@ -2076,3 +2079,190 @@ def test_upgrading_does_not_check_a_direction_still_being_changed(engine: Engine
 
         assert isinstance(outcome["upgrade"], Exception), outcome["upgrade"]
         assert "구매입고 (감소)" in str(outcome["upgrade"])
+
+
+# ── 만료된 로트가 재검사로 돌아온다 — `53bd4c97a00e` ─────────────────────────
+
+# 입고 줄이 선 로트에 만료일을 심는다 — **이 리비전 전에.** 이 리비전부터는 로트의 만료일을
+# 고칠 수 없다(`lot_expiry_stays_as_labelled`). 원장이 선 리비전(`e84fbec436c0`)에 심는다 —
+# 로트가 검사를 가리키게 되는 것은 그 뒤 리비전이 옮겨 채운다.
+_WITH_AN_EXPIRED_LOT = (
+    _WITH_A_LEDGER_LINE + ";\nUPDATE lots SET expiry_date = DATE '2026-09-30'"
+)
+
+# 머리까지 올린 뒤 합격한 재검사 한 건.
+_ONE_RETEST = """
+INSERT INTO common_codes (group_code, code, name) VALUES ('INSP_STAGE', '재검사', '재검사');
+
+INSERT INTO inspections (inspection_stage, stage_group, item_id, item_type, material_group,
+                         target_lot_id, judged_at, judged_by, result, nonconformity_group,
+                         renewed_expiry_date)
+SELECT '재검사', 'INSP_STAGE', l.item_id, l.item_type, i.material_group, l.id,
+       TIMESTAMP '2026-10-02 09:00', '검사원 1', '합격', 'NC_REASON', DATE '2027-10-02'
+FROM lots AS l JOIN items AS i ON i.id = l.item_id
+"""
+
+
+def test_the_measurement_takes_its_stage_from_its_inspection(engine: Engine) -> None:
+    """**옮겨 채운다 — 지어내지 않는다.** 측정 줄이 검사의 단계를 들게 되는 리비전은 그 단계를
+    상수로 박지 않고 그 검사에서 가져온다. 이 리비전 전의 측정 줄은 IQC 의 것뿐이다."""
+    schema = "retest_measurement_stage"
+    with _schema(engine, schema):
+        config = _upgrade_with(engine, schema, "85d4ad8b3f1f", _JUDGED_AND_MEASURED)
+        command.upgrade(config, "head")
+        scoped = _engine_for_schema(engine, schema)
+        try:
+            with scoped.connect() as conn:
+                stages = conn.execute(
+                    text(
+                        "SELECT inspection_stage, standard_time_variant"
+                        " FROM inspection_measurements"
+                    )
+                ).all()
+        finally:
+            scoped.dispose()
+
+        assert [tuple(row) for row in stages] == [("IQC", None)]
+
+
+def test_downgrade_counts_the_retests_that_would_vanish(engine: Engine) -> None:
+    """**재검사는 다시 만들 수 없다** — 그 판정과 갱신 만료일, 폐기 줄의 근거가 그 표에만 있다.
+
+    폐기 줄은 재검사 없이 설 수 없으므로 재검사를 세면 둘 다 센다(W-6 ①). 몇 건인지를 말한다.
+    """
+    schema = "retest_downgrade_guard"
+    with _schema(engine, schema):
+        config = _upgrade_with(engine, schema, "e84fbec436c0", _WITH_AN_EXPIRED_LOT)
+        command.upgrade(config, "head")
+        scoped = _engine_for_schema(engine, schema)
+        try:
+            with scoped.begin() as conn:
+                for statement in _ONE_RETEST.strip().split(";"):
+                    if statement.strip():
+                        conn.execute(text(statement))
+        finally:
+            scoped.dispose()
+
+        with pytest.raises(Exception, match="재검사 1건"):
+            command.downgrade(config, "85d4ad8b3f1f")
+
+
+def test_downgrade_goes_quietly_when_nothing_was_retested(engine: Engine) -> None:
+    """**가드가 정상 경로를 막지 않는다** — 재검사가 없으면 내려가고, 측정 줄은 그대로
+    남는다."""
+    schema = "retest_downgrade_quiet"
+    with _schema(engine, schema):
+        config = _upgrade_with(engine, schema, "85d4ad8b3f1f", _JUDGED_AND_MEASURED)
+        command.upgrade(config, "head")
+
+        command.downgrade(config, "85d4ad8b3f1f")
+
+        scoped = _engine_for_schema(engine, schema)
+        try:
+            with scoped.connect() as conn:
+                assert (
+                    conn.execute(
+                        text("SELECT count(*) FROM inspection_measurements")
+                    ).scalar_one()
+                    == 1
+                )
+        finally:
+            scoped.dispose()
+
+
+def test_downgrade_does_not_miss_a_retest_still_being_written(engine: Engine) -> None:
+    """**쓰는 중인 재검사를 세지 못하고 지나가지 않는다** — 반품 쪽 가드와 같은 자리다.
+
+    세기 전에 검사 표를 잠그지 않으면 가드는 0 을 보고 지나가고, 뒤의 칸 지우기가 쓰는 쪽을
+    기다렸다가 커밋된 재검사째 지운다.
+    """
+    schema = "retest_downgrade_race"
+    with _schema(engine, schema):
+        config = _upgrade_with(engine, schema, "e84fbec436c0", _WITH_AN_EXPIRED_LOT)
+        command.upgrade(config, "head")
+        scoped = _engine_for_schema(engine, schema)
+        writer = scoped.connect()
+        outcome: dict[str, object] = {}
+        try:
+            writer.begin()
+            for statement in _ONE_RETEST.strip().split(";"):
+                if statement.strip():
+                    writer.execute(text(statement))
+
+            def go() -> None:
+                try:
+                    command.downgrade(config, "85d4ad8b3f1f")
+                    outcome["downgrade"] = "went through"
+                except Exception as error:
+                    outcome["downgrade"] = error
+
+            runner = threading.Thread(target=go)
+            runner.start()
+            deadline = time.monotonic() + 10
+            with scoped.connect() as watcher:
+                while runner.is_alive() and time.monotonic() < deadline:
+                    waiting = watcher.execute(
+                        text(
+                            "SELECT count(*) FROM pg_locks AS l"
+                            " JOIN pg_class AS c ON c.oid = l.relation"
+                            " JOIN pg_namespace AS n ON n.oid = c.relnamespace"
+                            " WHERE NOT l.granted AND n.nspname = :schema"
+                        ),
+                        {"schema": schema},
+                    ).scalar_one()
+                    if waiting:
+                        break
+                    time.sleep(0.02)
+            writer.commit()
+            runner.join(30)
+            assert not runner.is_alive(), "내리기가 끝나지 않았다"
+        finally:
+            writer.close()
+            scoped.dispose()
+
+        assert isinstance(outcome["downgrade"], Exception), outcome["downgrade"]
+        assert "재검사 1건" in str(outcome["downgrade"])
+
+
+@pytest.mark.parametrize(
+    ("planted", "after_upgrade"),
+    [
+        ("재작업 불가 · OQC 불합격", "재작업 불가 · OQC 불합격 · 재검사 불합격"),
+        ("사람이 고친 근거", "사람이 고친 근거"),
+    ],
+    ids=["seeded", "edited-by-a-person"],
+)
+def test_the_disposal_source_is_corrected_only_where_the_seed_left_it(
+    engine: Engine, planted: str, after_upgrade: str
+) -> None:
+    """**기준정보 변경은 마이그레이션으로 낸다** — 시드가 심은 글자일 때만 고치고, 내릴 때도
+    이 리비전이 쓴 글자만 되돌린다. 「구매반품출고」의 설명을 고친 자리와 같다."""
+    schema = "retest_disposal_source"
+    with _schema(engine, schema):
+        config = _upgrade_with(
+            engine,
+            schema,
+            "85d4ad8b3f1f",
+            "INSERT INTO code_groups (group_code, name, value_fixed, description) VALUES"
+            " ('TXN_TYPE', '수불유형', TRUE, '시험');"
+            " INSERT INTO common_codes (group_code, code, name) VALUES"
+            " ('TXN_TYPE', '폐기출고', '폐기출고');"
+            " INSERT INTO txn_type_attributes (group_code, code, total_effect,"
+            " source_document_type) VALUES"
+            f" ('TXN_TYPE', '폐기출고', '감소', '{planted}')",
+        )
+        scoped = _engine_for_schema(engine, schema)
+        read = text(
+            "SELECT source_document_type FROM txn_type_attributes"
+            " WHERE group_code = 'TXN_TYPE' AND code = '폐기출고'"
+        )
+        try:
+            command.upgrade(config, "head")
+            with scoped.connect() as conn:
+                assert conn.execute(read).scalar_one() == after_upgrade
+
+            command.downgrade(config, "85d4ad8b3f1f")
+            with scoped.connect() as conn:
+                assert conn.execute(read).scalar_one() == planted
+        finally:
+            scoped.dispose()

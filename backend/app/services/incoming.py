@@ -513,6 +513,7 @@ def receive(session: Session, request: IncomingInspection) -> Judged:
                 item_code=code,
                 process_code=standard.process_code,
                 material_group=item.material_group,
+                inspection_stage=codes.STAGE_INCOMING,
                 measured_value=value,
                 applied_upper_spec=standard.upper_spec_limit,
                 applied_lower_spec=standard.lower_spec_limit,

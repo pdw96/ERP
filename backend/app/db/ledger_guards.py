@@ -66,6 +66,10 @@ from app.core import codes
 # 입고 줄을 넣고 반품 줄을 마지막에 넣으면 합도 지연 트리거도 통과한다. 입고 줄이 없으면 이
 # 비교는 지나가지만, 그때는 잔량이 0 이라 나가는 줄이 바로 아래에서 막힌다.
 #
+# **폐기 줄은 잔량 전부다**(3단계 재검사). 재검사에서 떨어진 로트는 한 줄로 0 이 된다 —
+# 일부만 버리면 떨어진 물건이 재고에 남는다. 폐기 줄은 재검사만 가리키고 양을 들지 않으므로
+# (재검사는 로트를 통째로 본다) 그 양이 맞는지는 합을 세는 이 자리가 본다.
+#
 # **유형이 없거나 로트가 없으면 아무 말 없이 넘긴다.** 그 줄은 외래키가 거부하고,
 # 거기서 나오는 말(제약 이름)이 더 정확하다. **셀 수 없는 수(`NaN` · 무한대)도
 # 넘긴다** — 넘기지 않으면 합이 `NaN` 이나 무한대가 되어 트리거가 엉뚱한 말(「잔량이
@@ -151,6 +155,11 @@ BEGIN
 
   IF balance < 0 THEN
     RAISE EXCEPTION '로트 %의 잔량이 %이 된다 — 있는 것보다 많이 뺄 수 없다', lot_label, balance
+      USING ERRCODE = 'check_violation';
+  END IF;
+
+  IF NEW.txn_type = '{codes.TXN_DISPOSAL}' AND balance <> 0 THEN
+    RAISE EXCEPTION '폐기출고는 로트 %의 잔량 전부다 — %이 남는다', lot_label, balance
       USING ERRCODE = 'check_violation';
   END IF;
 
@@ -360,6 +369,204 @@ BEFORE UPDATE ON inspections
 FOR EACH ROW EXECUTE FUNCTION inspection_stays_behind_its_returns()
 """
 
+# ── 재검사 — 만료된 로트에만, 들어오는 순간 한 번 묻는다 (ADR 0016) ────────────
+#
+# **「만료」는 재검사 줄 하나로 가를 수 없다.** 로트의 지금 만료일은 「가장 최근에 합격한
+# 재검사의 갱신 만료일, 없으면 `lots.expiry_date`」이고 그것을 판정일과 견준다 — 다른 표의
+# 여러 줄을 보는 조건이라 CHECK 로 적을 수 없다.
+#
+# **경계: 만료일 당일까지는 쓸 수 있다.** 지금 만료일이 판정일보다 **앞설 때만** 만료다. IQC
+# 쓰기 경로가 「이미 지난 자재」를 `만료일 < 판정일` 로 가른 것과 같은 경계이고, 갱신 만료일의
+# CHECK(`ck_inspection_renewal_after_judgement`)도 같은 경계를 쓴다.
+#
+# **로트 줄을 잠근 뒤에 묻는다** — 같은 로트의 두 재검사가 함께 「만료」를 보고 서지 않게.
+# 잠금은 `FOR NO KEY UPDATE` 다: 재검사 줄을 넣을 때 외래키 검사가 로트에 `KEY SHARE` 를
+# 잡는데, `FOR UPDATE` 는 그것과 부딪친다(ADR 0013 이 겪은 교착).
+#
+# **묻는 것은 ADR 0016 의 원칙이 고르는 것이다** — 고정할 수 없는 것(잔량 · 앞선 불합격)은
+# 같은 잠금 아래에서 묻는다.
+#
+# - **앞선 불합격 재검사가 있으면 거절한다.** 불합격은 잔량 전부를 폐기하는데, 그 줄이 같은
+#   트랜잭션에서 아직 서기 전이면 잔량이 그대로 보인다 — 잠금은 같은 트랜잭션 안에서 다시
+#   잡혀 막지 못한다
+# - **앞선 재검사보다 이른 판정은 거절한다.** 「가장 최근」이 판정 시각의 순서이므로, 끼워
+#   넣으면 지금 만료일이 어느 시점의 것인지 갈린다
+# - **지금 만료일이 없으면(NULL) 만료가 아니다** — SQL 의 NULL 견줌은 막지 못하므로 따로 묻는다
+# - **잔량이 0 보다 커야 한다** — 없는 물건을 검사한 기록이 된다
+#
+# **`BEFORE INSERT` 다.** `AFTER` 면 방금 넣은 합격 재검사의 갱신 만료일이 「가장 최근」으로
+# 잡혀 정상 재검사가 전부 거절된다. 로트가 없으면 넘긴다 — 외래키 · CHECK 가 더 정확한 말로
+# 거부한다.
+RETEST_ADMISSION_FUNCTION = f"""
+CREATE OR REPLACE FUNCTION retest_comes_only_to_an_expired_lot() RETURNS trigger
+LANGUAGE plpgsql AS $$
+DECLARE
+  lot_label text;
+  labelled date;
+  expires date;
+  latest timestamp;
+  balance numeric;
+BEGIN
+  IF NEW.inspection_stage <> '{codes.RETEST_STAGE}' OR NEW.target_lot_id IS NULL THEN
+    RETURN NEW;
+  END IF;
+
+  SELECT lot_number, expiry_date INTO lot_label, labelled
+  FROM lots WHERE id = NEW.target_lot_id FOR NO KEY UPDATE;
+  IF NOT FOUND THEN
+    RETURN NEW;
+  END IF;
+
+  IF EXISTS (SELECT 1 FROM inspections
+             WHERE target_lot_id = NEW.target_lot_id
+               AND result = '{codes.JUDGMENT_FAILED}') THEN
+    RAISE EXCEPTION '로트 %는 이미 재검사에서 떨어졌다 — 폐기된 로트는 다시 검사하지 않는다',
+      lot_label
+      USING ERRCODE = 'check_violation';
+  END IF;
+
+  SELECT max(judged_at) INTO latest FROM inspections WHERE target_lot_id = NEW.target_lot_id;
+  IF NEW.judged_at < latest THEN
+    RAISE EXCEPTION '재검사의 판정 시각(%)이 로트 %의 앞선 재검사(%)보다 이르다',
+      NEW.judged_at, lot_label, latest
+      USING ERRCODE = 'check_violation';
+  END IF;
+
+  SELECT renewed_expiry_date INTO expires FROM inspections
+  WHERE target_lot_id = NEW.target_lot_id AND result = '{codes.JUDGMENT_PASSED}'
+  ORDER BY judged_at DESC, id DESC LIMIT 1;
+  IF NOT FOUND THEN
+    expires := labelled;
+  END IF;
+
+  IF expires IS NULL THEN
+    RAISE EXCEPTION '로트 %는 만료일이 없다 — 재검사는 만료된 로트의 일이다', lot_label
+      USING ERRCODE = 'check_violation';
+  END IF;
+  IF expires >= NEW.judged_at::date THEN
+    RAISE EXCEPTION '로트 %의 지금 만료일(%)이 판정일(%)보다 앞서지 않는다 — %',
+      lot_label, expires, NEW.judged_at::date, '만료되지 않은 로트는 재검사를 받지 않는다'
+      USING ERRCODE = 'check_violation';
+  END IF;
+
+  SELECT coalesce(sum(CASE a.total_effect
+                        WHEN '{codes.EFFECT_INCREASE}' THEN e.quantity::numeric
+                        WHEN '{codes.EFFECT_DECREASE}' THEN -e.quantity::numeric
+                      END), 0)
+    INTO balance
+  FROM stock_ledger_entries AS e
+  JOIN txn_type_attributes AS a ON a.group_code = e.txn_type_group AND a.code = e.txn_type
+  WHERE e.lot_id = NEW.target_lot_id;
+
+  IF balance <= 0 THEN
+    RAISE EXCEPTION '로트 %에 남은 것이 없다 — 없는 물건은 재검사하지 않는다', lot_label
+      USING ERRCODE = 'check_violation';
+  END IF;
+
+  RETURN NEW;
+END $$
+"""
+
+RETEST_ADMISSION_TRIGGER = """
+CREATE TRIGGER retest_comes_only_to_an_expired_lot
+BEFORE INSERT ON inspections
+FOR EACH ROW EXECUTE FUNCTION retest_comes_only_to_an_expired_lot()
+"""
+
+# ── 검사 — 단계는 바뀌지 않고, 재검사는 고치지도 지우지도 않는다 ────────────
+#
+# **규칙이 읽는 줄은 고정한다**(ADR 0016). 재검사 줄의 로트 · 판정 시각을 고치면 만료되지 않은
+# 로트로 옮겨 가고, 합격 재검사를 지우면 지금 만료일이 기준 만료일로 되돌아가 갱신된 로트가
+# 다시 재검사를 받는다. 판정 기록을 고칠 정당한 경로가 아직 없다.
+#
+# **단계는 어느 줄에서도 바뀌지 않는다.** 재검사 줄만 고정하면 IQC 줄을 UPDATE 로 재검사로
+# 바꾸며 칸을 한꺼번에 갈아 끼울 수 있다 — `OLD` 가 재검사가 아니라 위의 고정이 물지 않고,
+# 들어오는 순간 묻는 트리거는 `INSERT` 에만 돈다.
+INSPECTION_STAGE_FUNCTION = f"""
+CREATE OR REPLACE FUNCTION inspection_keeps_its_stage() RETURNS trigger
+LANGUAGE plpgsql AS $$
+BEGIN
+  IF TG_OP = 'DELETE' THEN
+    IF OLD.inspection_stage = '{codes.RETEST_STAGE}' THEN
+      RAISE EXCEPTION '재검사 %는 지우지 않는다 — 그 로트의 지금 만료일이 그 위에 서 있다',
+        OLD.id
+        USING ERRCODE = 'restrict_violation';
+    END IF;
+    RETURN OLD;
+  END IF;
+
+  IF NEW.inspection_stage IS DISTINCT FROM OLD.inspection_stage THEN
+    RAISE EXCEPTION '검사 %의 단계는 바뀌지 않는다 — 줄은 들어올 때의 단계로 산다', OLD.id
+      USING ERRCODE = 'restrict_violation';
+  END IF;
+  IF OLD.inspection_stage = '{codes.RETEST_STAGE}' AND NEW IS DISTINCT FROM OLD THEN
+    RAISE EXCEPTION '재검사 %는 고치지 않는다 — 그 로트의 지금 만료일이 그 위에 서 있다',
+      OLD.id
+      USING ERRCODE = 'restrict_violation';
+  END IF;
+  RETURN NEW;
+END $$
+"""
+
+INSPECTION_STAGE_TRIGGER = """
+CREATE TRIGGER inspection_keeps_its_stage
+BEFORE UPDATE OR DELETE ON inspections
+FOR EACH ROW EXECUTE FUNCTION inspection_keeps_its_stage()
+"""
+
+# ── 로트 — 기준 만료일은 고치지 않는다 ─────────────────────────────────────
+#
+# **라벨에 찍혀 나간 값이다**(`PRD.md` 성공 기준 5). 재검사가 이 값을 읽으므로, 잠깐 과거로
+# 돌려 재검사를 넣고 되돌리거나 앞으로 밀어 이미 선 재검사를 소급해 무효로 만들 수 있다.
+# 원장에 줄이 있든 없든 막는다 — 고칠 까닭이 없다.
+LOT_EXPIRY_FUNCTION = """
+CREATE OR REPLACE FUNCTION lot_expiry_stays_as_labelled() RETURNS trigger
+LANGUAGE plpgsql AS $$
+BEGIN
+  IF NEW.expiry_date IS DISTINCT FROM OLD.expiry_date THEN
+    RAISE EXCEPTION '로트 %의 만료일은 고치지 않는다 — 갱신된 만료일은 재검사 기록에 산다',
+      OLD.lot_number
+      USING ERRCODE = 'restrict_violation';
+  END IF;
+  RETURN NEW;
+END $$
+"""
+
+LOT_EXPIRY_TRIGGER = """
+CREATE TRIGGER lot_expiry_stays_as_labelled
+BEFORE UPDATE OF expiry_date ON lots
+FOR EACH ROW EXECUTE FUNCTION lot_expiry_stays_as_labelled()
+"""
+
+# ── 재검사 불합격 → 폐기 줄 — 커밋 시점에 묻는다 ───────────────────────────
+#
+# **원장 쪽 외래키는 줄 → 재검사 방향만 본다.** 떨어진 재검사가 폐기 줄 없이 홀로 서면
+# 떨어진 물건이 잔량에 남는다 — 반품 문서와 그 원장 줄의 자리
+# (`purchase_return_has_its_ledger_line`)와 같다. 재검사는 잔량이 있는 로트에만 서므로(위의
+# 트리거) 폐기할 것이 언제나 있다.
+RETEST_LINE_FUNCTION = f"""
+CREATE OR REPLACE FUNCTION retest_failure_has_its_disposal_line() RETURNS trigger
+LANGUAGE plpgsql AS $$
+BEGIN
+  IF NEW.inspection_stage = '{codes.RETEST_STAGE}'
+     AND NEW.result = '{codes.JUDGMENT_FAILED}'
+     AND NOT EXISTS (SELECT 1 FROM stock_ledger_entries WHERE retest_id = NEW.id) THEN
+    RAISE EXCEPTION
+      '재검사 %는 로트를 떨어뜨렸는데 원장에 폐기 줄이 없다 — 판정과 폐기는 함께 선다',
+      NEW.id
+      USING ERRCODE = 'check_violation';
+  END IF;
+  RETURN NULL;
+END $$
+"""
+
+RETEST_LINE_TRIGGER = """
+CREATE CONSTRAINT TRIGGER retest_failure_has_its_disposal_line
+AFTER INSERT ON inspections
+DEFERRABLE INITIALLY DEFERRED
+FOR EACH ROW EXECUTE FUNCTION retest_failure_has_its_disposal_line()
+"""
+
 
 def _run(*statements: str) -> Callable[..., None]:
     def listener(target: FromClause, connection: Connection, **_: object) -> None:
@@ -373,7 +580,7 @@ def install(*, ledger: FromClause, returns: FromClause) -> None:
     """표가 설 때 트리거도 서게 한다 — `create_all` 이 메타데이터 밖의 것을 모르므로.
 
     **가리켜지는 표 위의 트리거는 가리키는 표가 설 때 건다.** `create_all` 은 외래키
-    순서대로 세우므로, 원장이 설 때 로트 · 유형 속성 표가, 반품 문서가 설 때 검사 표가
+    순서대로 세우므로, 원장이 설 때 로트 · 유형 속성 · 검사 표가, 반품 문서가 설 때 검사 표가
     이미 있다. 함수 본문이 읽는 다른 표는 부를 때 찾으므로 순서를 타지 않는다.
     """
     event.listen(
@@ -386,6 +593,14 @@ def install(*, ledger: FromClause, returns: FromClause) -> None:
             LOT_QUANTITY_TRIGGER,
             EFFECT_FUNCTION,
             EFFECT_TRIGGER,
+            RETEST_ADMISSION_FUNCTION,
+            RETEST_ADMISSION_TRIGGER,
+            INSPECTION_STAGE_FUNCTION,
+            INSPECTION_STAGE_TRIGGER,
+            LOT_EXPIRY_FUNCTION,
+            LOT_EXPIRY_TRIGGER,
+            RETEST_LINE_FUNCTION,
+            RETEST_LINE_TRIGGER,
         ),
     )
     event.listen(

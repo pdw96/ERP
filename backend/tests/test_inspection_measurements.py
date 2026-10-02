@@ -110,6 +110,7 @@ def _measurement(session: Session, **overrides: object) -> InspectionMeasurement
         "process_code": INCOMING,
         "item_code": "입도",
         "material_group": GROUP,
+        "inspection_stage": codes.STAGE_INCOMING,
         "measured_value": 30.0,
         "applied_upper_spec": 50.0,
         "applied_lower_spec": 10.0,

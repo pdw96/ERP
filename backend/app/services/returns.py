@@ -110,12 +110,21 @@ def _inspection(session: Session, inspection_id: int) -> Inspection:
     """
     # `key_share=True` 가 `FOR NO KEY UPDATE` 다 — 트리거와 같은 잠금이고, 문서를 넣을
     # 때 외래키가 잡는 `KEY SHARE` 와 부딪치지 않는다(`ledger_guards.py` 머리).
+    #
+    # **반품이 가리킬 수 있는 것은 IQC 뿐이다**(`fk_purchase_return_inspection_stage`). 재검사는
+    # 이미 재고인 로트를 다시 본 판정이라 돌려보낼 입고분이 없다 — 이 경로에는 「없는 검사」와
+    # 같다. 이름을 따로 두면 계약의 열거가 넓어지므로 재검사 쓰기 경로가 서는 조각에서 본다.
     inspection = session.scalars(
-        select(Inspection).where(Inspection.id == inspection_id).with_for_update(key_share=True)
+        select(Inspection)
+        .where(
+            Inspection.id == inspection_id,
+            Inspection.inspection_stage == codes.STAGE_INCOMING,
+        )
+        .with_for_update(key_share=True)
     ).one_or_none()
     if inspection is None:
         raise RefusedReturn(
-            ReturnRefusal.UNKNOWN_INSPECTION, f"그런 검사가 없다: {inspection_id}"
+            ReturnRefusal.UNKNOWN_INSPECTION, f"반품이 가리킬 수입검사가 없다: {inspection_id}"
         )
     return inspection
 
@@ -201,8 +210,10 @@ def _rejected_would_be_exceeded(
 ) -> bool:
     """불합격분은 원장 밖이라 **반품 문서끼리의 합**을 센다 — 반품 문서 트리거와 같은 셈이다.
 
-    검사 줄은 `_inspection()` 이 이미 잠갔다.
+    검사 줄은 `_inspection()` 이 이미 잠갔다. 그 검사는 IQC 라 수량이 언제나 있다
+    (`ck_inspection_incoming_names_its_delivery`).
     """
+    assert inspection.quantity is not None
     returned = (
         select(func.coalesce(func.sum(cast(PurchaseReturn.quantity, Numeric)), 0))
         .where(PurchaseReturn.inspection_id == inspection.id, PurchaseReturn.lot_id.is_(None))
