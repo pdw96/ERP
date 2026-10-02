@@ -537,21 +537,69 @@ def test_a_lot_without_ledger_lines_can_still_be_corrected(prepared: Session) ->
     assert prepared.get(Lot, second.id).quantity == 12.0  # type: ignore[union-attr]
 
 
-def test_a_type_whose_direction_is_unknown_is_not_counted(prepared: Session) -> None:
-    """**셀 줄 모르는 유형은 조용히 0 으로 세지 않는다** — 양방향 · 불변 · 기준점이 원장에
-    서면 그 줄을 더해야 하는지 빼야 하는지 트리거가 모른다. 지금은 CHECK 가 그런 유형을
-    받지 않지만, CHECK 가 넓어지는 날 트리거가 먼저 말하게 둔다."""
+@pytest.mark.parametrize(
+    ("txn_type", "effect"),
+    [
+        (codes.TXN_PURCHASE_RETURN, codes.EFFECT_INCREASE),
+        (codes.TXN_PURCHASE_RETURN, codes.EFFECT_BOTH),
+    ],
+)
+def test_a_type_running_the_wrong_way_takes_no_line(
+    prepared: Session, txn_type: str, effect: str
+) -> None:
+    """**거꾸로 선 유형은 첫 줄부터 받지 않는다**(Codex 리뷰 4 라운드). 방향을 고정하는
+    트리거는 줄이 선 유형만 지키므로, 아직 줄이 없는 구매반품출고가 「증가」로 고쳐진 채면 첫
+    반품이 잔량을 늘리고 그 줄이 곧바로 틀린 방향을 고정한다. 셀 줄 모르는 방향(양방향)도
+    조용히 0 으로 세지 않는다. 구매입고는 심은 로트에 줄이 이미 있어 고정 트리거가 먼저
+    막는다."""
     prepared.execute(
         text("UPDATE txn_type_attributes SET total_effect = :effect WHERE code = :code"),
-        {"effect": codes.EFFECT_BOTH, "code": codes.TXN_PURCHASE_RETURN},
+        {"effect": effect, "code": txn_type},
     )
     document = _lot_return(prepared, 100.0)
     prepared.add(document)
     prepared.flush()
-
     prepared.add(_return_line(document))
-    with pytest.raises(IntegrityError, match="잔량을 셀 수 없다"):
+    with pytest.raises(IntegrityError, match="원장은 이 유형을"):
         prepared.flush()
+
+
+def _a_lot_without_its_receipt(session: Session) -> Lot:
+    """같은 품목 · 공급사의 둘째 합격 로트 — **입고 줄을 아직 넣지 않았다.**"""
+    first = _the_lot(session)
+    passed = session.get(Inspection, first.inspection_id)
+    assert passed is not None
+    second = Inspection(
+        item_id=passed.item_id,
+        item_type=passed.item_type,
+        material_group=passed.material_group,
+        supplier_id=passed.supplier_id,
+        supplier_type=passed.supplier_type,
+        supplier_lot_number="SL-2026-0003",
+        quantity=300.0,
+        received_date=RECEIVED,
+        judged_at=JUDGED,
+        judged_by="검사원 1",
+        result=codes.JUDGMENT_PASSED,
+        nonconformity_code=None,
+    )
+    session.add(second)
+    session.flush()
+    lot = Lot(
+        item_id=first.item_id,
+        item_type=first.item_type,
+        lot_number="RM-01-260921-02",
+        lot_origin=codes.LOT_FROM_SUPPLIER,
+        warehouse=codes.WAREHOUSE_RAW,
+        stock_type=codes.STOCK_GOOD,
+        quantity=second.quantity,
+        received_date=RECEIVED,
+        inspection_id=second.id,
+        inspection_result=second.result,
+    )
+    session.add(lot)
+    session.flush()
+    return lot
 
 
 # ── 불합격분 — 원장 밖의 합 ─────────────────────────────────────────────────
@@ -1007,3 +1055,34 @@ def test_failed_returns_are_looked_up_by_inspection(prepared: Session) -> None:
         )
     }
     assert indexes == {"ix_purchase_return_inspection"}, indexes
+
+
+# ── Codex 리뷰 4 라운드 ──────────────────────────────────────────────────
+
+
+def test_a_receipt_written_later_does_not_launder_an_earlier_return(prepared: Session) -> None:
+    """**시각은 원장 줄이 들어올 때도 견준다.** 입고 줄이 아직 없는 로트에 반품 문서(09-25)를
+    먼저 넣으면 문서 쪽은 견줄 입고 시각이 없어 지나간다. 같은 트랜잭션에서 입고 줄(09-26)을
+    넣고 반품 줄을 마지막에 넣으면 합은 음수가 아니고 지연 트리거도 줄을 본다 — 들어오기 전에
+    나간 물건이 남는다."""
+    lot = _a_lot_without_its_receipt(prepared)
+    document = PurchaseReturn(
+        inspection_id=lot.inspection_id,
+        inspection_result=lot.inspection_result,
+        lot_id=lot.id,
+        settle_type=IN_KIND,
+        nonconformity_code=REASON,
+        quantity=50.0,
+        returned_at=RETURNED,
+        returned_by="자재 담당 1",
+    )
+    prepared.add(document)
+    prepared.flush()
+    late = _receipt(lot)
+    late.occurred_at = datetime(2026, 9, 26, 9, 0)
+    prepared.add(late)
+    prepared.flush()
+
+    prepared.add(_return_line(document))
+    with pytest.raises(IntegrityError, match="입고 시각"):
+        prepared.flush()

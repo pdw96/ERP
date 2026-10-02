@@ -2018,3 +2018,61 @@ def test_upgrading_stops_when_a_ledger_type_runs_the_wrong_way(engine: Engine) -
 
         with pytest.raises(Exception, match="구매입고"):
             command.upgrade(config, "head")
+
+
+def test_upgrading_does_not_check_a_direction_still_being_changed(engine: Engine) -> None:
+    """**묻기 전에 잠근다**(Codex 리뷰 4 라운드).
+
+    방향을 바꾸는 트랜잭션이 커밋되기 전에 올리기가 시작되면, 가드는 옛 방향(증가)을 보고
+    지나가고 뒤의 `CREATE TRIGGER` 가 그 트랜잭션을 기다렸다가 거꾸로 선 방향째 고정한다.
+    가드가 묻기 전에 표를 잠가 고치는 쪽이 끝나기를 기다리게 한다 — 그러면 커밋된 방향을 보고
+    멈춘다.
+    """
+    schema = "purchase_return_effect_race"
+    with _schema(engine, schema):
+        config = _upgrade_with(engine, schema, "e84fbec436c0", _WITH_A_LEDGER_LINE)
+        scoped = _engine_for_schema(engine, schema)
+        writer = scoped.connect()
+        outcome: dict[str, object] = {}
+        try:
+            writer.begin()
+            writer.execute(
+                text(
+                    "UPDATE txn_type_attributes SET total_effect = '감소'"
+                    " WHERE code = '구매입고'"
+                )
+            )
+
+            def go() -> None:
+                try:
+                    command.upgrade(config, "head")
+                    outcome["upgrade"] = "went through"
+                except Exception as error:
+                    outcome["upgrade"] = error
+
+            runner = threading.Thread(target=go)
+            runner.start()
+            deadline = time.monotonic() + 10
+            with scoped.connect() as watcher:
+                while runner.is_alive() and time.monotonic() < deadline:
+                    waiting = watcher.execute(
+                        text(
+                            "SELECT count(*) FROM pg_locks AS l"
+                            " JOIN pg_class AS c ON c.oid = l.relation"
+                            " JOIN pg_namespace AS n ON n.oid = c.relnamespace"
+                            " WHERE NOT l.granted AND n.nspname = :schema"
+                        ),
+                        {"schema": schema},
+                    ).scalar_one()
+                    if waiting:
+                        break
+                    time.sleep(0.02)
+            writer.commit()
+            runner.join(30)
+            assert not runner.is_alive(), "올리기가 끝나지 않았다"
+        finally:
+            writer.close()
+            scoped.dispose()
+
+        assert isinstance(outcome["upgrade"], Exception), outcome["upgrade"]
+        assert "구매입고 (감소)" in str(outcome["upgrade"])

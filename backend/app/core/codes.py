@@ -189,7 +189,14 @@ TXN_PURCHASE_RECEIPT = "구매입고"
 # 대물이든 대금이든 이 유형 하나다 — 원장은 「재고가 줄었다」만 적고, 정산
 # 구분은 반품 문서에 한 번만 산다(원칙 ⑥).
 TXN_PURCHASE_RETURN = "구매반품출고"
-LEDGER_TXN_TYPES = (TXN_PURCHASE_RECEIPT, TXN_PURCHASE_RETURN)
+# **유형마다 잔량을 세는 방향**(Codex 리뷰 4 라운드). 시드가 `txn_type_attributes` 에 같은 값을
+# 심지만, 그 칸은 원장 줄이 서기 전까지 고칠 수 있다 — 줄이 들어올 때 잔량 트리거가 이 방향과
+# 견주어 거꾸로 선 유형의 첫 줄을 막는다. 원장 CHECK 가 받는 유형도 이 목록이다.
+LEDGER_EFFECTS = {
+    TXN_PURCHASE_RECEIPT: EFFECT_INCREASE,
+    TXN_PURCHASE_RETURN: EFFECT_DECREASE,
+}
+LEDGER_TXN_TYPES = tuple(LEDGER_EFFECTS)
 
 # ── 불합격 처분 ─────────────────────────────────────────────────────────────
 # 「고칠 수 있는가」가 처분을 가른다 — 고칠 수 없는 것(이물 · 접착력 · 배합비)은

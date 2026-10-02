@@ -553,7 +553,7 @@ PostgreSQL 의 외래키가 기본키나 유일키에만 붙기 때문이다.
 - **양방향** — `(txn_type = '구매반품출고') = (purchase_return_id IS NOT NULL)`
 - **부분 유일 인덱스** `(purchase_return_id) WHERE purchase_return_id IS NOT NULL` — 문서 하나에 원장 줄은 하나다
 - **인덱스** `ix_stock_ledger_entry_lot (lot_id)` — 트리거가 줄마다 그 로트의 줄을 합하는 자리다. 입고 줄만 담은 부분 유일 인덱스는 그 합에 쓰이지 못한다(Codex 리뷰 2 라운드)
-- **트리거** `stock_ledger_entry_keeps_the_balance` — 한 로트의 줄을 합한 잔량이 0 밑으로 내려가지 않고, 입고 줄의 수량은 로트 수량과 같으며, 줄을 고치거나 지우지 않는다. 같은 자리를 로트 쪽에서 `lot_quantity_stays_with_its_ledger` 가 지킨다 — 원장에 줄이 선 로트의 수량을 고치지 않는다. **CHECK 로 적을 수 없는 규칙이라 트리거다**(ADR 0013, `app/db/ledger_guards.py`). 로트 줄을 `FOR NO KEY UPDATE` 로 잠근다 — `FOR UPDATE` 는 반품 문서의 외래키가 잡는 `KEY SHARE` 와 부딪쳐 교착이 났다. 유형 속성 줄은 `FOR SHARE` 로 읽어, 그 유형의 첫 줄이 커밋되기 전에 방향을 바꾸는 갱신을 그 뒤로 세운다
+- **트리거** `stock_ledger_entry_keeps_the_balance` — 한 로트의 줄을 합한 잔량이 0 밑으로 내려가지 않고, 입고 줄의 수량은 로트 수량과 같으며, 줄을 고치거나 지우지 않는다. 같은 자리를 로트 쪽에서 `lot_quantity_stays_with_its_ledger` 가 지킨다 — 원장에 줄이 선 로트의 수량을 고치지 않는다. **CHECK 로 적을 수 없는 규칙이라 트리거다**(ADR 0013, `app/db/ledger_guards.py`). 로트 줄을 `FOR NO KEY UPDATE` 로 잠근다 — `FOR UPDATE` 는 반품 문서의 외래키가 잡는 `KEY SHARE` 와 부딪쳐 교착이 났다. 유형 속성 줄은 `FOR SHARE` 로 읽어, 그 유형의 첫 줄이 커밋되기 전에 방향을 바꾸는 갱신을 그 뒤로 세운다. 줄의 유형이 `txn_type_attributes` 에 선 방향이 `codes.LEDGER_EFFECTS` 와 다르면 받지 않고, 나가는 줄의 시각이 그 로트의 입고 줄보다 앞서면 받지 않는다(Codex 리뷰 4 라운드)
 - `CHECK quantity >= 0` **이고 유한한 수** — 원장은 합으로 읽는 표라 `NaN` 한 줄의 피해가 표 하나에 그치지 않는다
 - **부분 유일 인덱스** `(lot_id) WHERE txn_type = '구매입고'` — 로트 하나에 입고 줄은 하나다
 

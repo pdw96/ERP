@@ -56,10 +56,24 @@ from app.core import codes
 # `NO KEY UPDATE` 와 부딪쳐 갱신을 이 줄의 커밋 뒤로 세우고, 그때 고정 트리거가 줄을 본다.
 # 줄끼리는 `FOR SHARE` 가 서로 부딪치지 않는다.
 #
+# **유형의 방향은 `codes.LEDGER_EFFECTS` 와 견준다**(Codex 리뷰 4 라운드). 아래의 고정
+# 트리거는 줄이 선 유형만 지키므로, 아직 줄이 없는 유형이 거꾸로 고쳐져 있으면 첫 줄이
+# 잔량을 거꾸로 세고 곧바로 그 방향을 고정한다. 목록에 없는 유형은 넘긴다 — 원장 CHECK 가
+# 같은 목록으로 거부하고 그 이름이 더 정확하다.
+#
+# **나가는 줄의 시각은 입고 줄과 견준다**(Codex 리뷰 4 라운드). 반품 문서의 트리거도
+# 견주지만, 입고 줄이 아직 없는 로트에서는 견줄 것이 없어 지나간다 — 같은 트랜잭션에서 늦은
+# 입고 줄을 넣고 반품 줄을 마지막에 넣으면 합도 지연 트리거도 통과한다. 입고 줄이 없으면 이
+# 비교는 지나가지만, 그때는 잔량이 0 이라 나가는 줄이 바로 아래에서 막힌다.
+#
 # **유형이 없거나 로트가 없으면 아무 말 없이 넘긴다.** 그 줄은 외래키가 거부하고,
 # 거기서 나오는 말(제약 이름)이 더 정확하다. **셀 수 없는 수(`NaN` · 무한대)도
 # 넘긴다** — 넘기지 않으면 합이 `NaN` 이나 무한대가 되어 트리거가 엉뚱한 말(「잔량이
 # 음수다」)로 거부하고, 그 줄의 진짜 이유는 `is_finite()` CHECK 가 말한다.
+_EXPECTED_EFFECTS = " ".join(
+    f"WHEN '{txn_type}' THEN '{effect}'" for txn_type, effect in codes.LEDGER_EFFECTS.items()
+)
+
 LEDGER_GUARD_FUNCTION = f"""
 CREATE OR REPLACE FUNCTION stock_ledger_entry_keeps_the_balance() RETURNS trigger
 LANGUAGE plpgsql AS $$
@@ -67,6 +81,8 @@ DECLARE
   lot_quantity double precision;
   lot_label text;
   effect text;
+  expected text;
+  came_in timestamp;
   balance numeric;
 BEGIN
   IF TG_OP <> 'INSERT' THEN
@@ -97,9 +113,25 @@ BEGIN
   IF NOT FOUND THEN
     RETURN NEW;
   END IF;
-  IF effect NOT IN ('{codes.EFFECT_INCREASE}', '{codes.EFFECT_DECREASE}') THEN
-    RAISE EXCEPTION '총량 영향이 「%」인 유형(%)은 잔량을 셀 수 없다', effect, NEW.txn_type
+  expected := CASE NEW.txn_type {_EXPECTED_EFFECTS} END;
+  IF expected IS NULL THEN
+    RETURN NEW;
+  END IF;
+  IF effect IS DISTINCT FROM expected THEN
+    RAISE EXCEPTION '유형 %의 총량 영향이 「%」로 서 있다 — 원장은 이 유형을 「%」으로 센다',
+      NEW.txn_type, effect, expected
       USING ERRCODE = 'check_violation';
+  END IF;
+
+  IF NEW.txn_type <> '{codes.TXN_PURCHASE_RECEIPT}' THEN
+    SELECT occurred_at INTO came_in FROM stock_ledger_entries
+    WHERE lot_id = NEW.lot_id AND txn_type = '{codes.TXN_PURCHASE_RECEIPT}';
+    IF NEW.occurred_at < came_in THEN
+      RAISE EXCEPTION
+        '줄의 시각(%)이 로트 %의 입고 시각(%)보다 앞선다 — 들어오기 전의 물건이다',
+        NEW.occurred_at, lot_label, came_in
+        USING ERRCODE = 'check_violation';
+    END IF;
   END IF;
 
   SELECT coalesce(sum(CASE a.total_effect
@@ -195,8 +227,8 @@ FOR EACH ROW EXECUTE FUNCTION txn_type_effect_stays_behind_its_lines()
 # 도착일은 판정일보다 늦을 수 없으므로(`ck_inspection_judged_after_arrival`) 판정 시각
 # 하나로 둘 다 지켜진다. **재고 로트는 입고 줄의 시각과도 견준다**(Codex 리뷰 2 라운드) —
 # 쓰기 경로는 입고 시각을 판정 시각으로 적지만, 그것을 묶는 제약은 없어 입고가 판정보다 늦은
-# 줄이 설 수 있다. 원장의 반품 줄은 문서와 같은 시각을 들어야 하므로(4칸 외래키) 이 자리가
-# 원장 쪽도 지킨다.
+# 줄이 설 수 있다. 입고 줄이 아직 없는 로트는 여기서 견줄 것이 없으므로, 반품 줄이 들어올 때
+# 잔량 트리거가 다시 견준다(Codex 리뷰 4 라운드).
 #
 # **잠그는 것은 그 검사 줄이다** — 반품이 가리키는 쪽이 하나뿐이라 갈래마다 같다.
 RETURN_GUARD_FUNCTION = f"""

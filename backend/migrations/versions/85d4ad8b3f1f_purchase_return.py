@@ -29,7 +29,8 @@
 걸리는 표(원장 · `lots` · `txn_type_attributes` · `purchase_returns` · `inspections`)를 잡는다
 (목록을 세지 않는다. 세면 갈린다). `ADD COLUMN` 이 원장의 첫 구문이라
 ACCESS EXCLUSIVE 가 커밋까지 유지되고, 그 사이 원장의 쓰기가 멈춘다. `migrations/env.py` 가
-전체를 트랜잭션 하나로 감싼다.
+전체를 트랜잭션 하나로 감싼다. 방향 가드 앞에서는 `txn_type_attributes` 를 `SHARE` 로 먼저
+잠근다(Codex 리뷰 4 라운드) — 묻고 나서 고정하기 사이에 방향이 바뀌지 않게.
 
 **내릴 때 멈출 수 있다 — 반품 문서가 하나라도 있으면.** 이 리비전은 구조만 세우므로
 사라지는 것은 사람이 나중에 넣은 반품뿐이고, 그것은 **다시 만들 수 없다** — 무엇을 왜
@@ -74,6 +75,8 @@ DECLARE
   lot_quantity double precision;
   lot_label text;
   effect text;
+  expected text;
+  came_in timestamp;
   balance numeric;
 BEGIN
   IF TG_OP <> 'INSERT' THEN
@@ -104,9 +107,25 @@ BEGIN
   IF NOT FOUND THEN
     RETURN NEW;
   END IF;
-  IF effect NOT IN ('증가', '감소') THEN
-    RAISE EXCEPTION '총량 영향이 「%」인 유형(%)은 잔량을 셀 수 없다', effect, NEW.txn_type
+  expected := CASE NEW.txn_type WHEN '구매입고' THEN '증가' WHEN '구매반품출고' THEN '감소' END;
+  IF expected IS NULL THEN
+    RETURN NEW;
+  END IF;
+  IF effect IS DISTINCT FROM expected THEN
+    RAISE EXCEPTION '유형 %의 총량 영향이 「%」로 서 있다 — 원장은 이 유형을 「%」으로 센다',
+      NEW.txn_type, effect, expected
       USING ERRCODE = 'check_violation';
+  END IF;
+
+  IF NEW.txn_type <> '구매입고' THEN
+    SELECT occurred_at INTO came_in FROM stock_ledger_entries
+    WHERE lot_id = NEW.lot_id AND txn_type = '구매입고';
+    IF NEW.occurred_at < came_in THEN
+      RAISE EXCEPTION
+        '줄의 시각(%)이 로트 %의 입고 시각(%)보다 앞선다 — 들어오기 전의 물건이다',
+        NEW.occurred_at, lot_label, came_in
+        USING ERRCODE = 'check_violation';
+    END IF;
   END IF;
 
   SELECT coalesce(sum(CASE a.total_effect
@@ -477,6 +496,13 @@ def upgrade() -> None:
     # 앞 스키마는 원장 줄이 선 유형의 방향도 고칠 수 있었다. 아래 트리거가 그 방향을 고정하므로,
     # 지금 셀 수 없거나 거꾸로 선 방향을 그대로 고정하면 고칠 길도 함께 닫힌다. 이 리비전 전의
     # 원장이 받던 유형은 구매입고 하나이고, 그 방향은 증가다.
+    #
+    # **묻기 전에 잠근다**(Codex 리뷰 4 라운드). 방향을 고치는 트랜잭션이 커밋되기 전에 물으면 옛
+    # 방향을 보고 지나가고, 뒤의 `CREATE TRIGGER` 가 그 트랜잭션을 기다렸다가 고쳐진 방향째 고정한다.
+    # `SHARE` 는 고치기(`ROW EXCLUSIVE`)와 부딪쳐 고치는 쪽이 끝난 뒤에 묻게 하고, 그 뒤의 고치기는
+    # 이 트랜잭션이 끝날 때까지 막는다. 아직 줄이 없는 유형(구매반품출고)의 방향은 여기서 묻지 않는다
+    # — 잔량 트리거가 첫 줄이 들어올 때 `codes.LEDGER_EFFECTS` 와 견준다.
+    op.execute("LOCK TABLE txn_type_attributes IN SHARE MODE")
     op.execute(
         """
         DO $$

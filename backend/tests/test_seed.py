@@ -122,26 +122,17 @@ def test_the_groups_in_the_database_match_the_ones_the_program_calls(
     assert planted == set(codes.GROUP_CODES)
 
 
-# 원장에 나는 유형마다 **잔량 트리거가 기대는 방향.** 시드에서 방향이 뒤집히면 반품이
-# 재고를 늘리고, 트리거는 그것을 막을 이유가 없다.
-_LEDGER_EFFECTS = {
-    codes.TXN_PURCHASE_RECEIPT: codes.EFFECT_INCREASE,
-    codes.TXN_PURCHASE_RETURN: codes.EFFECT_DECREASE,
-}
-
-
 def test_the_transaction_types_the_program_names_are_in_the_seed(blank: Engine) -> None:
     """**프로그램이 이름으로 부르는 수불유형이 시드에 있어야 한다.**
 
     수불유형 열둘의 값은 시드에만 있고 `codes.py` 에는 **부르는 쪽이 있는 것만**
-    적혀 있다(`LEDGER_TXN_TYPES`). 한 벌 반이라 갈릴 수 있는 자리이므로 —
+    적혀 있다(`LEDGER_EFFECTS`). 한 벌 반이라 갈릴 수 있는 자리이므로 —
     시드에서 그 줄의 이름을 바꾸면 원장의 CHECK 가 그 줄을 받지 않게 되고,
     그것은 **아무도 터지지 않는 고장**이다 — 여기서 둘을 견준다.
 
     **속성 줄까지 본다.** 코드만 있고 속성이 없으면 원장이 가리킬 수 없고, 방향이
-    틀리면 잔량 트리거가 거꾸로 센다.
+    틀리면 잔량 트리거가 그 유형의 첫 줄을 막는다 — 반품을 하나도 낼 수 없다.
     """
-    assert set(_LEDGER_EFFECTS) == set(codes.LEDGER_TXN_TYPES)
     seed_module.seed(blank)
 
     with blank.connect() as conn:
@@ -157,7 +148,7 @@ def test_the_transaction_types_the_program_names_are_in_the_seed(blank: Engine) 
             ).all()
         )
 
-    assert planted == _LEDGER_EFFECTS, planted
+    assert planted == codes.LEDGER_EFFECTS, planted
 
 
 def test_every_measured_reason_points_at_an_item_that_exists(blank: Engine) -> None:
