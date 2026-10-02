@@ -1083,3 +1083,14 @@ PostgreSQL 16)도 초록이다(392 passed).
 | — | 반품 문서의 `inspection_id` 인덱스를 뺐다(모델) | `test_failed_returns_are_looked_up_by_inspection` |
 | — | 올릴 때 원장 유형의 방향 가드를 껐다 | `test_upgrading_stops_when_a_ledger_type_runs_the_wrong_way` |
 | — | 내릴 때 반품 표 잠금을 뺐다 | `test_downgrade_does_not_miss_a_return_still_being_written` — 가드가 0 을 보고 지나간 뒤 옛 CHECK 를 다시 세우다 터진다 |
+
+## 조각 1 리뷰 4 라운드 — Codex 리뷰의 고침 (`9523f7f`)
+
+4 라운드가 더한 지킴 셋을 하나씩 어긋낸 뒤 그것을 물어야 할 검사만 돌렸다. 어긋냄 없이 돌린 대조군은 초록이고, 같은 트리의
+`pytest` 전체(실제 PostgreSQL 16)도 초록이다. 세 검사 모두 고침보다 먼저 써서, 고치기 전의 코드에서 빨간 것을 봤다(재현).
+
+| NC | 무엇을 어긋냈나 | 빨개진 검사 |
+|---|---|---|
+| — | 잔량 트리거의 방향 비교(`codes.LEDGER_EFFECTS`)를 껐다 | `test_a_type_running_the_wrong_way_takes_no_line` — 증가 · 양방향 둘 다 |
+| — | 잔량 트리거의 나가는 줄 시각 비교를 껐다 | `test_a_receipt_written_later_does_not_launder_an_earlier_return` — 문서 쪽 비교만 무는 `test_nothing_goes_back_before_it_came_in` 은 초록으로 남는다(겹친 방어가 아니라 입고 줄이 있을 때의 자리) |
+| — | 올릴 때 방향 가드 앞의 `txn_type_attributes` 잠금을 뺐다 | `test_upgrading_does_not_check_a_direction_still_being_changed` — 올리기가 고쳐진 방향째 지나간다 |
