@@ -92,6 +92,9 @@
 | `6001d28` | — | 두 NC 표의 머리 줄을 바꿔도 「아직」 표 게이트의 앵커가 통과한다 | `audit-quality` | 초록이 맞다 — 겨냥이 빗나간 어긋냄이다. 파서는 머리 줄이 아니라 절 이름으로 표를 찾고, 절 이름을 바꾸는 어긋냄은 같은 묶음에서 빨갛다 |
 | `f2f39e3` | — | 원장 트리거의 로트 잠금만 `FOR UPDATE` 로 되돌려도 엇갈림 검사가 통과한다 | `audit-quality` | 초록이 맞다 — 겹친 방어. 반품 문서 트리거가 검사 줄을 먼저 잡아 같은 검사의 반품이 줄을 서므로 엇갈림 자체가 서지 않는다. 둘 다 되돌리면(같은 묶음의 7c) 빨갛다 |
 | `f2f39e3` | — | 반품 문서 트리거의 검사 잠금만 빼도 엇갈림 검사가 통과한다 | `audit-quality` | 초록이 맞다 — 겹친 방어. `FOR NO KEY UPDATE` 는 외래키의 `KEY SHARE` 와 부딪치지 않아 교착이 나지 않는다. 둘 다 되돌리면 빨갛다 |
+| `57a5bba` | — | 반품 쓰기 경로의 `_as_counted()` 만 `double` 로 바꿔도 잔량 검사가 통과한다 | `audit-quality` | 초록이 맞다 — 겹친 방어. 합이 `numeric` 이면 `double` 과의 비교에서 합 쪽 값이 이미 맞다. 합까지 바꾸면 빨갛다(`79d04b8` 묶음) |
+| `79d04b8` | — | 반품 쓰기 경로의 `_as_counted()` 만 `double` 로 바꿔도 잔량 검사가 통과한다 — 수를 고친 뒤에도 같다 | `audit-quality` | 초록이 맞다 — 겹친 방어. `57a5bba` 줄과 같은 자리다 |
+| `79d04b8` | — | 반품 쓰기 경로의 로트 잠금만 빼도 동시 반품 검사가 통과한다 | `audit-quality` | 초록이 맞다 — 겹친 방어. 검사와 로트가 하나씩 짝이라(`uq_lot_inspection`) 먼저 잡는 검사 잠금이 같은 로트의 반품을 줄 세운다. 둘 다 빼면 빨갛다. 로트를 검사 밖의 길로 줄이는 유형(폐기출고)이 서는 날 이 잠금이 홀로 선다 — 그 조각이 다시 잰다 |
 
 ## ⑧ 의 고침 (`03b6c1f`)
 
@@ -1094,3 +1097,76 @@ PostgreSQL 16)도 초록이다(392 passed).
 | — | 잔량 트리거의 방향 비교(`codes.LEDGER_EFFECTS`)를 껐다 | `test_a_type_running_the_wrong_way_takes_no_line` — 증가 · 양방향 둘 다 |
 | — | 잔량 트리거의 나가는 줄 시각 비교를 껐다 | `test_a_receipt_written_later_does_not_launder_an_earlier_return` — 문서 쪽 비교만 무는 `test_nothing_goes_back_before_it_came_in` 은 초록으로 남는다(겹친 방어가 아니라 입고 줄이 있을 때의 자리) |
 | — | 올릴 때 방향 가드 앞의 `txn_type_attributes` 잠금을 뺐다 | `test_upgrading_does_not_check_a_direction_still_being_changed` — 올리기가 고쳐진 방향째 지나간다 |
+
+## 3단계 조각 2 — 반품 쓰기 경로 (`57a5bba`)
+
+쓰기 경로가 트리거보다 먼저 이름으로 막는 가드를 하나씩 어긋낸 뒤 `tests/test_return_path.py` 만 돌렸다. 어긋냄 없이 돌린
+대조군은 초록이고, 같은 트리의 `pytest` 전체(실제 PostgreSQL 16)도 초록이다. 가드를 빼면 트리거나 제약이 같은 줄을 막으므로
+데이터는 지켜지고, 빨개지는 까닭은 **이름 대신 `IntegrityError` 가 나서**다.
+
+| NC | 무엇을 어긋냈나 | 빨개진 검사 |
+|---|---|---|
+| — | 불합격분 합의 가드를 껐다 | `test_failed_returns_do_not_add_up_past_what_came` · `test_two_failed_returns_at_once_leave_the_second_with_a_name` |
+| — | 로트 잔량의 가드를 껐다 | `test_a_lot_can_go_back_in_pieces_down_to_nothing` · `test_a_lot_does_not_give_back_more_than_it_holds` · `test_a_refusal_leaves_nothing_behind` · `test_two_lot_returns_at_once_leave_the_second_with_a_name` |
+| — | 견주는 수(`_as_counted()`)만 `double` 로 바꿨다 | **없다 — 통과했다** — 겹친 방어(위 「아직 초록인 어긋냄」). 그리고 그 트리의 잔량 검사가 고른 수(33.3 · 66.7)는 `double` 로도 0 이라, 셈 전체를 바꿔도 무는지 이 트리에서는 알 수 없었다 — `79d04b8` 이 수를 고쳤다 |
+| — | 불합격 검사에 사유가 함께 오는 것을 막는 가드를 껐다 | `test_a_failed_return_does_not_say_why_twice` — `ck_purchase_return_reason_only_for_a_lot` 가 문다 |
+| — | 재고 로트 반품에 사유가 없는 것을 막는 가드를 껐다 | `test_a_lot_return_says_why` — 다음 가드가 「관문에서 쓸 수 없는 사유」로 거절해 이름이 갈린다 |
+| — | 정산 구분이 있는지 묻는 가드를 껐다 | `test_a_settle_type_nobody_defined_is_named` — `fk_purchase_return_settle_type` 가 문다 |
+| — | 사유가 관문 1 의 규칙 표에 있는지 묻는 가드를 껐다 | `test_a_lot_return_uses_a_reason_the_incoming_gate_knows` — `fk_purchase_return_reason` 이 문다 |
+
+## 조각 2 — 잔량 셈의 수를 고친 뒤 (`79d04b8`)
+
+`57a5bba` 의 잔량 검사가 셈을 `double` 로 바꾸는 어긋냄을 물 수 없는 수였다. `double` 로 실제 음수가 되는 수(64.4 · 35.6 →
+−7.1e-15)로 고친 뒤 셈과 잠금, 경계를 어긋냈다. 대조군과 같은 트리의 `pytest` 전체는 초록이다.
+
+| NC | 무엇을 어긋냈나 | 빨개진 검사 |
+|---|---|---|
+| — | 잔량의 합과 견주는 수를 모두 `double` 로 셌다 | `test_a_lot_can_go_back_in_pieces_down_to_nothing` |
+| — | 잔량의 합만 `double` 로 셌다 | `test_a_lot_can_go_back_in_pieces_down_to_nothing` |
+| — | 견주는 수(`_as_counted()`)만 `double` 로 바꿨다 | **없다 — 통과했다** — 겹친 방어(위 「아직 초록인 어긋냄」) |
+| — | 쓰기 경로의 검사 줄 잠금을 뺐다 | `test_two_failed_returns_at_once_leave_the_second_with_a_name` — 둘째가 트리거의 `IntegrityError` 를 받는다. 재고 로트 쪽은 로트 잠금이 받쳐 초록이다 |
+| — | 쓰기 경로의 로트 줄 잠금만 뺐다 | **없다 — 통과했다** — 겹친 방어(위 「아직 초록인 어긋냄」) |
+| — | 검사 줄 잠금과 로트 줄 잠금을 함께 뺐다 | `test_two_lot_returns_at_once_leave_the_second_with_a_name` — 둘째가 트리거의 `IntegrityError`(잔량 −100)를 받는다 |
+| — | 경계에서 `inspection_id` 의 `integer` 상한을 뺐다 | `test_what_the_database_would_break_on_is_refused_at_the_boundary` — `inspection_id-2147483648` 이 500 |
+| — | 경계에서 `quantity` 의 `> 0` 을 뺐다 | `test_what_the_database_would_break_on_is_refused_at_the_boundary` — `quantity-0.0` · `quantity--1.0` 이 500 |
+
+같은 트리에서 경계의 `settle_type` 길이(10자)를 뺐을 때도 같은 검사가 빨갰는데 **다른 까닭이었다** — 보낸 긴 코드가 공통코드에
+없어 「그런 정산 구분이 없다」(422, `loc` 이 `body`)가 났다. 경계가 막는 500 을 잰 것이 아니라서 빨강 줄로 세지 않고,
+`08662f1` 이 실제로 있는 긴 코드로 고쳐 다시 쟀다.
+
+## 조각 2 — 정산 구분의 길이를 고친 뒤 (`08662f1`)
+
+| NC | 무엇을 어긋냈나 | 빨개진 검사 |
+|---|---|---|
+| — | 경계에서 `settle_type` 의 길이(10자)를 뺐다 | `test_what_the_database_would_break_on_is_refused_at_the_boundary` — 공통코드에 있는 12자 코드가 넣는 자리에서 500 |
+| — | 재고 로트 반품에서 원장 줄을 넣지 않고 돌아오게 했다 | `test_a_201_means_the_commit_passed_the_deferred_check` — 커밋에서 지연 트리거가 물어 500 |
+| — | 엔드포인트가 커밋 대신 `flush` 만 하게 했다 | `test_a_201_means_the_commit_passed_the_deferred_check` — 응답은 201 인데 다른 세션에서 문서가 보이지 않는다 |
+| — | 반품 라우트의 422 를 검사의 `Refused` 로 선언했다 | `test_the_spec_lists_every_return_refusal_name` |
+| — | 반품 라우트의 선언에서 400 을 뺐다 | `test_the_spec_declares_every_answer_that_actually_goes_out` — `/purchase-returns` 쪽만 |
+
+## 조각 2 — 불합격분 합의 수를 더한 뒤 (`1851297`)
+
+| NC | 무엇을 어긋냈나 | 빨개진 검사 |
+|---|---|---|
+| — | 불합격분 반품의 합과 견주는 수를 모두 `double` 로 셌다 | `test_failed_goods_can_go_back_in_pieces_up_to_all_of_it` — 0.1 + 2.7 + 0.2 가 3.0000000000000004 |
+| — | 불합격분 반품의 합만 `double` 로 셌다 | `test_failed_goods_can_go_back_in_pieces_up_to_all_of_it` |
+
+## 조각 2 리뷰 1 라운드 — Codex 리뷰의 고침 (`62d0030`)
+
+더한 지킴 셋을 하나씩 어긋낸 뒤 그것을 물어야 할 검사만 돌렸다. 어긋냄 없이 돌린 대조군은 초록이고, 같은 트리의 `pytest`
+전체(실제 PostgreSQL 16)도 초록이다. 검사는 모두 고침보다 먼저 써서, 고치기 전의 코드에서 빨간 것을 봤다(재현).
+
+| NC | 무엇을 어긋냈나 | 빨개진 검사 |
+|---|---|---|
+| — | 꺼진 정산 구분의 거절을 껐다 | `test_a_retired_settle_type_is_named` |
+| — | 꺼진 사유의 거절을 껐다 | `test_a_retired_reason_is_named` |
+| — | 경계의 NUL 거절을 껐다 | `test_the_boundary_refuses_a_nul_the_database_cannot_hold` 둘 · `test_what_the_database_would_break_on_is_refused_at_the_boundary` 의 NUL 셋 — `nonconformity_code` 는 500 이 아니라 다른 까닭의 업무 거절(`loc` 가 `body`)로 빨갛다. 불합격 검사로 재는 자리라 사유가 경계를 지나면 그 거절이 먼저 문다 |
+
+## 거절 본문의 문장 — CodeQL 경고의 고침 (`951c6a6`)
+
+라우트가 싣는 문장을 상수(`"x"`)로 바꾼 뒤 `tests/test_api.py` · `tests/test_return_api.py` 를 돌렸다. 대조군과 같은 트리의
+`pytest` 전체(실제 PostgreSQL 16)는 초록이다. 반품 쪽 단언은 이 커밋이 더했고, 그 앞에서는 같은 어긋냄이 반품 쪽에서 초록이었다.
+
+| NC | 무엇을 어긋냈나 | 빨개진 검사 |
+|---|---|---|
+| — | 두 라우트가 `refused.message` 대신 상수를 싣게 했다 | `test_something_we_cannot_judge_comes_back_named` · `test_a_business_refusal_names_itself_in_the_same_shape` |

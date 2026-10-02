@@ -1,6 +1,6 @@
 """요청과 응답의 모양 — **검증은 pydantic 한 벌로 한다.**
 
-`app/services/incoming.py` 의 데이터클래스와 칸이 겹쳐 보이지만 둘은 다른 것을
+`app/services/` 의 데이터클래스와 칸이 겹쳐 보이지만 둘은 다른 것을
 맡는다. 여기 있는 것은 **밖에서 들어온 것을 못 믿는 층**이라 타입과 범위를 보고,
 서비스 쪽은 이미 믿을 수 있는 값으로 업무를 한다. 경계를 하나로 합치면 HTTP 를
 모르는 자리에서 HTTP 의 사정을 알게 된다.
@@ -15,6 +15,7 @@ from pydantic import AfterValidator, BaseModel, ConfigDict, Field
 from app.core import codes
 from app.db.constraints import blank_characters
 from app.services.incoming import Refusal
+from app.services.returns import ReturnRefusal
 
 # **데이터베이스가 깎는 글자와 같은 목록이다.** 두 벌로 적지 않는다 —
 # `app/db/constraints.py` 가 SQL 쪽 형태를 들고, 여기서는 그것을 푼 것을 쓴다.
@@ -31,6 +32,10 @@ def _present(value: str) -> str:
     """
     if not value.strip(_BLANK):
         raise ValueError("공백만으로 이루어진 값은 받지 않는다")
+    # **NUL 은 PostgreSQL 의 `text` 에 들지 못한다**(Codex 리뷰, 3단계 조각 2). JSON 은
+    # `\u0000` 을 실어 올 수 있고, 경계가 놓치면 드라이버가 넣는 자리에서 거부해 500 이 된다.
+    if "\x00" in value:
+        raise ValueError("NUL 글자는 받지 않는다")
     return value
 
 
@@ -85,8 +90,8 @@ class InspectionOut(BaseModel):
     # 않는다」가 NC-80 에서 `expiry_date` 를 거절한 규칙이고, 이 셋은 그 규칙을
     # 지나는 값이어야 한다(감사 ⑫ NC-137).
     #
-    # - `inspection_id` — 검사에는 다른 손잡이가 없다. 클레임과 반품이 **뒤에 그
-    #   건을 가리킬 유일한 값**이고, 불합격에도 남는다(로트는 서지 않는다)
+    # - `inspection_id` — 검사에는 다른 손잡이가 없다. 반품(`POST /purchase-returns`)이
+    #   **그 건을 가리키는 값**이고, 불합격에도 남는다(로트는 서지 않는다)
     # - `lot_id` — 라벨에 찍히는 것은 `lot_number` 이고, 그 번호는 **품목 안에서는
     #   유일하다**(`uq_lot_item_number`). 그러므로 부르는 쪽은 자기가 보낸
     #   `item_code` 와 돌려받은 `lot_number` 로도 로트를 가리킬 수 있고, `lot_id`
@@ -115,6 +120,42 @@ class InspectionOut(BaseModel):
     nonconformity_code: str | None
     lot_id: int | None
     lot_number: str | None
+    ledger_entry_id: int | None
+
+
+# **`integer` 칸의 끝.** 표의 기본키는 PostgreSQL `integer` 라, 그보다 큰 수를 들고
+# 가면 「그런 검사가 없다」가 아니라 **범위 오류(500)** 가 난다. 경계가 먼저 막는다.
+_INT4_MAX = 2_147_483_647
+
+
+class PurchaseReturnIn(BaseModel):
+    """구매반품 한 건 — **검사를 가리킨다.** 로트 · 공급사 · 품목은 거기서 따라간다."""
+
+    model_config = _ONLY_THE_FIELDS_WE_NAME
+
+    # 검사 응답의 `inspection_id` 다.
+    inspection_id: int = Field(gt=0, le=_INT4_MAX)
+    settle_type: Present = Field(min_length=1, max_length=10)
+    # **`> 0` 이다.** 돌려보낸 것이 없는 반품은 사건이 아니다(`ck_purchase_return_quantity`).
+    quantity: float = Field(gt=0, allow_inf_nan=False)
+    returned_by: Present = Field(min_length=1, max_length=50)
+    # 재고 로트를 돌려보낼 때만 적는다 — 불합격분은 그 검사가 사유를 든다.
+    nonconformity_code: Present | None = Field(default=None, max_length=30)
+
+
+class PurchaseReturnOut(BaseModel):
+    """반품이 선 뒤 남은 것.
+
+    **돌려주는 칸마다 까닭이 있다**(감사 ⑫ NC-137) —
+
+    - `purchase_return_id` — 반품 문서에는 다른 손잡이가 없다. 같은 검사에 반품이 여럿
+      설 수 있어 `inspection_id` 로는 그 건을 가리키지 못한다
+    - `ledger_entry_id` — 재고 로트를 돌려보냈으면 원장에서 빠졌다는 것을 부르는 쪽이
+      확인할 자리다. **불합격분이면 비어 있다** — 재고가 된 적이 없어 뺄 줄이 없다.
+      비어 있음이 그 구별을 말하므로 판정을 따로 싣지 않는다
+    """
+
+    purchase_return_id: int
     ledger_entry_id: int | None
 
 
@@ -148,13 +189,27 @@ class ValidationDetail(BaseModel):
 
 
 class Refused(BaseModel):
-    """422 의 본문.
+    """검사 422 의 본문.
 
     **두 경로가 한 모양이다**(NC-75). 다른 것은 `type` 의 이름 공간뿐이고,
     그것을 위의 두 모델이 스펙에 적는다(감사 ⑫ NC-134).
     """
 
     detail: list[RefusalDetail | ValidationDetail]
+
+
+class ReturnRefusalDetail(BaseModel):
+    """반품의 업무 규칙이 거절할 때 `detail[]` 에 실리는 줄 — 이름은 `ReturnRefusal` 이 든다."""
+
+    loc: list[str]
+    msg: str
+    type: ReturnRefusal
+
+
+class ReturnRefused(BaseModel):
+    """반품 422 의 본문 — `Refused` 와 **같은 모양이고 업무 이름의 열거만 다르다.**"""
+
+    detail: list[ReturnRefusalDetail | ValidationDetail]
 
 
 class Transport(StrEnum):

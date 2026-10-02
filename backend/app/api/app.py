@@ -1,8 +1,9 @@
-"""첫 쓰기 엔드포인트 — 관문 1.
+"""쓰기 엔드포인트 — 관문 1 과 구매반품.
 
-**엔드포인트는 하나다.** 수입검사 한 건을 받아 판정하고, 합격이면 로트와 원장
-줄을 만든다. 「검사를 적는다 · 로트를 만든다 · 원장에 적는다」를 셋으로 나누면
-**둘까지만 성공한 상태**가 생기고, 그것이 원칙 ⑦ 이 없애려는 것이다.
+**사건 하나가 요청 하나이고 트랜잭션 하나다.** 수입검사 한 건은 판정 · 로트 · 원장
+줄을, 구매반품 한 건은 문서 · 원장 줄을 한 번에 남긴다. 「검사를 적는다 · 로트를
+만든다 · 원장에 적는다」를 셋으로 나누면 **둘까지만 성공한 상태**가 생기고, 그것이
+원칙 ⑦ 이 없애려는 것이다.
 
 **읽는 엔드포인트가 없다.** 화면이 없으므로 부르는 쪽도 없고, 부르는 쪽이 없는
 엔드포인트는 빈 기준정보와 같다.
@@ -13,7 +14,7 @@ import re
 import uuid
 from collections.abc import Awaitable, Callable, Iterator, Mapping
 from functools import lru_cache
-from typing import Annotated
+from typing import Annotated, Any
 
 from fastapi import Depends, FastAPI, Request, status
 from fastapi.exceptions import RequestValidationError
@@ -26,7 +27,10 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 from app.api.schemas import (
     InspectionIn,
     InspectionOut,
+    PurchaseReturnIn,
+    PurchaseReturnOut,
     Refused,
+    ReturnRefused,
     Transport,
     TransportRefused,
 )
@@ -37,6 +41,7 @@ from app.services.incoming import (
     RefusedInspection,
     receive,
 )
+from app.services.returns import IncomingReturn, RefusedReturn, return_to_supplier
 
 # **이 API 의 판이다 — 패키지의 판과 다른 축이다.** 같은 코드가 계약을 깨지 않고
 # 여러 번 배포될 수 있고, 반대로 코드를 한 줄도 안 고치고 계약만 넓힐 수도 있다.
@@ -71,8 +76,11 @@ from app.services.incoming import (
 API_VERSION = "0.1"
 
 app = FastAPI(
-    title="조기경보 ERP — 관문 1",
-    summary="수입검사 한 건을 받아 판정하고, 합격이면 로트를 만든다.",
+    title="조기경보 ERP — 관문 1 · 구매반품",
+    summary=(
+        "수입검사 한 건을 받아 판정하고, 합격이면 로트를 만든다."
+        " 공급사에 돌려보낸 것을 적고, 재고 로트였으면 원장에서 뺀다."
+    ),
     # **창이 열려 있다는 것을 밖이 읽는 자리에 적는다** (감사 ⑯ NC-158). 밖에서
     # 보이는 것이 `info.version` 하나뿐이면 **소비자는 이 계약이 좁혀도 되는 창
     # 안에 있다는 것을 알 길이 없다** — 알았다면 붙지 않았을 수도 있는 정보다.
@@ -83,7 +91,8 @@ app = FastAPI(
         " 깨지면 앞자리, 호환되게 넓어지면 뒷자리."
         "\n\n거절의 본문은 어느 경로에서나 `detail[]` 한 모양이다."
         " `detail[].type` 이 기계가 읽는 자리이고 이름 공간이 셋이다 —"
-        " 업무 규칙의 `Refusal`, 라우트 밖의 `Transport`, 그리고 pydantic 이"
+        " 업무 규칙의 이름(경로마다 자기 열거를 든다 — 검사는 `Refusal`,"
+        " 반품은 `ReturnRefusal`), 라우트 밖의 `Transport`, 그리고 pydantic 이"
         " 정한 이름(`missing` · `extra_forbidden` 등). 앞의 둘은 이 스펙이"
         " 열거로 들고, **그 열거에 없는 값은 셋째 무리**다."
     ),
@@ -168,8 +177,8 @@ async def carry_an_id_that_names_this_request(
     #
     # **경로와 메서드는 `%r` 로 찍는다** (감사 ⑲ NC-174). 축(`X-Request-Id`)은
     # 모양을 좁혀 두었는데 **나란히 서는 경로에는 좁히는 것이 하나도 없었다** —
-    # 라우트가 하나뿐이라 그 밖의 모든 경로가 404 로 이 줄을 타므로, 부르는 쪽이
-    # 로그에 찍힐 글자를 고른다. `repr` 은 제어문자를 이스케이프하고 따옴표로 칸
+    # 선언한 라우트 밖의 모든 경로가 404 로 이 줄을 타므로, 부르는 쪽이 로그에
+    # 찍힐 글자를 고른다. `repr` 은 제어문자를 이스케이프하고 따옴표로 칸
     # 경계를 드러내며 **잃는 정보가 없다.**
     #
     # **감사가 든 시나리오는 재현되지 않았다** — `%0A` · `%0D` 는 uvicorn 이 떼어
@@ -430,27 +439,30 @@ def session_scope() -> Iterator[Session]:
         session.close()
 
 
-@app.post(
-    "/inspections",
-    response_model=InspectionOut,
-    status_code=status.HTTP_201_CREATED,
-    # **거절의 이름을 스펙이 든다.** 이것이 없으면 소비자가 `detail[].type` 의
-    # 값을 문서화되지 않은 채 하드코딩하고, 이름이 늘어도 그것이 계약 변경으로
-    # 보이지 않는다 — `result` 가 `enum` 을 싣는 이유와 같다(감사 ⑫ NC-134).
-    #
-    # **실제로 나가는 응답을 다 적는다** (감사 ⑯ NC-160). 처음에는 201 과 422 만
-    # 적었는데, 그러면 **기계가 읽는 계약만 보는 소비자에게 이 API 는 둘만 내는
-    # API** 다 — 404 · 405 · 500 이 같은 `detail[]` 모양으로 나가는데도 그렇다.
-    # NC-134 가 스물셋에 대해 낸 논거가 그대로 남던 자리다.
-    #
-    # `X-Request-Id` 도 함께 적는다. NC-145 가 그것을 **「부르는 쪽이 『이 요청』
-    # 이라고 말할 수 있게」** 세웠는데, 말할 자리가 스펙에 없으면 그 규약은
-    # 우리끼리의 것이다. 받은 값을 존중하는 것까지가 그 규약이다.
-    #
-    # **400 을 빠뜨렸었다** (감사 ㉛ NC-220). 본문이 UTF-8 로 풀리지 않으면 FastAPI 가
-    # 400 을 던지는데, 위의 「다 적는다」를 쓰고도 그 갈래를 몰랐다 — 프레임워크가
-    # 얹은 응답이라 눈으로 센 목록에서 빠졌다(NC-84 와 같은 부류).
-    responses={
+def _answers(refused: type[Refused] | type[ReturnRefused]) -> dict[int | str, dict[str, Any]]:
+    """쓰기 라우트가 **실제로 내는 응답**의 선언 — 라우트마다 다른 것은 422 의 이름뿐이다.
+
+    **한 벌로 둔다.** 라우트마다 손으로 적으면 하나를 고칠 때 다른 하나가 남는다 —
+    NC-160 · 220 이 낸 것이 바로 「선언이 실제보다 좁다」였고, 라우트가 늘면 그 자리도 는다.
+
+    **거절의 이름을 스펙이 든다.** 이것이 없으면 소비자가 `detail[].type` 의
+    값을 문서화되지 않은 채 하드코딩하고, 이름이 늘어도 그것이 계약 변경으로
+    보이지 않는다 — `result` 가 `enum` 을 싣는 이유와 같다(감사 ⑫ NC-134).
+
+    **실제로 나가는 응답을 다 적는다** (감사 ⑯ NC-160). 처음에는 201 과 422 만
+    적었는데, 그러면 **기계가 읽는 계약만 보는 소비자에게 이 API 는 둘만 내는
+    API** 다 — 404 · 405 · 500 이 같은 `detail[]` 모양으로 나가는데도 그렇다.
+    NC-134 가 스물셋에 대해 낸 논거가 그대로 남던 자리다.
+
+    `X-Request-Id` 도 함께 적는다. NC-145 가 그것을 **「부르는 쪽이 『이 요청』
+    이라고 말할 수 있게」** 세웠는데, 말할 자리가 스펙에 없으면 그 규약은
+    우리끼리의 것이다. 받은 값을 존중하는 것까지가 그 규약이다.
+
+    **400 을 빠뜨렸었다** (감사 ㉛ NC-220). 본문이 UTF-8 로 풀리지 않으면 FastAPI 가
+    400 을 던지는데, 위의 「다 적는다」를 쓰고도 그 갈래를 몰랐다 — 프레임워크가
+    얹은 응답이라 눈으로 센 목록에서 빠졌다(NC-84 와 같은 부류).
+    """
+    return {
         # **성공도 그 헤더를 단다.** 미들웨어가 모든 응답에 달므로 201 만 빼면
         # 선언이 다시 실제보다 좁아진다 — NC-160 이 낸 그 모양이다(찍어서 봤다).
         status.HTTP_201_CREATED: {"headers": _REQUEST_ID_SPEC},
@@ -460,15 +472,19 @@ def session_scope() -> Iterator[Session]:
             "model": TransportRefused,
             "headers": _REQUEST_ID_SPEC | _ALLOW_SPEC,
         },
-        status.HTTP_422_UNPROCESSABLE_CONTENT: {
-            "model": Refused,
-            "headers": _REQUEST_ID_SPEC,
-        },
+        status.HTTP_422_UNPROCESSABLE_CONTENT: {"model": refused, "headers": _REQUEST_ID_SPEC},
         status.HTTP_500_INTERNAL_SERVER_ERROR: {
             "model": TransportRefused,
             "headers": _REQUEST_ID_SPEC,
         },
-    },
+    }
+
+
+@app.post(
+    "/inspections",
+    response_model=InspectionOut,
+    status_code=status.HTTP_201_CREATED,
+    responses=_answers(Refused),
 )
 def post_inspection(
     payload: InspectionIn, session: Annotated[Session, Depends(session_scope)]
@@ -502,9 +518,14 @@ def post_inspection(
         # **문자열 하나로 돌려보내지 않는다.** 같은 422 인데 본문의 모양이
         # 갈리면 부르는 쪽이 둘을 따로 처리해야 하고, 한쪽은 스펙에 없다.
         # `type` 에 실리는 이름은 **고치면 깨지는 약속**이다(`incoming.py`).
+        #
+        # **본문에는 `message` 를 싣고 `str(refused)` 를 싣지 않는다.** 둘은 같은
+        # 글자지만 CodeQL 은 예외를 문자열로 바꿔 응답에 싣는 것을 예외 정보 노출로
+        # 읽고(`py/stack-trace-exposure`), 룰셋이 그 경고로 머지를 막는다(ADR 0005,
+        # PR #71). 싣는 것은 우리가 지어 넘긴 문장이다 — 그 갈래를 이름으로 든다.
         return _refusal(
             status.HTTP_422_UNPROCESSABLE_CONTENT,
-            [{"loc": ["body"], "msg": str(refused), "type": refused.code}],
+            [{"loc": ["body"], "msg": refused.message, "type": refused.code}],
         )
 
     # **응답을 만들기 전에 커밋한다.** 여기서 터지면 500 이 나가고, 그것이
@@ -518,4 +539,46 @@ def post_inspection(
         lot_id=judged.lot_id,
         lot_number=judged.lot_number,
         ledger_entry_id=judged.ledger_entry_id,
+    )
+
+
+@app.post(
+    "/purchase-returns",
+    response_model=PurchaseReturnOut,
+    status_code=status.HTTP_201_CREATED,
+    responses=_answers(ReturnRefused),
+)
+def post_purchase_return(
+    payload: PurchaseReturnIn, session: Annotated[Session, Depends(session_scope)]
+) -> PurchaseReturnOut | JSONResponse:
+    """공급사에 돌려보낸 것 한 건을 받는다.
+
+    재고 로트였으면 반품 문서와 원장의 구매반품출고 줄이 함께 서고, 불합격분이면
+    문서만 선다. **어떤 갈래를 무엇이 막는지는** `app/services/returns.py` 의
+    `ReturnRefusal` 이 든다.
+    """
+    try:
+        returned = return_to_supplier(
+            session,
+            IncomingReturn(
+                inspection_id=payload.inspection_id,
+                settle_type=payload.settle_type,
+                quantity=payload.quantity,
+                returned_by=payload.returned_by,
+                nonconformity_code=payload.nonconformity_code,
+            ),
+        )
+    except RefusedReturn as refused:
+        return _refusal(
+            status.HTTP_422_UNPROCESSABLE_CONTENT,
+            [{"loc": ["body"], "msg": refused.message, "type": refused.code}],
+        )
+
+    # **응답을 만들기 전에 커밋한다** — 문서 → 원장 줄을 묻는 지연 트리거도 여기서
+    # 돈다. 터지면 500 이고, 그것이 「저장되지 않았다」의 올바른 모양이다.
+    session.commit()
+
+    return PurchaseReturnOut(
+        purchase_return_id=returned.purchase_return_id,
+        ledger_entry_id=returned.ledger_entry_id,
     )
