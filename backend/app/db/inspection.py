@@ -210,6 +210,9 @@ class Inspection(Base):
         # 쓰기 경로가 지키고 있었는데, 쓰는 코드가 하나뿐인 것은 제약이 아니라
         # 우연이다 — 옛 원장에는 실제로 어긋난 짝이 설 수 있었다.
         UniqueConstraint("id", "item_id", name="uq_inspection_id_item"),
+        # **로트가 수량을 가리킬 상대**(감사 ㉟ NC-225). 검사 한 건은 로트 하나를 통째로
+        # 만들므로 둘의 수량은 같은 사실이다 — 다시 적지 않고 가리킨다.
+        UniqueConstraint("id", "quantity", name="uq_inspection_id_quantity"),
     )
 
     id: Mapped[int] = mapped_column(primary_key=True)

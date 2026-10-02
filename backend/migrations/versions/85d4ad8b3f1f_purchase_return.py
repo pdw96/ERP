@@ -1,7 +1,8 @@
 """구매반품이 원장에 닿는다 — 반품 문서 · 반품 줄 · 잔량 트리거
 
-표 하나(`purchase_returns`)를 세우고, 원장이 구매반품출고를 받게 넓히고, 원장의 합을
-지키는 트리거 셋을 건다(ADR 0013). 3단계의 첫 조각이다.
+표 하나(`purchase_returns`)를 세우고, 원장이 구매반품출고를 받게 넓히고, 원장의 합과 그
+합이 기대는 값을 지키는 트리거를 건다(ADR 0013). 로트 수량을 그 로트를 만든 검사의 수량과
+쌍으로 묶는다(감사 ㉟ NC-225). 3단계의 첫 조각이다.
 
 **원장이 처음으로 줄어든다.** 그래서 「한 로트의 줄을 합한 잔량이 0 밑으로 내려가지
 않는다」가 처음으로 깨질 수 있게 되고, 그 규칙은 여러 줄의 합이라 CHECK 로 적을 수 없다.
@@ -15,12 +16,16 @@
 
 **올릴 때 멈출 수 있다 — 아래의 자리에서, 이름을 말하고.** 입고 줄의 수량이 로트 수량과
 다른 로트가 있으면, 트리거를 거는 순간부터 그 로트는 「입고 줄과 로트가 갈린」 채로
-남는다. 앞 스키마는 그것을 막지 않았으므로 실재할 수 있고, **조이기 전에 묻는다.** 잔량이
-음수인 로트는 물을 필요가 없다 — 이 리비전 전의 원장은 구매입고(증가) 하나만 받았다.
+남는다. 로트 수량이 그 로트를 만든 검사의 수량과 다른 로트도 같다 — 쌍 외래키가 먼저
+걸리면 나오는 말은 제약 이름뿐이다. 앞 스키마는 둘 다 막지 않았으므로 실재할 수 있고,
+**조이기 전에 묻는다.** 잔량이 음수인 로트는 물을 필요가 없다 — 이 리비전 전의 원장은
+구매입고(증가) 하나만 받았다.
 
 **올릴 때 잠근다.** `CREATE TABLE` 하나가 외래키로 가리키는 표(`inspections` · `lots` ·
-`common_codes`)를, 원장에 붙는 외래키 · CHECK · 인덱스가 원장과 반품 문서를, 트리거가
-원장과 `lots` 를 잡는다(목록을 세지 않는다. 세면 갈린다). `ADD COLUMN` 이 원장의 첫 구문이라
+`common_codes` · `nonconformity_stage_rules`)를, 원장에 붙는 외래키 · CHECK · 인덱스가 원장과
+반품 문서를, 검사의 유일키와 로트의 쌍 외래키가 `inspections` 와 `lots` 를, 트리거가 그것이
+걸리는 표(원장 · `lots` · `txn_type_attributes` · `purchase_returns` · `inspections`)를 잡는다
+(목록을 세지 않는다. 세면 갈린다). `ADD COLUMN` 이 원장의 첫 구문이라
 ACCESS EXCLUSIVE 가 커밋까지 유지되고, 그 사이 원장의 쓰기가 멈춘다. `migrations/env.py` 가
 전체를 트랜잭션 하나로 감싼다.
 
@@ -28,6 +33,11 @@ ACCESS EXCLUSIVE 가 커밋까지 유지되고, 그 사이 원장의 쓰기가 �
 사라지는 것은 사람이 나중에 넣은 반품뿐이고, 그것은 **다시 만들 수 없다** — 무엇을 왜
 돌려보냈는지는 이 표에만 있다. 원장의 반품 줄은 문서 없이 설 수 없으므로(외래키) 문서를
 세면 둘 다 센다(W-6 ①).
+
+**내릴 때도 잠근다**(감사 ㉟ NC-224). `DROP TRIGGER` 는 그 트리거가 걸린 표에 ACCESS
+EXCLUSIVE 를 잡는다 — `lots` · `inspections` · `txn_type_attributes` 의 **읽기까지** 커밋까지
+멈춘다. 원장 쪽은 CHECK 를 다시 세우며 모든 줄을 다시 검증하고, 칸 · 제약 · 인덱스를 떼며 같은
+잠금을 잡는다. 올릴 때보다 무겁다.
 
 > **이 가드들이 못 보는 부류**(W-6 ③): 올릴 때의 가드는 **입고 줄이 있는 로트**만 본다 —
 > 입고 줄이 없는 로트(기초재고 · 쓰기 경로가 깨진 자리)의 수량은 견줄 짝이 없다. 내릴 때의
@@ -72,7 +82,7 @@ BEGIN
   END IF;
 
   SELECT quantity, lot_number INTO lot_quantity, lot_label
-  FROM lots WHERE id = NEW.lot_id FOR UPDATE;
+  FROM lots WHERE id = NEW.lot_id FOR NO KEY UPDATE;
   IF NOT FOUND THEN
     RETURN NEW;
   END IF;
@@ -144,11 +154,35 @@ BEFORE UPDATE OF quantity ON lots
 FOR EACH ROW EXECUTE FUNCTION lot_quantity_stays_with_its_ledger()
 """
 
+_EFFECT_FUNCTION = """
+CREATE OR REPLACE FUNCTION txn_type_effect_stays_behind_its_lines() RETURNS trigger
+LANGUAGE plpgsql AS $$
+BEGIN
+  IF NEW.total_effect IS DISTINCT FROM OLD.total_effect
+     AND EXISTS (SELECT 1 FROM stock_ledger_entries
+                 WHERE txn_type_group = OLD.group_code AND txn_type = OLD.code) THEN
+    RAISE EXCEPTION
+      '유형 %의 총량 영향은 원장에 줄이 선 뒤에 고치지 않는다 — 잔량이 다시 세어진다',
+      OLD.code
+      USING ERRCODE = 'restrict_violation';
+  END IF;
+  RETURN NEW;
+END $$
+"""
+
+_EFFECT_TRIGGER = """
+CREATE TRIGGER txn_type_effect_stays_behind_its_lines
+BEFORE UPDATE OF total_effect ON txn_type_attributes
+FOR EACH ROW EXECUTE FUNCTION txn_type_effect_stays_behind_its_lines()
+"""
+
 _RETURN_GUARD_FUNCTION = """
 CREATE OR REPLACE FUNCTION purchase_return_stays_within_what_came() RETURNS trigger
 LANGUAGE plpgsql AS $$
 DECLARE
   received double precision;
+  judged_result text;
+  judged timestamp;
   returned numeric;
 BEGIN
   IF TG_OP <> 'INSERT' THEN
@@ -160,13 +194,20 @@ BEGIN
     RETURN NEW;
   END IF;
 
-  IF NEW.lot_id IS NOT NULL THEN
+  SELECT quantity, result, judged_at INTO received, judged_result, judged
+  FROM inspections WHERE id = NEW.inspection_id FOR NO KEY UPDATE;
+  IF NOT FOUND THEN
     RETURN NEW;
   END IF;
 
-  SELECT quantity INTO received FROM inspections
-  WHERE id = NEW.inspection_id AND result = '불합격' FOR UPDATE;
-  IF NOT FOUND THEN
+  IF NEW.returned_at < judged THEN
+    RAISE EXCEPTION
+      '반품 시각(%)이 판정 시각(%)보다 앞선다 — 판정 전의 물건은 돌려보낼 수 없다',
+      NEW.returned_at, judged
+      USING ERRCODE = 'check_violation';
+  END IF;
+
+  IF NEW.lot_id IS NOT NULL OR judged_result <> '불합격' THEN
     RETURN NEW;
   END IF;
 
@@ -188,6 +229,51 @@ _RETURN_GUARD_TRIGGER = """
 CREATE TRIGGER purchase_return_stays_within_what_came
 BEFORE INSERT OR UPDATE OR DELETE ON purchase_returns
 FOR EACH ROW EXECUTE FUNCTION purchase_return_stays_within_what_came()
+"""
+
+_RETURN_LINE_FUNCTION = """
+CREATE OR REPLACE FUNCTION purchase_return_has_its_ledger_line() RETURNS trigger
+LANGUAGE plpgsql AS $$
+BEGIN
+  IF NEW.lot_id IS NOT NULL
+     AND NOT EXISTS (SELECT 1 FROM stock_ledger_entries WHERE purchase_return_id = NEW.id) THEN
+    RAISE EXCEPTION
+      '반품 %는 재고 로트를 돌려보냈는데 원장에 줄이 없다 — 문서와 줄은 함께 선다',
+      NEW.id
+      USING ERRCODE = 'check_violation';
+  END IF;
+  RETURN NULL;
+END $$
+"""
+
+_RETURN_LINE_TRIGGER = """
+CREATE CONSTRAINT TRIGGER purchase_return_has_its_ledger_line
+AFTER INSERT ON purchase_returns
+DEFERRABLE INITIALLY DEFERRED
+FOR EACH ROW EXECUTE FUNCTION purchase_return_has_its_ledger_line()
+"""
+
+_INSPECTION_FUNCTION = """
+CREATE OR REPLACE FUNCTION inspection_stays_behind_its_returns() RETURNS trigger
+LANGUAGE plpgsql AS $$
+BEGIN
+  IF (NEW.quantity, NEW.supplier_id, NEW.item_id, NEW.judged_at, NEW.received_date)
+       IS DISTINCT FROM
+     (OLD.quantity, OLD.supplier_id, OLD.item_id, OLD.judged_at, OLD.received_date)
+     AND EXISTS (SELECT 1 FROM purchase_returns WHERE inspection_id = OLD.id) THEN
+    RAISE EXCEPTION
+      '검사 %를 반품이 가리킨다 — 수량 · 공급사 · 품목 · 시각 · 도착일을 고치지 않는다',
+      OLD.id
+      USING ERRCODE = 'restrict_violation';
+  END IF;
+  RETURN NEW;
+END $$
+"""
+
+_INSPECTION_TRIGGER = """
+CREATE TRIGGER inspection_stays_behind_its_returns
+BEFORE UPDATE OF quantity, supplier_id, item_id, judged_at, received_date ON inspections
+FOR EACH ROW EXECUTE FUNCTION inspection_stays_behind_its_returns()
 """
 
 # ── 기준정보 — 「구매반품출고」의 설명 ──────────────────────────────────────
@@ -220,6 +306,13 @@ def upgrade() -> None:
             server_default="NC_REASON",
             nullable=False,
         ),
+        sa.Column("reason_stage", sa.String(length=30), server_default="IQC", nullable=False),
+        sa.Column(
+            "reason_stage_group",
+            sa.String(length=20),
+            server_default="INSP_STAGE",
+            nullable=False,
+        ),
         sa.Column("quantity", sa.Float(), nullable=False),
         sa.Column("returned_at", sa.DateTime(), nullable=False),
         sa.Column("returned_by", sa.String(length=50), nullable=False),
@@ -236,6 +329,10 @@ def upgrade() -> None:
         sa.CheckConstraint(
             "(lot_id IS NULL) = (nonconformity_code IS NULL)",
             name="ck_purchase_return_reason_only_for_a_lot",
+        ),
+        sa.CheckConstraint(
+            "reason_stage_group = 'INSP_STAGE' AND reason_stage = 'IQC'",
+            name="ck_purchase_return_reason_stage",
         ),
         sa.CheckConstraint(
             "quantity > 0 AND quantity > '-Infinity'::double precision AND quantity < 'Infinity'::double precision",
@@ -261,8 +358,13 @@ def upgrade() -> None:
             name="fk_purchase_return_settle_type",
         ),
         sa.ForeignKeyConstraint(
-            ["nonconformity_group", "nonconformity_code"],
-            ["common_codes.group_code", "common_codes.code"],
+            ["nonconformity_group", "nonconformity_code", "reason_stage_group", "reason_stage"],
+            [
+                "nonconformity_stage_rules.reason_group",
+                "nonconformity_stage_rules.reason_code",
+                "nonconformity_stage_rules.stage_group",
+                "nonconformity_stage_rules.stage_code",
+            ],
             name="fk_purchase_return_reason",
         ),
         sa.PrimaryKeyConstraint("id"),
@@ -323,13 +425,48 @@ def upgrade() -> None:
         """
     )
 
+    # ── 조이기 전에 묻는다 — 검사 수량과 로트 수량이 갈린 로트(감사 ㉟ NC-225) ──
+    # 검사 한 건은 로트 하나를 통째로 만든다. 앞 스키마는 둘을 묶지 않았으므로 갈린 짝이
+    # 실재할 수 있고, 외래키가 먼저 걸리면 나오는 말은 제약 이름뿐이다.
+    op.execute(
+        """
+        DO $$
+        DECLARE adrift text;
+        BEGIN
+          SELECT string_agg(l.lot_number || ' (로트 ' || l.quantity || ' · 검사 ' || i.quantity || ')',
+                            ', ' ORDER BY l.lot_number) INTO adrift
+          FROM lots AS l JOIN inspections AS i ON i.id = l.inspection_id
+          WHERE l.quantity IS DISTINCT FROM i.quantity;
+          IF adrift IS NOT NULL THEN
+            RAISE EXCEPTION
+              '로트 수량이 그 로트를 만든 검사 수량과 다르다: %. 어느 쪽이 들어온 양인지 사람이 먼저 가른다',
+              adrift;
+          END IF;
+        END $$;
+        """
+    )
+    op.create_unique_constraint("uq_inspection_id_quantity", "inspections", ["id", "quantity"])
+    op.create_foreign_key(
+        "fk_lot_inspection_quantity",
+        "lots",
+        "inspections",
+        ["inspection_id", "quantity"],
+        ["id", "quantity"],
+    )
+
     for statement in (
         _LEDGER_GUARD_FUNCTION,
         _LEDGER_GUARD_TRIGGER,
         _LOT_QUANTITY_FUNCTION,
         _LOT_QUANTITY_TRIGGER,
+        _EFFECT_FUNCTION,
+        _EFFECT_TRIGGER,
         _RETURN_GUARD_FUNCTION,
         _RETURN_GUARD_TRIGGER,
+        _RETURN_LINE_FUNCTION,
+        _RETURN_LINE_TRIGGER,
+        _INSPECTION_FUNCTION,
+        _INSPECTION_TRIGGER,
     ):
         op.execute(statement)
 
@@ -367,12 +504,21 @@ def downgrade() -> None:
         ).bindparams(after=_RETURN_DESCRIPTION_AFTER, before=_RETURN_DESCRIPTION_BEFORE)
     )
 
+    op.execute("DROP TRIGGER inspection_stays_behind_its_returns ON inspections")
+    op.execute("DROP TRIGGER purchase_return_has_its_ledger_line ON purchase_returns")
     op.execute("DROP TRIGGER purchase_return_stays_within_what_came ON purchase_returns")
+    op.execute("DROP TRIGGER txn_type_effect_stays_behind_its_lines ON txn_type_attributes")
     op.execute("DROP TRIGGER lot_quantity_stays_with_its_ledger ON lots")
     op.execute("DROP TRIGGER stock_ledger_entry_keeps_the_balance ON stock_ledger_entries")
+    op.execute("DROP FUNCTION inspection_stays_behind_its_returns()")
+    op.execute("DROP FUNCTION purchase_return_has_its_ledger_line()")
     op.execute("DROP FUNCTION purchase_return_stays_within_what_came()")
+    op.execute("DROP FUNCTION txn_type_effect_stays_behind_its_lines()")
     op.execute("DROP FUNCTION lot_quantity_stays_with_its_ledger()")
     op.execute("DROP FUNCTION stock_ledger_entry_keeps_the_balance()")
+
+    op.drop_constraint("fk_lot_inspection_quantity", "lots", type_="foreignkey")
+    op.drop_constraint("uq_inspection_id_quantity", "inspections", type_="unique")
 
     op.drop_index(
         "uq_stock_ledger_entry_one_line_per_return", table_name="stock_ledger_entries"

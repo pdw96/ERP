@@ -157,6 +157,15 @@ class Lot(Base):
             ["inspections.id", "inspections.item_id"],
             name="fk_lot_inspection_item",
         ),
+        # **수량도 쌍으로 묶는다**(감사 ㉟ NC-225). 검사 한 건은 로트 하나를 통째로
+        # 만든다 — 일부만 받는 일은 없고, 받지 않은 것은 반품 문서가 든다(저장소 소유자가
+        # 정했다, 2026-10-02). 같은 수량이 검사와 로트에 나뉘어 살므로 쌍으로 가리켜 갈릴 수
+        # 없게 한다. 검사를 모르는 로트(기초재고)는 `inspection_id` 가 비어 빠진다.
+        ForeignKeyConstraint(
+            ["inspection_id", "quantity"],
+            ["inspections.id", "inspections.quantity"],
+            name="fk_lot_inspection_quantity",
+        ),
         # **주석은 규칙이 아니다.** 처음에는 「자사 로트가 검사를 가리키게 되는 날
         # 이 자리를 다시 봐야 한다」고 적어 두었는데, 적어 두기만 하고 강제하지
         # 않는 규칙을 만들지 않는 것이 이 저장소의 규칙이다 — 자사 로트는
@@ -310,11 +319,28 @@ class PurchaseReturn(Base):
         ),
         # **사유는 재고 로트를 돌려보낼 때만 적는다.** 불합격분은 그 검사가 이미
         # 사유를 들고 있다 — 다시 적으면 같은 사실이 두 곳에 산다.
-        *code_reference(
-            group_column="nonconformity_group",
-            code_column="nonconformity_code",
-            group_code=codes.NC_REASON,
-            name="purchase_return_reason",
+        #
+        # **그 단계에서 쓸 수 있는 사유만**(Codex 리뷰). 공통코드를 가리키면 「그 코드가
+        # 있다」까지만 증명되어, 사 온 자재를 완제품 접착력 불량으로 돌려보낸 기록이 선다.
+        # 검사 기록이 `(사유 × 단계)` 로 규칙 표를 가리키는 것과 같은 방식이고, 단계는
+        # 반품이 가리키는 검사의 단계(IQC)로 못박는다.
+        ForeignKeyConstraint(
+            ["nonconformity_group", "nonconformity_code", "reason_stage_group", "reason_stage"],
+            [
+                "nonconformity_stage_rules.reason_group",
+                "nonconformity_stage_rules.reason_code",
+                "nonconformity_stage_rules.stage_group",
+                "nonconformity_stage_rules.stage_code",
+            ],
+            name="fk_purchase_return_reason",
+        ),
+        CheckConstraint(
+            f"nonconformity_group = '{codes.NC_REASON}'", name="ck_purchase_return_reason_group"
+        ),
+        CheckConstraint(
+            f"reason_stage_group = '{codes.INSP_STAGE}'"
+            f" AND reason_stage = '{codes.STAGE_INCOMING}'",
+            name="ck_purchase_return_reason_stage",
         ),
         CheckConstraint(
             "(lot_id IS NULL) = (nonconformity_code IS NULL)",
@@ -352,6 +378,13 @@ class PurchaseReturn(Base):
     nonconformity_code: Mapped[str | None] = mapped_column(String(30), nullable=True)
     nonconformity_group: Mapped[str] = mapped_column(
         String(20), default=codes.NC_REASON, server_default=codes.NC_REASON
+    )
+    # 사유가 쓰일 수 있는 단계 — 값이 아니라 위의 외래키의 **자리**다(`ck_…_reason_stage`).
+    reason_stage: Mapped[str] = mapped_column(
+        String(30), default=codes.STAGE_INCOMING, server_default=codes.STAGE_INCOMING
+    )
+    reason_stage_group: Mapped[str] = mapped_column(
+        String(20), default=codes.INSP_STAGE, server_default=codes.INSP_STAGE
     )
 
     quantity: Mapped[float] = mapped_column(Float)

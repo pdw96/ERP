@@ -1842,6 +1842,12 @@ INSERT INTO common_codes (group_code, code, name) VALUES
 INSERT INTO txn_type_attributes (group_code, code, total_effect, source_document_type)
 VALUES ('TXN_TYPE', '구매반품출고', '감소', '구매반품관리');
 
+INSERT INTO nonconformity_attributes (group_code, code, measure_kind)
+VALUES ('NC_REASON', 'IQ-FM', '계수');
+
+INSERT INTO nonconformity_stage_rules (reason_code, stage_code, disposition)
+VALUES ('IQ-FM', 'IQC', '반품');
+
 INSERT INTO purchase_returns (inspection_id, inspection_result, lot_id, settle_type,
                               nonconformity_code, quantity, returned_at, returned_by)
 SELECT l.inspection_id, l.inspection_result, l.id, '대물', 'IQ-FM', 100.0,
@@ -1915,3 +1921,24 @@ def test_the_return_type_description_is_corrected_only_where_the_seed_left_it(
         command.downgrade(config, "b41d7c8e5a92")
         with scoped.connect() as conn:
             assert conn.execute(read).scalar_one() == planted
+
+
+def test_upgrading_stops_when_a_lot_disagrees_with_its_inspection(engine: Engine) -> None:
+    """**검사 한 건은 로트 하나를 통째로 만든다**(감사 ㉟ NC-225) — 갈린 짝을 이름으로 말한다.
+
+    입고 줄과 로트는 같게 두고 검사만 다르게 심는다. 그래야 앞의 가드(입고 줄 ≠ 로트)를
+    지나 이 가드에 닿는다 — 둘 다 다르면 앞의 가드가 먼저 물어 이 가드는 불리지 않는다.
+    """
+    schema = "purchase_return_lot_quantity_guard"
+    with _schema(engine, schema):
+        config = _upgrade_with(
+            engine,
+            schema,
+            "e84fbec436c0",
+            _WITH_A_LEDGER_LINE
+            + ";\nUPDATE lots SET quantity = 400.0"
+            + ";\nUPDATE stock_ledger_entries SET quantity = 400.0",
+        )
+
+        with pytest.raises(Exception, match=r"SL-2026-0001 \(로트 400 · 검사 500\)"):
+            command.upgrade(config, "head")

@@ -19,7 +19,19 @@
   경계와 함께 다시 본다(ADR 0013 「결과」)
 - **로트는 생겼는데 입고 줄이 없는 상태** — 줄이 들어올 때 부르는 트리거는 들어오지
   않은 줄을 볼 수 없다. 쓰기 경로가 한 트랜잭션으로 지킨다(`docs/PRD-2단계.md` 「닫으며」의
-  단서 ②)
+  단서 ②). 반품 쪽의 같은 자리(문서는 섰는데 원장 줄이 없다)는 아래 지연 트리거가 커밋
+  시점에 막는다 — 입고 쪽에 같은 것을 걸지 못하는 것은 기초재고 로트를 가를 표식이 아직
+  없어서다
+
+**합이 기대는 다른 표의 값도 고정한다**(감사 ㉟ NC-223). 줄이 들어오는 순간만 보는 트리거는
+그 뒤에 분모가 움직이면 모른다 — 로트 수량(`lot_quantity_stays_with_its_ledger`), 유형의
+총량 영향(`txn_type_effect_stays_behind_its_lines`), 반품이 가리키는 검사의 수량 · 공급사 ·
+품목 · 시각(`inspection_stays_behind_its_returns`)을 각각 지킨다.
+
+**잠금은 `FOR NO KEY UPDATE` 다**(Codex 리뷰 · 감사 ㉟ OB-1). 반품 문서를 넣을 때 외래키
+검사가 로트 · 검사 줄에 `KEY SHARE` 를 잡는데, `FOR UPDATE` 는 그것과 부딪쳐 「문서 먼저,
+원장 줄 나중」인 두 트랜잭션이 서로를 기다리다 교착으로 끊겼다. `NO KEY UPDATE` 끼리는 줄을
+세우고 `KEY SHARE` 와는 부딪치지 않는다.
 """
 
 from collections.abc import Callable
@@ -62,7 +74,7 @@ BEGIN
   END IF;
 
   SELECT quantity, lot_number INTO lot_quantity, lot_label
-  FROM lots WHERE id = NEW.lot_id FOR UPDATE;
+  FROM lots WHERE id = NEW.lot_id FOR NO KEY UPDATE;
   IF NOT FOUND THEN
     RETURN NEW;
   END IF;
@@ -139,17 +151,53 @@ BEFORE UPDATE OF quantity ON lots
 FOR EACH ROW EXECUTE FUNCTION lot_quantity_stays_with_its_ledger()
 """
 
-# ── 반품 문서 — 불합격분의 합 · 고치지 않는다 ───────────────────────────────
+# ── 유형 — 원장이 선 뒤에는 방향이 움직이지 않는다 ──────────────────────────
+#
+# **잔량의 부호는 이 칸이 말한다.** 원장 줄이 선 뒤에 「구매반품출고」를 「증가」로 고치면
+# 지나간 반품이 전부 재고를 늘린 것으로 다시 세어지고, 「불변」으로 고치면 그 유형의
+# 줄이 합에서 사라져 정상 로트의 다음 반품이 거부된다. 줄이 없는 유형은 고칠 수 있다.
+EFFECT_FUNCTION = """
+CREATE OR REPLACE FUNCTION txn_type_effect_stays_behind_its_lines() RETURNS trigger
+LANGUAGE plpgsql AS $$
+BEGIN
+  IF NEW.total_effect IS DISTINCT FROM OLD.total_effect
+     AND EXISTS (SELECT 1 FROM stock_ledger_entries
+                 WHERE txn_type_group = OLD.group_code AND txn_type = OLD.code) THEN
+    RAISE EXCEPTION
+      '유형 %의 총량 영향은 원장에 줄이 선 뒤에 고치지 않는다 — 잔량이 다시 세어진다',
+      OLD.code
+      USING ERRCODE = 'restrict_violation';
+  END IF;
+  RETURN NEW;
+END $$
+"""
+
+EFFECT_TRIGGER = """
+CREATE TRIGGER txn_type_effect_stays_behind_its_lines
+BEFORE UPDATE OF total_effect ON txn_type_attributes
+FOR EACH ROW EXECUTE FUNCTION txn_type_effect_stays_behind_its_lines()
+"""
+
+# ── 반품 문서 — 시각 · 불합격분의 합 · 고치지 않는다 ────────────────────────
 #
 # **재고 로트 반품은 원장이 지킨다** — 반품 한 줄마다 원장에 구매반품출고 한 줄이 서고
 # 위의 잔량 트리거가 그 줄을 본다. **불합격분 반품은 원장 줄이 없으므로**(재고가 된 적이
 # 없다) 같은 합의 규칙을 여기서 건다: 한 불합격 검사에서 돌려보낸 수량의 합이 그 검사가
-# 받은 수량을 넘지 않는다. 잠그는 것은 그 검사 줄이다.
+# 받은 수량을 넘지 않는다.
+#
+# **판정보다 앞선 반품은 없다**(Codex 리뷰). 들어와 판정받기 전의 물건은 돌려보낼 수 없다 —
+# 도착일은 판정일보다 늦을 수 없으므로(`ck_inspection_judged_after_arrival`) 판정 시각
+# 하나로 둘 다 지켜진다. 원장의 반품 줄은 문서와 같은 시각을 들어야 하므로(4칸 외래키) 이
+# 한 자리가 원장 쪽도 지킨다.
+#
+# **잠그는 것은 그 검사 줄이다** — 반품이 가리키는 쪽이 하나뿐이라 갈래마다 같다.
 RETURN_GUARD_FUNCTION = f"""
 CREATE OR REPLACE FUNCTION purchase_return_stays_within_what_came() RETURNS trigger
 LANGUAGE plpgsql AS $$
 DECLARE
   received double precision;
+  judged_result text;
+  judged timestamp;
   returned numeric;
 BEGIN
   IF TG_OP <> 'INSERT' THEN
@@ -161,13 +209,20 @@ BEGIN
     RETURN NEW;
   END IF;
 
-  IF NEW.lot_id IS NOT NULL THEN
+  SELECT quantity, result, judged_at INTO received, judged_result, judged
+  FROM inspections WHERE id = NEW.inspection_id FOR NO KEY UPDATE;
+  IF NOT FOUND THEN
     RETURN NEW;
   END IF;
 
-  SELECT quantity INTO received FROM inspections
-  WHERE id = NEW.inspection_id AND result = '{codes.JUDGMENT_FAILED}' FOR UPDATE;
-  IF NOT FOUND THEN
+  IF NEW.returned_at < judged THEN
+    RAISE EXCEPTION
+      '반품 시각(%)이 판정 시각(%)보다 앞선다 — 판정 전의 물건은 돌려보낼 수 없다',
+      NEW.returned_at, judged
+      USING ERRCODE = 'check_violation';
+  END IF;
+
+  IF NEW.lot_id IS NOT NULL OR judged_result <> '{codes.JUDGMENT_FAILED}' THEN
     RETURN NEW;
   END IF;
 
@@ -191,6 +246,64 @@ BEFORE INSERT OR UPDATE OR DELETE ON purchase_returns
 FOR EACH ROW EXECUTE FUNCTION purchase_return_stays_within_what_came()
 """
 
+# ── 반품 문서 → 원장 줄 — 커밋 시점에 묻는다 ───────────────────────────────
+#
+# **원장 쪽 제약은 줄 → 문서 방향만 본다**(감사 ㉟ NC-222 · Codex 리뷰 P1). 재고 로트를
+# 돌려보낸 문서가 원장 줄 없이 홀로 서면, 공급사에게 간 물건이 잔량에서 빠지지 않는다 —
+# 재고가 조용히 실물보다 많다. 문서와 줄은 한 트랜잭션에 서므로 **커밋할 때** 묻는다
+# (`DEFERRABLE INITIALLY DEFERRED`). 문서를 먼저 넣고 줄을 나중에 넣는 순서가 그래서 선다.
+RETURN_LINE_FUNCTION = """
+CREATE OR REPLACE FUNCTION purchase_return_has_its_ledger_line() RETURNS trigger
+LANGUAGE plpgsql AS $$
+BEGIN
+  IF NEW.lot_id IS NOT NULL
+     AND NOT EXISTS (SELECT 1 FROM stock_ledger_entries WHERE purchase_return_id = NEW.id) THEN
+    RAISE EXCEPTION
+      '반품 %는 재고 로트를 돌려보냈는데 원장에 줄이 없다 — 문서와 줄은 함께 선다',
+      NEW.id
+      USING ERRCODE = 'check_violation';
+  END IF;
+  RETURN NULL;
+END $$
+"""
+
+RETURN_LINE_TRIGGER = """
+CREATE CONSTRAINT TRIGGER purchase_return_has_its_ledger_line
+AFTER INSERT ON purchase_returns
+DEFERRABLE INITIALLY DEFERRED
+FOR EACH ROW EXECUTE FUNCTION purchase_return_has_its_ledger_line()
+"""
+
+# ── 검사 — 반품이 가리키는 동안 움직이지 않는다 ─────────────────────────────
+#
+# **반품 문서는 공급사 · 품목을 검사에서 따라간다**(칸을 두지 않았다). 그러니 반품이 선 뒤에
+# 검사의 공급사를 고치면 그 반품이 다른 공급사로 간 것이 되고, 수량을 고치면 불합격분의 합
+# 규칙이 기대는 분모가 움직이며, 판정 시각을 고치면 위의 시각 규칙이 비켜 간다(감사 ㉟ NC-223 ·
+# Codex 리뷰). 유형 칸(`item_type` · `supplier_type`)은 쌍 외래키를 따라 함께 움직이므로
+# 식별 칸만 본다.
+INSPECTION_FUNCTION = """
+CREATE OR REPLACE FUNCTION inspection_stays_behind_its_returns() RETURNS trigger
+LANGUAGE plpgsql AS $$
+BEGIN
+  IF (NEW.quantity, NEW.supplier_id, NEW.item_id, NEW.judged_at, NEW.received_date)
+       IS DISTINCT FROM
+     (OLD.quantity, OLD.supplier_id, OLD.item_id, OLD.judged_at, OLD.received_date)
+     AND EXISTS (SELECT 1 FROM purchase_returns WHERE inspection_id = OLD.id) THEN
+    RAISE EXCEPTION
+      '검사 %를 반품이 가리킨다 — 수량 · 공급사 · 품목 · 시각 · 도착일을 고치지 않는다',
+      OLD.id
+      USING ERRCODE = 'restrict_violation';
+  END IF;
+  RETURN NEW;
+END $$
+"""
+
+INSPECTION_TRIGGER = """
+CREATE TRIGGER inspection_stays_behind_its_returns
+BEFORE UPDATE OF quantity, supplier_id, item_id, judged_at, received_date ON inspections
+FOR EACH ROW EXECUTE FUNCTION inspection_stays_behind_its_returns()
+"""
+
 
 def _run(*statements: str) -> Callable[..., None]:
     def listener(target: FromClause, connection: Connection, **_: object) -> None:
@@ -203,8 +316,9 @@ def _run(*statements: str) -> Callable[..., None]:
 def install(*, ledger: FromClause, returns: FromClause) -> None:
     """표가 설 때 트리거도 서게 한다 — `create_all` 이 메타데이터 밖의 것을 모르므로.
 
-    **원장이 선 뒤에 로트 트리거를 건다.** 로트 쪽 함수가 원장을 읽고, `create_all` 은
-    외래키 순서대로 세우므로 원장이 설 때 로트는 이미 있다.
+    **가리켜지는 표 위의 트리거는 가리키는 표가 설 때 건다.** `create_all` 은 외래키
+    순서대로 세우므로, 원장이 설 때 로트 · 유형 속성 표가, 반품 문서가 설 때 검사 표가
+    이미 있다. 함수 본문이 읽는 다른 표는 부를 때 찾으므로 순서를 타지 않는다.
     """
     event.listen(
         ledger,
@@ -214,6 +328,19 @@ def install(*, ledger: FromClause, returns: FromClause) -> None:
             LEDGER_GUARD_TRIGGER,
             LOT_QUANTITY_FUNCTION,
             LOT_QUANTITY_TRIGGER,
+            EFFECT_FUNCTION,
+            EFFECT_TRIGGER,
         ),
     )
-    event.listen(returns, "after_create", _run(RETURN_GUARD_FUNCTION, RETURN_GUARD_TRIGGER))
+    event.listen(
+        returns,
+        "after_create",
+        _run(
+            RETURN_GUARD_FUNCTION,
+            RETURN_GUARD_TRIGGER,
+            RETURN_LINE_FUNCTION,
+            RETURN_LINE_TRIGGER,
+            INSPECTION_FUNCTION,
+            INSPECTION_TRIGGER,
+        ),
+    )

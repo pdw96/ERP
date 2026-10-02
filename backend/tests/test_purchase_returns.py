@@ -18,7 +18,7 @@ from datetime import date, datetime
 import pytest
 from sqlalchemy import create_engine, text
 from sqlalchemy.engine import Engine
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy.exc import DBAPIError, IntegrityError
 from sqlalchemy.orm import Session
 from sqlalchemy.pool import NullPool
 
@@ -690,3 +690,194 @@ def test_two_failed_returns_at_once_cannot_exceed_what_came(engine: Engine) -> N
 
         assert isinstance(second, IntegrityError), second
         assert "돌려보낸 합이" in str(second)
+
+
+# ── 리뷰가 낸 자리 — Codex 리뷰 · 감사 ㉟ ────────────────────────────────
+
+
+def _immediately(session: Session) -> None:
+    """커밋까지 미뤄 두는 검사를 지금 돌린다 — 테스트 세션은 커밋하지 않고 되돌리므로."""
+    session.execute(text("SET CONSTRAINTS purchase_return_has_its_ledger_line IMMEDIATE"))
+
+
+def test_a_lot_return_cannot_stand_without_its_ledger_line(prepared: Session) -> None:
+    """**문서 → 원장 줄 방향**(NC-222 · Codex P1). 원장 쪽 제약은 줄 → 문서만 본다 — 문서가
+    홀로 서면 공급사에게 간 물건이 잔량에서 빠지지 않는다."""
+    prepared.add(_lot_return(prepared, 100.0))
+    prepared.flush()
+
+    with pytest.raises(IntegrityError, match="원장에 줄이 없다"):
+        _immediately(prepared)
+
+
+def test_a_lot_return_with_its_line_passes_the_commit_check(prepared: Session) -> None:
+    """**가드가 정상 경로를 막지 않는다** — 문서를 먼저, 줄을 나중에 넣는 순서가 선다."""
+    _return_from_the_lot(prepared, 100.0)
+
+    _immediately(prepared)
+
+
+def test_a_failed_return_needs_no_ledger_line(prepared: Session) -> None:
+    """불합격분은 재고가 된 적이 없어 원장에 뺄 줄이 없다."""
+    prepared.add(_failed_return(prepared, 100.0))
+    prepared.flush()
+
+    _immediately(prepared)
+
+
+def test_a_types_direction_is_fixed_once_the_ledger_uses_it(prepared: Session) -> None:
+    """**잔량의 부호가 사후에 뒤집히지 않는다**(NC-223 · Codex). 원장 줄이 선 유형의 방향을
+    고치면 지나간 줄이 전부 거꾸로 다시 세어진다."""
+    with pytest.raises(IntegrityError, match="원장에 줄이 선 뒤에 고치지 않는다"):
+        prepared.execute(
+            text("UPDATE txn_type_attributes SET total_effect = :effect WHERE code = :code"),
+            {"effect": codes.EFFECT_DECREASE, "code": codes.TXN_PURCHASE_RECEIPT},
+        )
+
+
+@pytest.mark.parametrize(
+    "change",
+    [
+        "quantity = 100",
+        "judged_at = TIMESTAMP '2026-09-21 08:00'",
+        "received_date = DATE '2026-09-20'",
+        "supplier_id = (SELECT max(id) FROM partners)",
+        "item_id = (SELECT max(id) FROM items)",
+    ],
+    ids=["quantity", "judged_at", "received_date", "supplier", "item"],
+)
+def test_a_returned_inspection_stays_as_it_was(prepared: Session, change: str) -> None:
+    """**반품은 공급사 · 품목 · 수량을 검사에서 따라간다**(NC-223 · Codex). 반품이 선 뒤 검사가
+    움직이면 그 반품이 다른 공급사로 간 것이 되거나, 합 규칙의 분모가 바뀐다.
+
+    값이 실제로 달라지도록 다른 공급사 · 품목을 하나씩 더 둔다 — 같은 값으로 고치면 트리거가
+    「달라지지 않았다」로 넘겨 이 검사가 아무것도 묻지 않는다.
+    """
+    prepared.add_all([make_partner(codes.SUPPLIER, code="SUP-02"), make_item(code="RM-02")])
+    prepared.flush()
+    prepared.add(_failed_return(prepared, 100.0))
+    prepared.flush()
+
+    with pytest.raises(IntegrityError, match="반품이 가리킨다"):
+        prepared.execute(text(f"UPDATE inspections SET {change} WHERE result = '불합격'"))
+
+
+def test_an_inspection_nobody_returned_can_still_be_corrected(prepared: Session) -> None:
+    """**가드가 정상 경로를 막지 않는다** — 반품도 로트도 가리키지 않는 검사는 고칠 수 있다."""
+    prepared.execute(text("UPDATE inspections SET quantity = 180 WHERE result = '불합격'"))
+
+    assert _failed(prepared).quantity == 180.0
+
+
+def test_a_lot_carries_its_inspections_quantity(prepared: Session) -> None:
+    """**검사 한 건은 로트 하나를 통째로 만든다**(NC-225). 같은 수량이 검사와 로트에 나뉘어
+    살므로 쌍으로 묶는다 — 갈리면 「무엇이 들어왔나」가 표마다 다르게 읽힌다."""
+    made = prepared.get(Inspection, _the_lot(prepared).inspection_id)
+    assert made is not None
+    second = Inspection(
+        item_id=made.item_id,
+        item_type=made.item_type,
+        material_group=made.material_group,
+        supplier_id=made.supplier_id,
+        supplier_type=made.supplier_type,
+        supplier_lot_number="SL-2026-0005",
+        quantity=300.0,
+        received_date=RECEIVED,
+        judged_at=JUDGED,
+        judged_by="검사원 1",
+        result=codes.JUDGMENT_PASSED,
+    )
+    prepared.add(second)
+    prepared.flush()
+    lot = _lot(made, second, "RM-01-260921-03")
+    lot.item_id = made.item_id
+    lot.quantity = 299.0
+    prepared.add(lot)
+    with pytest.raises(IntegrityError, match="fk_lot_inspection_quantity"):
+        prepared.flush()
+
+
+def test_an_inspection_that_made_a_lot_keeps_its_quantity(prepared: Session) -> None:
+    """반대 방향 — 로트가 가리키는 동안 검사의 수량을 고치면 짝이 사라져 막힌다."""
+    with pytest.raises(IntegrityError, match="fk_lot_inspection_quantity"):
+        prepared.execute(text("UPDATE inspections SET quantity = 400 WHERE result = '합격'"))
+
+
+def test_nothing_goes_back_before_it_was_judged(prepared: Session) -> None:
+    """**판정받기 전의 물건은 돌려보낼 수 없다**(Codex). 시각이 앞선 반품은 잔량 합으로는
+    통과하지만 지나간 시점의 잔량을 음수로 만든다."""
+    prepared.add(_lot_return(prepared, 10.0, returned_at=datetime(2026, 9, 20, 9, 0)))
+    with pytest.raises(IntegrityError, match="판정 시각"):
+        prepared.flush()
+
+
+def test_a_lot_return_uses_a_reason_the_incoming_stage_knows(prepared: Session) -> None:
+    """**그 단계에서 쓸 수 있는 사유만**(Codex). 있는 코드라도 IQC 의 규칙이 없으면 받지
+    않는다 — 사 온 자재를 완제품 접착력 불량으로 돌려보낸 기록이 서지 않는다."""
+    add_code(prepared, codes.NC_REASON, "FQ-ADH", "접착력")
+    prepared.flush()
+    prepared.add(NonconformityAttribute(code="FQ-ADH", measure_kind=codes.COUNTED_KIND))
+    prepared.flush()
+
+    prepared.add(_lot_return(prepared, 10.0, nonconformity_code="FQ-ADH"))
+    with pytest.raises(IntegrityError, match="fk_purchase_return_reason"):
+        prepared.flush()
+
+
+def test_two_returns_written_document_first_do_not_deadlock(engine: Engine) -> None:
+    """**문서 먼저, 원장 줄 나중** — 쓰기 경로가 할 순서로 두 반품이 엇갈려도 끊기지 않는다
+    (Codex · 감사 ㉟ OB-1).
+
+    문서를 넣을 때 외래키 검사가 로트에 `KEY SHARE` 를 잡는다. 원장 트리거가 `FOR UPDATE`
+    로 잠그면 둘이 서로의 `KEY SHARE` 를 기다려 교착으로 하나가 끊겼다. 첫째가 문서만 넣은
+    채로 둘째를 보내고, 둘째가 기다리기 시작한 뒤에 첫째의 줄을 넣고 커밋한다.
+    """
+    with _committed_schema(engine, "return_interleave") as scoped:
+        first = Session(scoped)
+        second = Session(scoped)
+        outcome: dict[str, object] = {}
+        try:
+            first_document = _lot_return(first, 10.0, returned_at=datetime(2026, 9, 25, 9, 0))
+            first.add(first_document)
+            first.flush()
+            pid = second.execute(text("SELECT pg_backend_pid()")).scalar_one()
+
+            def go() -> None:
+                try:
+                    document = _lot_return(
+                        second, 10.0, returned_at=datetime(2026, 9, 25, 10, 0)
+                    )
+                    second.add(document)
+                    second.flush()
+                    second.add(_return_line(document))
+                    second.flush()
+                    second.commit()
+                    outcome["second"] = "committed"
+                except DBAPIError as error:
+                    second.rollback()
+                    outcome["second"] = error
+
+            racer = threading.Thread(target=go)
+            racer.start()
+            deadline = time.monotonic() + 10
+            with scoped.connect() as watcher:
+                while racer.is_alive() and time.monotonic() < deadline:
+                    waiting = watcher.execute(
+                        text("SELECT wait_event_type FROM pg_stat_activity WHERE pid = :pid"),
+                        {"pid": pid},
+                    ).scalar_one_or_none()
+                    if waiting == "Lock":
+                        break
+                    time.sleep(0.02)
+            first.add(_return_line(first_document))
+            first.flush()
+            first.commit()
+            racer.join(10)
+            assert not racer.is_alive(), "둘째가 끝나지 않았다"
+        finally:
+            first.close()
+            second.close()
+
+        assert outcome["second"] == "committed", outcome["second"]
+        with Session(scoped) as session:
+            assert _balance(session, _the_lot(session).id) == 480.0
