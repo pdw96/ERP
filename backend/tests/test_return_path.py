@@ -207,6 +207,19 @@ def test_a_lot_can_go_back_in_pieces_down_to_nothing(planted: Session) -> None:
     )
 
 
+def test_failed_goods_can_go_back_in_pieces_up_to_all_of_it(planted: Session) -> None:
+    """**불합격분의 합도 같다.** `double precision` 으로 더하면 0.1 + 2.7 + 0.2 가 3 이 아니라
+    3.0000000000000004 가 되어, 받은 것을 다 돌려보내는 마지막 반품을 쓰기 경로가 거절한다."""
+    inspection_id = _failed(planted, quantity=3.0)
+
+    for piece in (0.1, 2.7, 0.2):
+        return_to_supplier(planted, _back(inspection_id, piece))
+
+    assert (
+        _refused(planted, _back(inspection_id, 0.001)) == ReturnRefusal.MORE_THAN_WAS_REJECTED
+    )
+
+
 # ── 트리거가 막는 것을 먼저 이름으로 막는다 ────────────────────────────────
 
 
