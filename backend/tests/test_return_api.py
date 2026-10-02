@@ -18,8 +18,10 @@ from sqlalchemy.orm import Session
 
 from app.api import schemas
 from app.api.app import app, session_scope
+from app.core import codes
 from app.db.inventory import PurchaseReturn, StockLedgerEntry
 from app.services.returns import ReturnRefusal
+from tests.factories import add_code
 from tests.test_return_path import (  # noqa: F401
     IN_KIND,
     _committed_schema,
@@ -28,6 +30,9 @@ from tests.test_return_path import (  # noqa: F401
     planted,
 )
 from tests.test_write_path import _FOREIGN_REASON
+
+# 공통코드에는 설 수 있는데 반품 문서의 칸(`String(10)`)에는 들지 않는 정산 구분.
+_TOO_LONG_TO_KEEP = "대물정산-분할반품-예외"
 
 
 @pytest.fixture
@@ -103,8 +108,9 @@ def test_a_business_refusal_names_itself_in_the_same_shape(
         # `integer` 를 넘는 번호는 「없다」가 아니라 범위 오류(500)가 된다.
         ("inspection_id", 2_147_483_648),
         ("inspection_id", 0),
-        # 칸(10자)을 넘는 정산 구분은 데이터베이스가 자르려다 터진다.
-        ("settle_type", "대" * 11),
+        # 공통코드 칸(30자)에는 들지만 반품 칸(10자)을 넘는 정산 구분 — 아래에서 심는다.
+        # 경계가 없으면 「그런 정산 구분이 없다」를 지나 넣는 자리에서 터진다.
+        ("settle_type", _TOO_LONG_TO_KEEP),
         ("returned_by", "　"),
         ("nonconformity_code", "\t"),
     ],
@@ -115,7 +121,13 @@ def test_what_the_database_would_break_on_is_refused_at_the_boundary(
     field: str,
     value: object,
 ) -> None:
-    """**데이터베이스까지 가면 500 이 되는 값**을 경계가 422 로 돌려보낸다."""
+    """**데이터베이스까지 가면 500 이 되는 값**을 경계가 422 로 돌려보낸다.
+
+    **정산 구분은 실제로 있는 코드로 잰다.** 처음에는 없는 긴 코드를 보냈는데, 경계를 빼도
+    「그런 정산 구분이 없다」(422)로 막혀 이 검사가 **다른 까닭으로** 빨개졌다(어긋내 확인했다).
+    """
+    add_code(planted, codes.SETTLE_TYPE, _TOO_LONG_TO_KEEP, "칸보다 긴 정산 구분")
+    planted.flush()
     response = client.post(
         "/purchase-returns", json=_payload(_failed(planted)) | {field: value}
     )
