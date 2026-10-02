@@ -1195,3 +1195,24 @@ PostgreSQL 16)도 초록이다(392 passed).
 | — | 폐기 줄의 판정 CHECK 를 한 식(`(id IS NULL AND result IS NULL) OR (id IS NOT NULL AND result = '불합격')`)으로 썼다 — 처음 쓴 모양이다 | `test_a_disposal_carries_the_failure_it_follows` — 판정이 빌 때 `NULL = '불합격'` 이 NULL 이라 CHECK 가 그 줄을 받았다 |
 | — | 내릴 때 세기 전의 `LOCK TABLE inspections` 를 뺐다 | `test_downgrade_does_not_miss_a_retest_still_being_written` |
 | — | 내릴 때의 재검사 수 가드를 껐다 | `test_downgrade_counts_the_retests_that_would_vanish` · `test_downgrade_does_not_miss_a_retest_still_being_written` |
+
+## 3단계 조각 4 — 재검사 쓰기 경로 (`330e335`)
+
+쓰기 경로(`app/services/retests.py`)의 지킴을 하나씩 어긋낸 뒤 `tests/test_retest_path.py` · `tests/test_retest_api.py` 를
+돌렸다. 어긋냄 없이 돌린 대조군과 같은 트리의 `pytest` 전체(실제 PostgreSQL 16)는 초록이다. 잰 트리와 이 커밋은 테스트
+독스트링 한 줄의 줄바꿈만 다르다.
+
+| NC | 무엇을 어긋냈나 | 빨개진 검사 |
+|---|---|---|
+| — | 로트 줄의 잠금(`FOR NO KEY UPDATE`)을 뺐다 | `test_two_retests_at_once_the_second_is_named` 둘 — 둘째가 이름 대신 트리거의 거절을 받는다 |
+| — | 만료의 경계를 `>=` 에서 `>` 로 바꿨다 | `test_a_lot_that_expires_today_is_still_in_date` · `test_the_write_path_and_the_trigger_draw_the_same_line` 의 `expires-today` · `test_a_business_refusal_names_itself_in_the_same_shape`(API) |
+| — | 앞선 불합격 재검사를 묻지 않게 했다 | `test_a_lot_that_failed_is_not_retested_again` · `test_two_retests_at_once_the_second_is_named` 의 `behind-a-failure` |
+| — | 설정기간이 없을 때의 거절을 껐다 | `test_a_pass_without_a_shelf_life_is_named` |
+| — | 새 만료일을 판정일이 아니라 옛 만료일에서 셌다 | `test_a_pass_renews_the_expiry_from_the_day_it_was_judged` · `test_a_pass_comes_back_with_its_new_expiry` |
+| — | 폐기 줄의 양을 잔량이 아니라 로트 수량으로 냈다 | `test_a_failure_throws_away_everything_left` · `test_a_failure_whose_balance_does_not_add_up_in_binary_still_empties_the_lot` |
+| — | 잔량을 `numeric` 이 아니라 `double` 로 셌다 | `test_a_failure_whose_balance_does_not_add_up_in_binary_still_empties_the_lot` — 처음 고른 수(33.3 · 0.1)에서는 초록이라 수를 33.3 · 66.6 으로 바꿔 다시 쟀다 |
+| — | 재지 않는 재검사의 거절을 껐다 | `test_nothing_to_measure_again_is_named` |
+| — | 경시변화가 아닌 항목의 거절을 껐다 | `test_measurements_that_do_not_fit_the_retest_are_named` 의 `not-time-variant` |
+| — | 기준을 경시변화로 거르지 않았다 | `test_retest_path.py` · `test_retest_api.py` 의 검사 스물넷 |
+| — | 잔량 0 의 거절을 껐다 | `test_a_lot_with_nothing_left_is_named` |
+| — | 만료일 없음의 거절을 껐다 | `test_a_lot_without_an_expiry_is_named` |
