@@ -1058,3 +1058,15 @@ PostgreSQL 16)도 초록이다(392 passed).
 | 225 | 올릴 때의 가드(로트 수량 ≠ 검사 수량)를 껐다 | `test_upgrading_stops_when_a_lot_disagrees_with_its_inspection` |
 | — | 마이그레이션이 유형 방향 고정 트리거를 걸지 않게 했다 | `test_the_migration_builds_the_same_tables_as_the_models` |
 
+
+## 조각 1 리뷰 2 라운드 — Codex 리뷰의 고침 (`cab7fc7`)
+
+2 라운드가 더한 지킴 넷을 하나씩 어긋낸 뒤 그것을 물어야 할 검사만 돌렸다(`tests/test_purchase_returns.py`). 어긋냄 없이 돌린
+대조군은 초록이고, 같은 트리의 `pytest` 전체(실제 PostgreSQL 16)도 초록이다.
+
+| NC | 무엇을 어긋냈나 | 빨개진 검사 |
+|---|---|---|
+| — | 재고 로트 반품의 입고 시각 비교를 껐다 | `test_nothing_goes_back_before_it_came_in` |
+| 223 | 원장 트리거가 유형 속성 줄을 `FOR SHARE` 없이 읽게 했다 | `test_a_direction_change_waits_for_the_first_line_of_its_type` — 둘째의 방향 변경이 커밋되고 잔량이 510 이 된다 |
+| — | `lot_id` 인덱스를 뺐다(모델) | `test_the_balance_is_looked_up_by_lot` |
+| 223 | 검사 고정에서 불합격 사유를 뺐다 | `test_a_returned_inspection_stays_as_it_was` — `reason` 쪽만 |
