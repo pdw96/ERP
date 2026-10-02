@@ -523,6 +523,8 @@ def post_inspection(
         # 글자지만 CodeQL 은 예외를 문자열로 바꿔 응답에 싣는 것을 예외 정보 노출로
         # 읽고(`py/stack-trace-exposure`), 룰셋이 그 경고로 머지를 막는다(ADR 0005,
         # PR #71). 싣는 것은 우리가 지어 넘긴 문장이다 — 그 갈래를 이름으로 든다.
+        # **이 고침은 ADR 0015 앞의 예외다** — 이제 오탐은 코드로 넘기지 않고 소유자가
+        # Security 탭에서 넘긴다. 보내는 글자가 같아 되돌리지 않았다.
         return _refusal(
             status.HTTP_422_UNPROCESSABLE_CONTENT,
             [{"loc": ["body"], "msg": refused.message, "type": refused.code}],
