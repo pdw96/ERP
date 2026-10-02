@@ -1170,3 +1170,28 @@ PostgreSQL 16)도 초록이다(392 passed).
 | NC | 무엇을 어긋냈나 | 빨개진 검사 |
 |---|---|---|
 | — | 두 라우트가 `refused.message` 대신 상수를 싣게 했다 | `test_something_we_cannot_judge_comes_back_named` · `test_a_business_refusal_names_itself_in_the_same_shape` |
+
+## 3단계 조각 3 — 재검사 스키마 (`1de458b`)
+
+트리거와 CHECK 를 하나씩 어긋낸 뒤 `tests/test_retest.py` 를, 내릴 때의 가드는 `tests/test_migrations.py -k retest` 를
+돌렸다. 어긋냄 없이 돌린 대조군과 같은 트리의 `pytest` 전체(실제 PostgreSQL 16)는 초록이다. 마지막 줄은 어긋냄이 아니라
+처음 쓴 CHECK 그대로이고, 그 검사가 그 식에서 먼저 빨갛게 나와 식을 고쳤다.
+
+| NC | 무엇을 어긋냈나 | 빨개진 검사 |
+|---|---|---|
+| — | 재검사 트리거에서 로트 잠금(`FOR NO KEY UPDATE`)을 뺐다 | `test_two_retests_at_once_do_not_both_find_the_lot_expired` · `test_a_retest_behind_a_failure_finds_the_lot_disposed` |
+| — | 재검사 트리거를 `AFTER INSERT` 로 걸었다 | `test_a_passed_retest_renews_the_expiry_on_its_own_row` 를 비롯해 합격 재검사를 넣는 검사 전부 — 방금 넣은 갱신 만료일이 「가장 최근」으로 잡힌다 |
+| — | 앞선 불합격 재검사를 묻지 않게 했다 | `test_a_lot_that_failed_its_retest_is_not_retested_again` · `test_a_failure_still_waiting_for_its_disposal_blocks_a_pass` · `test_a_retest_behind_a_failure_finds_the_lot_disposed` |
+| — | 만료일이 NULL 인 분기를 껐다 | `test_a_lot_without_an_expiry_is_not_retested` |
+| — | 만료의 경계를 `>=` 에서 `>` 로 바꿨다(만료일 당일을 만료로 셌다) | `test_a_lot_that_has_not_expired_is_not_retested` 의 `on-the-expiry-day` |
+| — | 잔량 0 의 거절을 껐다 | `test_a_lot_with_nothing_left_is_not_retested` |
+| — | 앞선 재검사보다 이른 판정의 거절을 껐다 | `test_a_retest_does_not_slip_in_before_an_earlier_one` |
+| — | 원장 트리거에서 「폐기 줄은 잔량 전부」를 껐다 | `test_a_disposal_takes_the_whole_balance` |
+| — | 단계가 바뀌는 것의 거절을 껐다 | `test_an_inspection_keeps_the_stage_it_came_in_with` |
+| — | 재검사 줄을 고치는 것의 거절을 껐다 | `test_a_retest_is_never_rewritten` 셋 |
+| — | 재검사 줄을 지우는 것의 거절을 껐다 | `test_a_retest_is_never_erased` |
+| — | 로트 만료일의 고정을 껐다 | `test_a_lots_expiry_stays_as_labelled` 셋 |
+| — | 떨어진 재검사의 폐기 줄을 커밋 때 묻지 않게 했다 | `test_a_failed_retest_cannot_stand_without_its_disposal` |
+| — | 폐기 줄의 판정 CHECK 를 한 식(`(id IS NULL AND result IS NULL) OR (id IS NOT NULL AND result = '불합격')`)으로 썼다 — 처음 쓴 모양이다 | `test_a_disposal_carries_the_failure_it_follows` — 판정이 빌 때 `NULL = '불합격'` 이 NULL 이라 CHECK 가 그 줄을 받았다 |
+| — | 내릴 때 세기 전의 `LOCK TABLE inspections` 를 뺐다 | `test_downgrade_does_not_miss_a_retest_still_being_written` |
+| — | 내릴 때의 재검사 수 가드를 껐다 | `test_downgrade_counts_the_retests_that_would_vanish` · `test_downgrade_does_not_miss_a_retest_still_being_written` |
