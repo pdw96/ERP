@@ -90,6 +90,8 @@
 | `055fc4e` | — | 열린 줄의 원 지적에 「심각도: 낮음」(콜론 꼴)을 적어도 낮음 게이트가 통과한다 | `audit-quality` | **닫혔다** — `_LOW` 가 콜론 꼴을 받는다(「PR #65 Codex 리뷰 2 라운드의 고침」 묶음) |
 | `5f6803a` | — | 열린 줄의 원 지적이 「심각도 낮음이 아니다」 · 「낮음 아님」이다 | `audit-quality` | 초록이 맞다 — 부정형은 낮음이 아니다(「PR #65 Codex 리뷰 3 라운드의 고침」 묶음) |
 | `6001d28` | — | 두 NC 표의 머리 줄을 바꿔도 「아직」 표 게이트의 앵커가 통과한다 | `audit-quality` | 초록이 맞다 — 겨냥이 빗나간 어긋냄이다. 파서는 머리 줄이 아니라 절 이름으로 표를 찾고, 절 이름을 바꾸는 어긋냄은 같은 묶음에서 빨갛다 |
+| `f2f39e3` | — | 원장 트리거의 로트 잠금만 `FOR UPDATE` 로 되돌려도 엇갈림 검사가 통과한다 | `audit-quality` | 초록이 맞다 — 겹친 방어. 반품 문서 트리거가 검사 줄을 먼저 잡아 같은 검사의 반품이 줄을 서므로 엇갈림 자체가 서지 않는다. 둘 다 되돌리면(같은 묶음의 7c) 빨갛다 |
+| `f2f39e3` | — | 반품 문서 트리거의 검사 잠금만 빼도 엇갈림 검사가 통과한다 | `audit-quality` | 초록이 맞다 — 겹친 방어. `FOR NO KEY UPDATE` 는 외래키의 `KEY SHARE` 와 부딪치지 않아 교착이 나지 않는다. 둘 다 되돌리면 빨갛다 |
 
 ## ⑧ 의 고침 (`03b6c1f`)
 
@@ -1035,3 +1037,24 @@ PostgreSQL 16)도 초록이다(392 passed).
 | NC | 무엇을 어긋냈나 | 빨개진 검사 |
 |---|---|---|
 | 70 | 원장의 합을 `numeric` 이 아니라 `double precision` 으로 셌다 | `test_returns_can_empty_a_lot_to_the_last_gram` |
+
+## 조각 1 리뷰 라운드 — Codex 리뷰 · 감사 ㉟ 의 고침 (`f2f39e3`)
+
+이번 라운드가 더한 지킴(트리거 넷 · 쌍 외래키 · 사유의 단계 외래키 · 마이그레이션 가드)을 하나씩 어긋낸 뒤 그것을 물어야 할 검사만
+돌렸다(`tests/test_purchase_returns.py` · `tests/test_migrations.py`). 어긋냄 없이 돌린 대조군은 초록이고, 같은 트리의 `pytest`
+전체(실제 PostgreSQL 16)도 초록이다. 잠금은 둘 중 무엇이 교착을 막는지 가르려고 셋으로 나눠 쟀다.
+
+| NC | 무엇을 어긋냈나 | 빨개진 검사 |
+|---|---|---|
+| 222 | 반품 문서의 지연 트리거(문서 → 원장 줄)를 걸지 않았다 | `test_a_lot_return_cannot_stand_without_its_ledger_line` |
+| 223 | 유형의 방향을 고정하는 트리거를 걸지 않았다 | `test_a_types_direction_is_fixed_once_the_ledger_uses_it` |
+| 223 | 반품이 가리키는 검사를 고정하는 트리거를 걸지 않았다 | `test_a_returned_inspection_stays_as_it_was` — 다섯 칸 모두 |
+| — | 반품 시각과 판정 시각의 비교를 껐다 | `test_nothing_goes_back_before_it_was_judged` |
+| — | 반품 사유의 외래키를 공통코드로 되돌렸다(모델) | `test_a_lot_return_uses_a_reason_the_incoming_stage_knows` |
+| 225 | 로트 · 검사 수량의 쌍 외래키를 뺐다(모델) | `test_a_lot_carries_its_inspections_quantity` · `test_an_inspection_that_made_a_lot_keeps_its_quantity` |
+| — | 원장 트리거의 로트 잠금만 `FOR UPDATE` 로 되돌렸다(7a) | **없다 — 통과했다** — 겹친 방어. 반품 문서 트리거의 검사 잠금이 같은 검사의 반품을 줄 세워 엇갈림이 서지 않는다 |
+| — | 반품 문서 트리거의 검사 잠금만 뺐다(7b) | **없다 — 통과했다** — 겹친 방어. `FOR NO KEY UPDATE` 가 외래키의 `KEY SHARE` 와 부딪치지 않는다 |
+| — | 둘 다 처음 모양으로 되돌렸다 — 로트 `FOR UPDATE`, 검사 잠금 없음(7c) | `test_two_returns_written_document_first_do_not_deadlock` — 교착으로 둘째가 끊긴다 |
+| 225 | 올릴 때의 가드(로트 수량 ≠ 검사 수량)를 껐다 | `test_upgrading_stops_when_a_lot_disagrees_with_its_inspection` |
+| — | 마이그레이션이 유형 방향 고정 트리거를 걸지 않게 했다 | `test_the_migration_builds_the_same_tables_as_the_models` |
+
