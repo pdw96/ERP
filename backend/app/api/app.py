@@ -518,9 +518,14 @@ def post_inspection(
         # **문자열 하나로 돌려보내지 않는다.** 같은 422 인데 본문의 모양이
         # 갈리면 부르는 쪽이 둘을 따로 처리해야 하고, 한쪽은 스펙에 없다.
         # `type` 에 실리는 이름은 **고치면 깨지는 약속**이다(`incoming.py`).
+        #
+        # **본문에는 `message` 를 싣고 `str(refused)` 를 싣지 않는다.** 둘은 같은
+        # 글자지만 CodeQL 은 예외를 문자열로 바꿔 응답에 싣는 것을 예외 정보 노출로
+        # 읽고(`py/stack-trace-exposure`), 룰셋이 그 경고로 머지를 막는다(ADR 0005,
+        # PR #71). 싣는 것은 우리가 지어 넘긴 문장이다 — 그 갈래를 이름으로 든다.
         return _refusal(
             status.HTTP_422_UNPROCESSABLE_CONTENT,
-            [{"loc": ["body"], "msg": str(refused), "type": refused.code}],
+            [{"loc": ["body"], "msg": refused.message, "type": refused.code}],
         )
 
     # **응답을 만들기 전에 커밋한다.** 여기서 터지면 500 이 나가고, 그것이
@@ -566,7 +571,7 @@ def post_purchase_return(
     except RefusedReturn as refused:
         return _refusal(
             status.HTTP_422_UNPROCESSABLE_CONTENT,
-            [{"loc": ["body"], "msg": str(refused), "type": refused.code}],
+            [{"loc": ["body"], "msg": refused.message, "type": refused.code}],
         )
 
     # **응답을 만들기 전에 커밋한다** — 문서 → 원장 줄을 묻는 지연 트리거도 여기서

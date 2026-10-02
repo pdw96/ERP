@@ -85,8 +85,13 @@ def test_a_business_refusal_names_itself_in_the_same_shape(
     client: TestClient,
     planted: Session,  # noqa: F811
 ) -> None:
-    """**업무 거절도 `detail[]` 한 모양이다** — `type` 이 `ReturnRefusal` 의 이름이다."""
-    response = client.post("/purchase-returns", json=_payload(_passed(planted)))
+    """**업무 거절도 `detail[]` 한 모양이다** — `type` 이 `ReturnRefusal` 의 이름이다.
+
+    **사람에게 하는 말도 실린다** — `msg` 가 그 검사를 가리킨다. 라우트가 싣는 것은
+    `RefusedReturn.message` 다(`app.py` 의 그 자리 주석).
+    """
+    inspection_id = _passed(planted)
+    response = client.post("/purchase-returns", json=_payload(inspection_id))
 
     assert response.status_code == 422, response.text
     assert response.json()["detail"] == [
@@ -96,6 +101,7 @@ def test_a_business_refusal_names_itself_in_the_same_shape(
             "type": ReturnRefusal.REASON_IS_MISSING.value,
         }
     ]
+    assert f"검사 {inspection_id} " in response.json()["detail"][0]["msg"]
     assert planted.scalar(select(func.count()).select_from(PurchaseReturn)) == 0
 
 
