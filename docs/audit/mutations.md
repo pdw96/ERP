@@ -1358,3 +1358,13 @@ PostgreSQL 16)도 초록이다(392 passed).
 | — | 포함 · 배제 경계의 쌍을 견주지 않았다 | `test_an_inclusive_and_an_exclusive_bound_are_one_constraint` · `test_the_judgment_asks_for_as_far_as_the_contract_moved` 의 `a-looser-request-bound-widens` · `a-tighter-request-bound-breaks` |
 | — | 값을 파이썬의 `==` 로 견줬다 | `test_a_boolean_is_not_a_number` |
 | — | `operationId` 를 견주지 않았다 | `test_the_judgment_asks_for_as_far_as_the_contract_moved` 의 `a-renamed-operation-breaks` |
+
+## 3단계 읽는 조각 B2 — 없던 anyOf · 근거 값의 제약 · 헤더 대소문자 (`ad7ff81`, PR #84 Codex 리뷰 3 라운드)
+
+`app/api/compat.py` 의 고침을 하나씩 되돌린 뒤 `tests/test_contract_judgment.py` 를 돌렸다. 어긋냄 없이 돌린 대조군과 같은 트리의 `pytest` 전체(실제 PostgreSQL 16)는 초록이다. 같은 커밋이 고친 CI 의 기준(머지 커밋의 첫 부모)은 로컬에서 어긋낼 수 없다 — CI 실행 로그의 「계약의 기준」 스텝이 받은 커밋이 그것을 보인다.
+
+| NC | 무엇을 어긋냈나 | 빨개진 검사 |
+|---|---|---|
+| — | 없던 `anyOf` 를 갈래 0 으로 읽었다 | `test_an_any_of_that_was_not_there_was_no_constraint` |
+| — | 응답 헤더 이름을 철자대로 견줬다 | `test_a_header_name_is_the_same_in_any_case` |
+| — | 근거 값의 길이를 묻지 않았다 | `test_a_reason_must_be_a_value_the_new_schema_takes_whole` |
