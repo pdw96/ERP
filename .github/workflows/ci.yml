@@ -78,6 +78,33 @@ jobs:
         # 범위는 인자로 적지 않는다 — `backend/pyproject.toml` 의 `[tool.mypy] files` 한 자리가 든다(ADR 0007)
         run: mypy
 
+      # ── 계약의 기준 (ADR 0018) ────────────────────────────────────────────
+      # 판정 테스트(`tests/test_contract_judgment.py`)가 견줄 옛 계약은 **이 변경이 들어갈
+      # 자리의 지금 계약**이다. PR 에서는 들어갈 브랜치의 지금 끝을 받는다 — 갈라진 커밋은
+      # 그 사이 다른 PR 이 판을 올려 두면 낡는다. `main` 푸시에서는 그 푸시 앞의 끝
+      # (`github.event.before`)이다 — 푸시된 커밋 자신과 견주면 언제나 같다.
+      #
+      # 받지 못하면 이 스텝이 떨어진다 — 기준 없이 도는 판정은 건너뛴 검사와 같다.
+      #
+      # **이 스텝이 못 보는 것**(W-6 ③): PR 이 초록이 된 뒤에 들어갈 브랜치가 움직이는 것.
+      # 그 사이 다른 PR 이 판을 올려 두면 이 PR 의 판정은 낡은 기준의 것이다 — 머지된 뒤
+      # `main` 푸시의 실행이 다시 견준다.
+      - name: 계약의 기준
+        env:
+          EVENT: ${{ github.event_name }}
+          BASE_REF: ${{ github.base_ref }}
+          BEFORE: ${{ github.event.before }}
+        run: |
+          set -euo pipefail
+          if [ "$EVENT" = pull_request ]; then
+            git fetch --no-tags --depth=1 origin \
+              "+refs/heads/${BASE_REF}:refs/remotes/origin/${BASE_REF}"
+            echo "ERP_CONTRACT_BASELINE=origin/${BASE_REF}" >> "$GITHUB_ENV"
+          else
+            git fetch --no-tags --depth=1 origin "$BEFORE"
+            echo "ERP_CONTRACT_BASELINE=${BEFORE}" >> "$GITHUB_ENV"
+          fi
+
       - name: 테스트
         env:
           ERP_TEST_DATABASE_URL: postgresql+psycopg://erp:erp@localhost:5432/erp_test
