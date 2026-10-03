@@ -1297,3 +1297,15 @@ PostgreSQL 16)도 초록이다(392 passed).
 |---|---|---|
 | — | 읽은 커서를 다시 내어 견주지 않았다 | `test_a_cursor_this_list_did_not_issue_is_named` 의 `a-stray-dollar` · `a-stray-dot` · `not-as-issued` — 끼운 글자가 하나일 때는 패딩이 어긋나 우연히 거절됐다. 넷을 끼워 디코더가 받는 모양으로 다시 쟀다 |
 | — | id 의 위 끝(`integer`)을 묻지 않았다 | `test_a_cursor_this_list_did_not_issue_is_named` 의 `beyond-integer` |
+
+## 3단계 읽는 조각 B1 — 경로마다 가른 거절 이름 (`8a47ece`, PR #83 Codex 리뷰 3 라운드)
+
+`app/api/app.py` · `app/api/schemas.py` 의 선언을 하나씩 되돌렸다. 어긋냄 없이 돌린 대조군과 같은 트리의 `pytest` 전체(실제 PostgreSQL 16)는 초록이다.
+
+| NC | 무엇을 어긋냈나 | 빨개진 검사 |
+|---|---|---|
+| — | 로트 하나의 422 에 목록의 본문(`LotListRefused`)을 실었다 | `test_the_spec_declares_what_the_read_paths_answer` |
+| — | 목록 경로에도 업무의 404 를 선언했다 | `test_the_spec_declares_what_the_read_paths_answer` |
+| — | 목록의 이름에 `unknown_lot` 을 더했다 | `test_the_spec_declares_what_the_read_paths_answer` |
+| — | 로트 하나의 이름에 `cursor_is_not_readable` 을 더했다 | `test_the_spec_declares_what_the_read_paths_answer` |
+| — | 스펙 산문을 「400 · 404 · 405 · 500 은 라우트 밖의 일이다」로 되돌렸다 | `test_the_spec_declares_what_the_read_paths_answer` |
