@@ -1368,3 +1368,14 @@ PostgreSQL 16)도 초록이다(392 passed).
 | — | 없던 `anyOf` 를 갈래 0 으로 읽었다 | `test_an_any_of_that_was_not_there_was_no_constraint` |
 | — | 응답 헤더 이름을 철자대로 견줬다 | `test_a_header_name_is_the_same_in_any_case` |
 | — | 근거 값의 길이를 묻지 않았다 | `test_a_reason_must_be_a_value_the_new_schema_takes_whole` |
+
+## 3단계 읽는 조각 B2 — 한 칸 더 좁힌 모양 (`d58c9f3`, PR #84 Codex 리뷰 4 라운드)
+
+`app/api/compat.py` 의 거절을 하나씩 껐다. 껐을 때 `tests/test_contract_judgment.py` 에서 빨개진 검사를 적었다. 어긋냄 없이 돌린 대조군과 같은 트리의 `pytest` 전체(실제 PostgreSQL 16)는 초록이다.
+
+| NC | 무엇을 어긋냈나 | 빨개진 검사 |
+|---|---|---|
+| — | 문자열이 아닌 열거 값을 받았다 | `test_a_shape_the_judgment_does_not_know_is_refused` 의 `an-enum-of-numbers` |
+| — | 헤더 인자를 받았다 | `test_a_shape_the_judgment_does_not_know_is_refused` 의 `a-header-input` |
+| — | 같은 경로 · 이름의 선언 둘을 받았다 | `test_two_declarations_of_one_name_are_refused` |
+| — | 배열을 근거의 값으로 받았다 | `test_a_reason_value_is_a_scalar` |
