@@ -60,6 +60,7 @@
 | `356e7e3` | — | 접힌 블록(`run: >`)으로 쓴 명령 · 형제 잡의 `if:` | `audit-quality` | 초록이 맞다 — YAML 이 정한 대로 읽고 `backend` 잡만 본다(「PR #38 Codex 리뷰 4 라운드의 고침」 묶음) |
 | `45d9beb` | — | 접힌 블록(`run: >`)으로 쓴 `린트` 명령 | `audit-quality` | 초록이 맞다 — 접힌 줄도 실행 줄 맨 앞의 명령이다(「PR #38 Codex 리뷰 5 라운드의 고침」 묶음) |
 | `a35dd14` | 203 | 굵게 하지 않은 초록 줄(`없다 — 통과했다 (…)`)이 초록 검사를 지나고, 같은 NC 의 앞 초록을 닫으며, 기록 검사의 기록을 채운다 | `audit-quality` | **닫혔다** — 빨강을 셋째 칸이 여는 모양으로 가른다(「감사 ㉘ 의 고침」 묶음의 203 줄) |
+| `5a4c237` | — | 「재검사를 기다리는 로트」에서 원자재 조건(`Item.material_group IS NOT NULL`)을 빼도 통과한다 — 원자재 말고는 잔량이 있는 로트가 설 길이 없다 | `audit-quality` | 초록 — 생산 입고(반제품 · 완제품 로트의 원장 줄)가 서는 단계에서 그 로트로 다시 잰다 |
 | `a35dd14` | 204 | `_AWAITING` 에서 「열림」을 빼도 통과한다 — ㉗ Q-R3a 가 그대로이고, 다른 어긋냄을 문 196 빨강 줄이 그것을 닫은 것으로 읽혔다 | `audit-quality` | 초록 — 대장에 굵은 「열림」 줄이 서는 회차에 다시 잰다(㉘ NC-204) |
 | `a35dd14` | 205 | 머리의 셋째 칸이 「결과」인 표의 굵은 초록 줄, 초록 절 안에 둔 커밋 없는 묶음 | `audit-quality` | **닫혔다** — 기록 표가 아닌 표의 `**없다` 칸이 빨갛고, 초록 절은 색인 표만 뺀다(「감사 ㉘ 의 고침」 묶음의 205 줄) |
 | `a35dd14` | 206 | 제3 문서의 주석을 「표 18 이 설 때는」으로 되돌려도 통과한다 | `audit-quality` | **닫혔다** — 표 번호 게이트가 문다(「감사 ㉘ 의 고침」 묶음의 206 줄) |
@@ -1263,3 +1264,19 @@ PostgreSQL 16)도 초록이다(392 passed).
 | — | 검사의 판정 시각을 `datetime.now()` 로 되돌렸다 | `test_the_write_paths_stamp_the_site_wall_clock` · `test_the_gate_draws_today_on_the_site_calendar` · `test_a_stamp_later_than_the_site_now_stops_the_clock` |
 | — | 반품 시각을 `datetime.now()` 로 되돌렸다 | `test_the_write_paths_stamp_the_site_wall_clock` |
 | — | 재검사의 판정 시각을 `datetime.now()` 로 되돌렸다 | `test_a_retest_is_judged_on_the_site_wall_clock` 를 비롯한 `test_retest_path.py` 서른둘 |
+
+## 3단계 읽는 조각 B1 — 로트 읽기 (`5a4c237`, ADR 0020)
+
+`app/services/lots.py` · `app/api/cursor.py` · `GET /lots` 를 하나씩 어긋낸 뒤 `tests/test_lot_api.py` 를 돌렸다. 어긋냄 없이 돌린
+대조군과 같은 트리의 `pytest` 전체(실제 PostgreSQL 16)는 초록이다. 잰 트리와 이 커밋은 독스트링 몇 줄만 다르다.
+
+| NC | 무엇을 어긋냈나 | 빨개진 검사 |
+|---|---|---|
+| — | 만료의 경계를 `<` 에서 `<=` 로 바꿨다(만료일 당일을 기다리게 했다) | `test_the_wait_starts_where_the_retest_path_draws_the_line` 의 `expires-today` · `test_the_waiting_list_holds_only_the_lots_that_wait` |
+| — | 잔량 조건을 뺐다 | `test_a_lot_sent_back_whole_does_not_wait` · `test_a_failed_retest_empties_the_lot_and_ends_the_wait` — 처음 쓴 검사로는 빨개지지 않아(떨어진 재검사 조건이 같은 로트를 덮었다) 반품으로 비운 로트를 더한 뒤 다시 쟀다 |
+| — | 지금 만료일을 가장 이른 합격 재검사의 것으로 골랐다 | `test_the_current_expiry_is_the_latest_passed_retests` — 처음 쓴 검사로는 빨개지지 않아 합격 재검사 둘을 둔 검사를 더한 뒤 다시 쟀다 |
+| — | 지금 만료일을 라벨의 것으로만 냈다 | `test_a_passed_retest_renews_the_current_expiry_but_not_the_label` |
+| — | 커서 다음을 `>` 대신 `>=` 로 읽었다 | `test_paging_through_the_list_neither_repeats_nor_skips` |
+| — | 다음 쪽이 있는지를 `>=` 로 셌다 | `test_the_waiting_list_holds_only_the_lots_that_wait` — 처음 쓴 검사로는 빨개지지 않아 상한과 꼭 맞는 쪽의 커서를 보는 줄을 더한 뒤 다시 쟀다 |
+| — | 커서의 거름과 요청의 거름을 견주지 않았다 | `test_a_cursor_this_list_did_not_issue_is_named` 의 `another-list` |
+| — | 현장의 오늘을 하루 밀었다 | `test_a_passed_retest_renews_the_current_expiry_but_not_the_label` |
