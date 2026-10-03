@@ -531,6 +531,17 @@ def test_a_deviation_with_no_reason_at_retest_is_named(planted: Session) -> None
     )
 
 
+def test_a_deviation_whose_reason_was_retired_is_named(planted: Session) -> None:
+    """**측정값이 고르는 사유도 꺼진 코드는 고르지 않는다**(PR #81 Codex 리뷰) — 그 항목의
+    사유가 모두 꺼졌으면 지어내지도 꺼진 것을 적지도 않는다."""
+    lot = an_expired_lot(planted)
+    _retire(planted, codes.NC_REASON, _MOISTURE_REASON)
+
+    assert (
+        _refused(planted, a_retest(lot.id, moisture=0.9)) == RetestRefusal.REASON_IS_NOT_ACTIVE
+    )
+
+
 def test_the_names_shared_with_the_inspection_path_mean_the_same() -> None:
     """**검사와 겹치는 이름은 같은 값이다**(ADR 0014) — 재검사가 부르는 검사의 함수가 던지는
     이름이 이 경로의 열거에 없으면 스펙이 실제로 나가는 이름을 들지 못한다."""

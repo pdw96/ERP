@@ -201,13 +201,21 @@ def reason_for(session: Session, item_code: str, stage: str = codes.STAGE_INCOMI
 
     **단계마다 쓸 수 있는 사유가 다르다** — 재검사(`app/services/retests.py`)도 같은 길로
     그 단계의 규칙 줄에서 고른다.
+
+    **꺼진 사유 코드는 고르지 않는다**(이슈 #73, PR #81 Codex 리뷰) — 사람이 적은 사유와 같다.
+    켜진 것이 하나라도 있으면 그것을 고르고, 그 항목의 사유가 모두 꺼졌으면 이름으로 거절한다.
     """
-    reason = session.scalars(
-        select(NonconformityStageRule.reason_code)
+    candidates = session.execute(
+        select(NonconformityStageRule.reason_code, CommonCode.is_active)
         .join(
             NonconformityAttribute,
             (NonconformityAttribute.group_code == NonconformityStageRule.reason_group)
             & (NonconformityAttribute.code == NonconformityStageRule.reason_code),
+        )
+        .join(
+            CommonCode,
+            (CommonCode.group_code == NonconformityStageRule.reason_group)
+            & (CommonCode.code == NonconformityStageRule.reason_code),
         )
         .where(
             NonconformityStageRule.stage_code == stage,
@@ -215,7 +223,13 @@ def reason_for(session: Session, item_code: str, stage: str = codes.STAGE_INCOMI
             NonconformityAttribute.measure_kind == codes.MEASURED_KIND,
         )
         .order_by(NonconformityStageRule.reason_code)
-    ).first()
+    ).all()
+    reason = next((code for code, active in candidates if active), None)
+    if reason is None and candidates:
+        raise RefusedInspection(
+            Refusal.REASON_IS_NOT_ACTIVE,
+            f"{item_code} 이 규격을 벗어났는데 그것을 적을 사유가 모두 쓰지 않게 됐다",
+        )
     if reason is None:
         raise RefusedInspection(
             Refusal.NO_REASON_FOR_THE_DEVIATION,

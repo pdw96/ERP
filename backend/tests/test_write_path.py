@@ -589,6 +589,27 @@ def test_a_retired_reason_cannot_be_sent_by_a_person(prepared: Session) -> None:
     assert prepared.query(Inspection).count() == 0
 
 
+def test_a_deviation_whose_reason_was_retired_is_refused(prepared: Session) -> None:
+    """**측정값이 고르는 사유도 꺼진 코드는 고르지 않는다**(PR #81 Codex 리뷰). 고르면 꺼진
+    사유로 새 특채까지 선다 — 그 항목의 사유가 모두 꺼졌으면 이름으로 거절한다."""
+    reason = prepared.get(CommonCode, (codes.NC_REASON, _MOISTURE_REASON))
+    assert reason is not None
+    reason.is_active = False
+    prepared.flush()
+
+    with pytest.raises(RefusedInspection) as refused:
+        receive(
+            prepared,
+            _request(
+                measurements=(Measurement(_GRAIN, 30.0), Measurement(_MOISTURE, 9.9)),
+                special_acceptance=True,
+            ),
+        )
+
+    assert refused.value.code == Refusal.REASON_IS_NOT_ACTIVE
+    assert prepared.query(Inspection).count() == 0
+
+
 def test_a_measured_reason_cannot_be_sent_by_a_person(prepared: Session) -> None:
     """**재는 항목의 판정은 측정값에서만 나온다** (원칙 ③).
 
