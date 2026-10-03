@@ -127,13 +127,14 @@
             "title": "Nonconformity Code"
           },
           "result": {
-            "enum": [
+            "description": "열린 문자열이다 — 알려진 값은 `x-known-values` 가 들고 늘 수 있다. 모르는 값을 받을 자리를 둔다.",
+            "title": "Result",
+            "type": "string",
+            "x-known-values": [
               "합격",
               "불합격",
               "특채"
-            ],
-            "title": "Result",
-            "type": "string"
+            ]
           }
         },
         "required": [
@@ -145,6 +146,221 @@
           "ledger_entry_id"
         ],
         "title": "InspectionOut",
+        "type": "object"
+      },
+      "Invalid": {
+        "description": "업무 이름 없이 pydantic 만 거절하는 경로의 422 본문.",
+        "properties": {
+          "detail": {
+            "items": {
+              "$ref": "#/components/schemas/ValidationDetail"
+            },
+            "title": "Detail",
+            "type": "array"
+          }
+        },
+        "required": [
+          "detail"
+        ],
+        "title": "Invalid",
+        "type": "object"
+      },
+      "LotListRefusalDetail": {
+        "description": "로트 목록이 커서를 거절할 때 `detail[]` 에 실리는 줄 — 이름은 `LotListRefusal` 이\n든다.",
+        "properties": {
+          "loc": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Loc",
+            "type": "array"
+          },
+          "msg": {
+            "title": "Msg",
+            "type": "string"
+          },
+          "type": {
+            "description": "열린 문자열이다 — 알려진 값은 `x-known-values` 가 들고 늘 수 있다. 모르는 값을 받을 자리를 둔다.",
+            "title": "Type",
+            "type": "string",
+            "x-known-values": [
+              "cursor_is_not_readable",
+              "cursor_is_for_another_list"
+            ]
+          }
+        },
+        "required": [
+          "loc",
+          "msg",
+          "type"
+        ],
+        "title": "LotListRefusalDetail",
+        "type": "object"
+      },
+      "LotListRefused": {
+        "description": "`GET /lots` 의 422 본문 — `Refused` 와 **같은 모양이고 업무 이름의 열거만 다르다.**",
+        "properties": {
+          "detail": {
+            "items": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/LotListRefusalDetail"
+                },
+                {
+                  "$ref": "#/components/schemas/ValidationDetail"
+                }
+              ]
+            },
+            "title": "Detail",
+            "type": "array"
+          }
+        },
+        "required": [
+          "detail"
+        ],
+        "title": "LotListRefused",
+        "type": "object"
+      },
+      "LotMissing": {
+        "description": "`GET /lots/{lot_id}` 의 404 본문 — **라우트 밖의 404 와 같은 모양이고 이름 공간만\n다르다.**",
+        "properties": {
+          "detail": {
+            "items": {
+              "$ref": "#/components/schemas/LotRefusalDetail"
+            },
+            "title": "Detail",
+            "type": "array"
+          }
+        },
+        "required": [
+          "detail"
+        ],
+        "title": "LotMissing",
+        "type": "object"
+      },
+      "LotOut": {
+        "description": "로트 하나의 지금 — **잔량과 지금 만료일은 저장된 값이 아니라 센 값이다.**\n\n- `received_quantity` — 로트를 만든 입고 수량이다. 잔량이 아니다\n- `balance` — 원장 줄의 합. 반품 · 폐기가 빠진 지금의 양이다\n- `labelled_expiry_date` — 라벨에 찍혀 나간 만료일. 고쳐지지 않는다(원칙 ⑦)\n- `current_expiry_date` — 가장 최근에 합격한 재검사의 갱신 만료일, 없으면 라벨의\n  만료일(ADR 0017). 「오늘」은 현장 시간대가 가른다(ADR 0019)\n- `awaiting_retest` — 지금 만료일이 현장의 오늘보다 앞서고 잔량이 있는 원자재 로트다.\n  만료일 당일까지는 쓸 수 있다",
+        "properties": {
+          "awaiting_retest": {
+            "title": "Awaiting Retest",
+            "type": "boolean"
+          },
+          "balance": {
+            "title": "Balance",
+            "type": "number"
+          },
+          "current_expiry_date": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Current Expiry Date"
+          },
+          "item_code": {
+            "title": "Item Code",
+            "type": "string"
+          },
+          "labelled_expiry_date": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Labelled Expiry Date"
+          },
+          "lot_id": {
+            "title": "Lot Id",
+            "type": "integer"
+          },
+          "lot_number": {
+            "title": "Lot Number",
+            "type": "string"
+          },
+          "received_quantity": {
+            "title": "Received Quantity",
+            "type": "number"
+          }
+        },
+        "required": [
+          "lot_id",
+          "lot_number",
+          "item_code",
+          "received_quantity",
+          "balance",
+          "labelled_expiry_date",
+          "current_expiry_date",
+          "awaiting_retest"
+        ],
+        "title": "LotOut",
+        "type": "object"
+      },
+      "LotPageOut": {
+        "description": "로트 목록의 한 쪽(ADR 0020).\n\n**대리키 순서다.** `next_cursor` 가 비어 있으면 마지막 쪽이다. 약속하는 것은 「넘기는 동안\n조건을 계속 채운 줄은 겹치지도 빠지지도 않는다」까지다 — 넘기는 사이 조건에 새로 든\n줄은 처음부터 다시 넘기면 보이고, 조건을 벗어난 줄은 오지 않는다.",
+        "properties": {
+          "lots": {
+            "items": {
+              "$ref": "#/components/schemas/LotOut"
+            },
+            "title": "Lots",
+            "type": "array"
+          },
+          "next_cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Cursor"
+          }
+        },
+        "required": [
+          "lots",
+          "next_cursor"
+        ],
+        "title": "LotPageOut",
+        "type": "object"
+      },
+      "LotRefusalDetail": {
+        "description": "로트 하나를 찾지 못할 때 `detail[]` 에 실리는 줄 — 이름은 `LotRefusal` 이 든다.",
+        "properties": {
+          "loc": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Loc",
+            "type": "array"
+          },
+          "msg": {
+            "title": "Msg",
+            "type": "string"
+          },
+          "type": {
+            "description": "열린 문자열이다 — 알려진 값은 `x-known-values` 가 들고 늘 수 있다. 모르는 값을 받을 자리를 둔다.",
+            "title": "Type",
+            "type": "string",
+            "x-known-values": [
+              "unknown_lot"
+            ]
+          }
+        },
+        "required": [
+          "loc",
+          "msg",
+          "type"
+        ],
+        "title": "LotRefusalDetail",
         "type": "object"
       },
       "MeasurementIn": {
@@ -244,39 +460,8 @@
         "title": "PurchaseReturnOut",
         "type": "object"
       },
-      "Refusal": {
-        "description": "검사(`POST /inspections`)의 업무 규칙이 거절할 때 `detail[].type` 으로 나가는 이름.\n\n**이 경로의 목록이 여기 한 벌이다** — 업무 규칙의 이름은 경로마다 열거가 하나다\n(ADR 0014). 값을 고치는 것은 계약을 고치는 것이고, 메시지는 고쳐도 되지만 이\n이름은 고치면 깨진다.\n\n**상수가 아니라 열거로 두는 이유**는 그 목록이 `/openapi.json` 에\n실려야 하기 때문이다 — 상수로 두면 소비자가 이름을 **문서화되지 않은 채\n하드코딩**하고, 이름이 늘어도 그것이 파괴적 변경으로 취급될 근거가 없다\n(감사 ⑫ NC-134). `result` 가 같은 이유로 `enum` 을 싣는다.\n\n**`StrEnum` 이라 `str` 과 같게 비교되고 JSON 으로 그대로 나간다** — 부르는\n쪽이 보는 값은 바뀌지 않는다.",
-        "enum": [
-          "unknown_item",
-          "item_is_not_raw_material",
-          "unknown_supplier",
-          "partner_is_not_supplier",
-          "received_date_is_in_the_future",
-          "no_standard_for_material_group",
-          "nothing_to_measure_for_material_group",
-          "item_measured_twice",
-          "item_is_not_in_the_standard",
-          "measurement_is_missing",
-          "no_reason_for_the_deviation",
-          "reason_is_not_usable_at_this_gate",
-          "reason_comes_with_a_computed_deviation",
-          "special_acceptance_on_a_pass",
-          "special_acceptance_is_not_open",
-          "supplier_is_not_active",
-          "reason_is_not_a_counted_one",
-          "reason_is_derived_by_the_system",
-          "reason_is_not_inspected_for_this_material",
-          "reason_points_at_a_measured_item",
-          "item_is_not_measured",
-          "lot_number_would_not_fit",
-          "material_is_already_expired",
-          "reason_is_not_active"
-        ],
-        "title": "Refusal",
-        "type": "string"
-      },
       "RefusalDetail": {
-        "description": "검사의 업무 규칙이 거절할 때 `detail[]` 에 실리는 줄.\n\n`type` 이 **기계가 읽는 자리**다. 이름 목록은 `Refusal` 이 들고 여기 다시\n적지 않는다 — 두 벌이면 갈린다.",
+        "description": "검사의 업무 규칙이 거절할 때 `detail[]` 에 실리는 줄.\n\n`type` 이 **기계가 읽는 자리**다. 알려진 이름은 `Refusal` 열거에서 끌어오고\n여기 다시 적지 않는다 — 두 벌이면 갈린다.",
         "properties": {
           "loc": {
             "items": {
@@ -290,7 +475,35 @@
             "type": "string"
           },
           "type": {
-            "$ref": "#/components/schemas/Refusal"
+            "description": "열린 문자열이다 — 알려진 값은 `x-known-values` 가 들고 늘 수 있다. 모르는 값을 받을 자리를 둔다.",
+            "title": "Type",
+            "type": "string",
+            "x-known-values": [
+              "unknown_item",
+              "item_is_not_raw_material",
+              "unknown_supplier",
+              "partner_is_not_supplier",
+              "received_date_is_in_the_future",
+              "no_standard_for_material_group",
+              "nothing_to_measure_for_material_group",
+              "item_measured_twice",
+              "item_is_not_in_the_standard",
+              "measurement_is_missing",
+              "no_reason_for_the_deviation",
+              "reason_is_not_usable_at_this_gate",
+              "reason_comes_with_a_computed_deviation",
+              "special_acceptance_on_a_pass",
+              "special_acceptance_is_not_open",
+              "supplier_is_not_active",
+              "reason_is_not_a_counted_one",
+              "reason_is_derived_by_the_system",
+              "reason_is_not_inspected_for_this_material",
+              "reason_points_at_a_measured_item",
+              "item_is_not_measured",
+              "lot_number_would_not_fit",
+              "material_is_already_expired",
+              "reason_is_not_active"
+            ]
           }
         },
         "required": [
@@ -410,12 +623,13 @@
             "title": "Renewed Expiry Date"
           },
           "result": {
-            "enum": [
+            "description": "열린 문자열이다 — 알려진 값은 `x-known-values` 가 들고 늘 수 있다. 모르는 값을 받을 자리를 둔다.",
+            "title": "Result",
+            "type": "string",
+            "x-known-values": [
               "합격",
               "불합격"
-            ],
-            "title": "Result",
-            "type": "string"
+            ]
           }
         },
         "required": [
@@ -427,33 +641,6 @@
         ],
         "title": "RetestOut",
         "type": "object"
-      },
-      "RetestRefusal": {
-        "description": "재검사를 거절할 때 `detail[].type` 으로 나가는 이름 — **목록이 여기 한 벌이다.**\n\n경로마다 열거를 둔다(ADR 0014). **검사와 겹치는 이름은 같은 값이다** — 측정값과 사유를 보는\n규칙은 같은 함수(`app/services/incoming.py`)가 보고, 그 함수는 검사의 `Refusal` 을\n던진다. 그 값이 이 열거에도 있어야 스펙이 실제로 나가는 이름을 든다 —\n`tests/test_retest_path.py` 가 견준다.",
-        "enum": [
-          "unknown_lot",
-          "lot_is_not_raw_material",
-          "lot_already_failed_a_retest",
-          "lot_has_no_expiry",
-          "lot_has_not_expired",
-          "nothing_left_in_the_lot",
-          "nothing_to_retest_for_material_group",
-          "item_measured_twice",
-          "item_is_not_retested",
-          "item_is_not_measured",
-          "measurement_is_missing",
-          "no_reason_for_the_deviation",
-          "reason_comes_with_a_computed_deviation",
-          "reason_is_not_usable_at_this_gate",
-          "reason_is_not_a_counted_one",
-          "reason_is_derived_by_the_system",
-          "reason_is_not_inspected_for_this_material",
-          "reason_points_at_a_measured_item",
-          "item_has_no_shelf_life",
-          "reason_is_not_active"
-        ],
-        "title": "RetestRefusal",
-        "type": "string"
       },
       "RetestRefusalDetail": {
         "description": "재검사의 업무 규칙이 거절할 때 `detail[]` 에 실리는 줄 — 이름은 `RetestRefusal` 이\n든다.",
@@ -470,7 +657,31 @@
             "type": "string"
           },
           "type": {
-            "$ref": "#/components/schemas/RetestRefusal"
+            "description": "열린 문자열이다 — 알려진 값은 `x-known-values` 가 들고 늘 수 있다. 모르는 값을 받을 자리를 둔다.",
+            "title": "Type",
+            "type": "string",
+            "x-known-values": [
+              "unknown_lot",
+              "lot_is_not_raw_material",
+              "lot_already_failed_a_retest",
+              "lot_has_no_expiry",
+              "lot_has_not_expired",
+              "nothing_left_in_the_lot",
+              "nothing_to_retest_for_material_group",
+              "item_measured_twice",
+              "item_is_not_retested",
+              "item_is_not_measured",
+              "measurement_is_missing",
+              "no_reason_for_the_deviation",
+              "reason_comes_with_a_computed_deviation",
+              "reason_is_not_usable_at_this_gate",
+              "reason_is_not_a_counted_one",
+              "reason_is_derived_by_the_system",
+              "reason_is_not_inspected_for_this_material",
+              "reason_points_at_a_measured_item",
+              "item_has_no_shelf_life",
+              "reason_is_not_active"
+            ]
           }
         },
         "required": [
@@ -505,23 +716,6 @@
         "title": "RetestRefused",
         "type": "object"
       },
-      "ReturnRefusal": {
-        "description": "반품을 거절할 때 `detail[].type` 으로 나가는 이름 — **목록이 여기 한 벌이다.**\n\n검사의 `Refusal` 과 **열거를 나눈다.** 한 열거로 합치면 두 경로의 422 가 같은\n목록을 스펙에 싣고, 검사를 부르는 쪽은 **검사에서는 날 수 없는 이름**까지 분기로\n적어야 한다. 이름 공간은 하나(업무 규칙)이고 열거가 경로마다 하나다.",
-        "enum": [
-          "unknown_inspection",
-          "inspection_is_not_incoming",
-          "unknown_settle_type",
-          "settle_type_is_not_active",
-          "reason_is_missing",
-          "reason_comes_with_a_failed_inspection",
-          "reason_is_not_usable_at_this_gate",
-          "reason_is_not_active",
-          "more_than_the_lot_holds",
-          "more_than_was_rejected"
-        ],
-        "title": "ReturnRefusal",
-        "type": "string"
-      },
       "ReturnRefusalDetail": {
         "description": "반품의 업무 규칙이 거절할 때 `detail[]` 에 실리는 줄 — 이름은 `ReturnRefusal` 이 든다.",
         "properties": {
@@ -537,7 +731,21 @@
             "type": "string"
           },
           "type": {
-            "$ref": "#/components/schemas/ReturnRefusal"
+            "description": "열린 문자열이다 — 알려진 값은 `x-known-values` 가 들고 늘 수 있다. 모르는 값을 받을 자리를 둔다.",
+            "title": "Type",
+            "type": "string",
+            "x-known-values": [
+              "unknown_inspection",
+              "inspection_is_not_incoming",
+              "unknown_settle_type",
+              "settle_type_is_not_active",
+              "reason_is_missing",
+              "reason_comes_with_a_failed_inspection",
+              "reason_is_not_usable_at_this_gate",
+              "reason_is_not_active",
+              "more_than_the_lot_holds",
+              "more_than_was_rejected"
+            ]
           }
         },
         "required": [
@@ -572,15 +780,6 @@
         "title": "ReturnRefused",
         "type": "object"
       },
-      "Transport": {
-        "description": "라우트 **밖에서** 나는 거절의 이름 — `detail[].type` 의 셋째 이름 공간.\n\n업무 규칙의 이름(경로마다 열거)은 업무 규칙이 거절할 때의 것이고 이쪽은 **요청이 라우트에\n닿기 전이나 처리가 터진 뒤**의 이름이다. 둘을 한 열거로 합치지 않는 것은\n**층이 다르기 때문**이다 — 업무 이름은 관문 2 가 늘리고 이쪽은 늘지 않는다.\n\n**이 이름들이 여기 있는 이유는 NC-134 의 논거 그대로다.** 코드에만 있으면\n소비자가 문서화되지 않은 채 하드코딩하고, `http_error` 를 `path_error` 로\n고치는 커밋이 **어떤 검사도 물지 않고 어떤 스펙도 바꾸지 않은 채** 소비자의\n분기를 깬다 — NC-76 이 없앤 바로 그 모양이다(감사 ⑯ NC-160).",
-        "enum": [
-          "http_error",
-          "internal_error"
-        ],
-        "title": "Transport",
-        "type": "string"
-      },
       "TransportDetail": {
         "description": "라우트 밖 거절의 `detail[]` 한 줄. `loc` 은 요청선 · 서버이고, 400 만 본문이다.",
         "properties": {
@@ -596,7 +795,13 @@
             "type": "string"
           },
           "type": {
-            "$ref": "#/components/schemas/Transport"
+            "description": "열린 문자열이다 — 알려진 값은 `x-known-values` 가 들고 늘 수 있다. 모르는 값을 받을 자리를 둔다.",
+            "title": "Type",
+            "type": "string",
+            "x-known-values": [
+              "http_error",
+              "internal_error"
+            ]
           }
         },
         "required": [
@@ -661,7 +866,7 @@
     }
   },
   "info": {
-    "description": "읽는 엔드포인트가 서기 전까지 이 계약은 **좁혀질 수 있고 판은 움직이지 않는다.** 그 조각이 서는 날부터 이동 규칙이 선다 — 깨지면 앞자리, 호환되게 넓어지면 뒷자리.\n\n거절의 본문은 어느 경로에서나 `detail[]` 한 모양이다. `detail[].type` 이 기계가 읽는 자리이고 이름 공간이 셋이다 — 업무 규칙의 이름(경로마다 자기 열거를 든다 — 검사는 `Refusal`, 반품은 `ReturnRefusal`, 재검사는 `RetestRefusal`), 라우트 밖의 `Transport`, 그리고 pydantic 이 정한 이름(`missing` · `extra_forbidden` 등). 앞의 둘은 이 스펙이 열거로 들고, **그 열거에 없는 값은 셋째 무리**다.",
+    "description": "읽는 엔드포인트가 서기 전까지 이 계약은 **좁혀질 수 있고 판은 움직이지 않는다.** 그 조각이 서는 날부터 이동 규칙이 선다 — 깨지면 앞자리, 호환되게 넓어지면 뒷자리.\n\n거절의 본문은 어느 경로에서나 `detail[]` 한 모양이다. `detail[].type` 이 기계가 읽는 자리이고 이름 공간이 셋이다 — 업무 규칙의 이름(경로마다 자기 목록을 든다), 라우트 밖의 이름, 그리고 pydantic 이 정한 이름(`missing` · `extra_forbidden` 등).\n\n**응답이 내는 이름은 열린 문자열이다** — 업무 거절과 라우트 밖 거절의 이름, 판정(`result`) 같은 자리다. 알려진 값은 그 칸의 `x-known-values` 가 들고 **늘 수 있다** — 늘어나는 것은 넓히는 변경이다. 모르는 이름을 받으면 그 상태 코드의 거절로 읽는다 — 이름을 몰라도 422 는 「업무 규칙이나 검증이 받지 않았다」이고, 400 · 405 · 500 은 라우트 밖의 일이다. 404 는 그 경로가 업무의 404 를 선언했으면(`GET /lots/{lot_id}` — 그 로트가 없다) 업무의 답이고, 아니면 라우트 밖의 일이다.",
     "summary": "수입검사 한 건을 받아 판정하고, 합격이면 로트를 만든다. 공급사에 돌려보낸 것을 적고, 재고 로트였으면 원장에서 뺀다. 만료된 로트를 다시 검사해, 합격이면 새 만료일을 내고 불합격이면 잔량을 버린다.",
     "title": "조기경보 ERP — 관문 1 · 구매반품 · 재검사",
     "version": "0.1"
@@ -799,6 +1004,252 @@
           }
         },
         "summary": "Post Inspection"
+      }
+    },
+    "/lots": {
+      "get": {
+        "description": "로트 목록 — **대리키 순서로 넘긴다**(ADR 0020).\n\n`awaiting_retest=true` 면 재검사를 기다리는 로트만 거른다. `limit` 은 1 이상\n200 이하이고 벗어나면 422 다 — 조용히 줄이면 부르는 쪽은 다 받았다고 믿는다.\n`next_cursor` 를 다음 요청의 `cursor` 로 그대로 돌려준다. 읽을 수 없는 커서와\n다른 목록의 커서는 이름으로 거절한다.",
+        "operationId": "get_lots_lots_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "awaiting_retest",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Awaiting Retest",
+              "type": "boolean"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "maximum": 200,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 200,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Cursor"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LotPageOut"
+                }
+              }
+            },
+            "description": "Successful Response",
+            "headers": {
+              "X-Request-Id": {
+                "description": "이 요청을 가리키는 값. 보내면 그대로 돌아오고, 없거나 모양이 맞지 않으면 우리가 짓는다.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "405": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TransportRefused"
+                }
+              }
+            },
+            "description": "Method Not Allowed",
+            "headers": {
+              "Allow": {
+                "description": "이 경로가 받는 메서드.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-Request-Id": {
+                "description": "이 요청을 가리키는 값. 보내면 그대로 돌아오고, 없거나 모양이 맞지 않으면 우리가 짓는다.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LotListRefused"
+                }
+              }
+            },
+            "description": "Unprocessable Entity",
+            "headers": {
+              "X-Request-Id": {
+                "description": "이 요청을 가리키는 값. 보내면 그대로 돌아오고, 없거나 모양이 맞지 않으면 우리가 짓는다.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TransportRefused"
+                }
+              }
+            },
+            "description": "Internal Server Error",
+            "headers": {
+              "X-Request-Id": {
+                "description": "이 요청을 가리키는 값. 보내면 그대로 돌아오고, 없거나 모양이 맞지 않으면 우리가 짓는다.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        },
+        "summary": "Get Lots"
+      }
+    },
+    "/lots/{lot_id}": {
+      "get": {
+        "description": "로트 하나의 지금 — 잔량 · 라벨의 만료일 · 지금 만료일 · 재검사를 기다리는가.\n\n`lot_id` 는 검사 응답의 그 값이다. 없으면 404 이고 이름은 `unknown_lot` 이다.",
+        "operationId": "get_lot_lots__lot_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "lot_id",
+            "required": true,
+            "schema": {
+              "exclusiveMinimum": 0,
+              "maximum": 2147483647,
+              "title": "Lot Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LotOut"
+                }
+              }
+            },
+            "description": "Successful Response",
+            "headers": {
+              "X-Request-Id": {
+                "description": "이 요청을 가리키는 값. 보내면 그대로 돌아오고, 없거나 모양이 맞지 않으면 우리가 짓는다.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LotMissing"
+                }
+              }
+            },
+            "description": "Not Found",
+            "headers": {
+              "X-Request-Id": {
+                "description": "이 요청을 가리키는 값. 보내면 그대로 돌아오고, 없거나 모양이 맞지 않으면 우리가 짓는다.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "405": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TransportRefused"
+                }
+              }
+            },
+            "description": "Method Not Allowed",
+            "headers": {
+              "Allow": {
+                "description": "이 경로가 받는 메서드.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-Request-Id": {
+                "description": "이 요청을 가리키는 값. 보내면 그대로 돌아오고, 없거나 모양이 맞지 않으면 우리가 짓는다.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Invalid"
+                }
+              }
+            },
+            "description": "Unprocessable Entity",
+            "headers": {
+              "X-Request-Id": {
+                "description": "이 요청을 가리키는 값. 보내면 그대로 돌아오고, 없거나 모양이 맞지 않으면 우리가 짓는다.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TransportRefused"
+                }
+              }
+            },
+            "description": "Internal Server Error",
+            "headers": {
+              "X-Request-Id": {
+                "description": "이 요청을 가리키는 값. 보내면 그대로 돌아오고, 없거나 모양이 맞지 않으면 우리가 짓는다.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        },
+        "summary": "Get Lot"
       }
     },
     "/purchase-returns": {

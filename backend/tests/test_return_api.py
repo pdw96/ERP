@@ -16,7 +16,6 @@ from sqlalchemy import func, select
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session
 
-from app.api import schemas
 from app.api.app import app, session_scope
 from app.core import codes
 from app.db.inventory import PurchaseReturn, StockLedgerEntry
@@ -171,10 +170,9 @@ def test_the_spec_lists_every_return_refusal_name(client: TestClient) -> None:
     inspected = paths["/inspections"]["post"]["responses"]["422"]
     assert inspected["content"]["application/json"]["schema"]["$ref"].endswith("/Refused")
 
-    assert spec["components"]["schemas"]["ReturnRefusal"]["enum"] == [
-        name.value for name in ReturnRefusal
-    ]
-    assert schemas.ReturnRefusalDetail.model_fields["type"].annotation is ReturnRefusal
+    named = spec["components"]["schemas"]["ReturnRefusalDetail"]["properties"]["type"]
+    assert named["x-known-values"] == [name.value for name in ReturnRefusal]
+    assert "enum" not in named
 
 
 def test_a_201_means_the_commit_passed_the_deferred_check(engine: Engine) -> None:
