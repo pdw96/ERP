@@ -11,7 +11,6 @@
 """
 
 import base64
-import binascii
 import json
 from dataclasses import dataclass
 
@@ -42,7 +41,10 @@ def read(token: str) -> LotCursor:
         raise UnreadableCursor(token)
     try:
         body = json.loads(base64.urlsafe_b64decode(packed + "=" * (-len(packed) % 4)))
-    except (binascii.Error, UnicodeDecodeError, json.JSONDecodeError) as exc:
+    # `ValueError` 가 셋을 다 덮는다 — base64 의 `binascii.Error`, ASCII 가 아닌 글자(`v1.한`)에
+    # 디코더가 내는 `ValueError`, 그리고 `json.JSONDecodeError` · `UnicodeDecodeError`.
+    # ASCII 밖의 글자를 놓쳤을 때 거절 대신 500 이 났다(PR #83 Codex 리뷰).
+    except ValueError as exc:
         raise UnreadableCursor(token) from exc
     if not isinstance(body, dict):
         raise UnreadableCursor(token)

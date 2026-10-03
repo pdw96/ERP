@@ -251,12 +251,13 @@ def test_a_limit_out_of_range_is_refused_not_trimmed(client: TestClient, limit: 
         ("garbage", "cursor_is_not_readable"),
         ("v2.eyJhIjp0cnVlLCJpZCI6MX0", "cursor_is_not_readable"),
         ("v1.bm90LWpzb24", "cursor_is_not_readable"),
+        ("v1.한", "cursor_is_not_readable"),
         (
             cursors.issue(cursors.LotCursor(awaiting_retest=False, after=1)),
             "cursor_is_for_another_list",
         ),
     ],
-    ids=["no-version", "unknown-version", "not-json", "another-list"],
+    ids=["no-version", "unknown-version", "not-json", "not-ascii", "another-list"],
 )
 def test_a_cursor_this_list_did_not_issue_is_named(
     client: TestClient, cursor: str, name: str
