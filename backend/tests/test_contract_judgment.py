@@ -247,7 +247,9 @@ def _renamed_operation(spec_: dict[str, Any]) -> None:
 
 def _bound_beside_a_ref(spec_: dict[str, Any]) -> None:
     answer = _lots(spec_)["responses"]["200"]["content"]["application/json"]["schema"]
-    answer["maxProperties"] = 5
+    # 판정이 아는 키라야 `$ref` 옆이라는 모양만으로 거절되는지 본다 —
+    # 모르는 키는 그 자체로 걸린다
+    answer["maxLength"] = 5
 
 
 def _required_on_the_path(spec_: dict[str, Any]) -> None:
