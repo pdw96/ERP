@@ -16,6 +16,7 @@ ADR 0012 의 사진(`docs/openapi.json`)은 계약이 바뀌는 것을 **보이�
 스키마 밖이던 입력)를 들고, 판정이 그 근거를 옛 사진과 새 스펙에 견주어 본다.
 """
 
+import json
 import re
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
@@ -24,20 +25,59 @@ from typing import Any, Literal
 Kind = Literal["breaking", "widening"]
 Side = Literal["request", "response"]
 
-# **글은 계약이 아니다.** 설명 · 제목 · 예시가 바뀌어도 부르는 쪽이 보내는 것과 받는 것은 같다.
-_PROSE = frozenset({"description", "title", "summary", "example", "examples", "deprecated"})
+# **글은 계약이 아니다.** 설명 · 제목이 바뀌어도 부르는 쪽이 보내는 것과 받는 것은 같다.
+_PROSE = frozenset({"description", "title", "summary"})
+
+# ── 판정이 아는 모양 (ADR 0021) ──────────────────────────────────────────────
+# **판정은 이 저장소의 스펙이 실제로 쓰는 모양만 받는다.** OpenAPI 전체를 손으로 흉내 내는
+# 판정은 고칠 때마다 모르는 모양이 새로 빠져나갔다(PR #84 Codex 리뷰 두 라운드가 열한 건 가운데
+# 열 건을 이 모듈에 냈다 — `docs/리뷰-루프.md` 의 쏠림 신호, 방안 B). 그래서 모양을 닫는다 —
+# 아래 밖의 칸 · 값이 스펙에 나오면 판정은 견주지 않고 빨갛다. 새 모양을 쓰려면 **판정부터
+# 넓힌다** — 여기 더하고, 그 모양의 변화를 가르는 코드와 검사를 함께 낸다.
+_TOP = frozenset({"openapi", "info", "paths", "components"})
+_COMPONENTS = frozenset({"schemas"})
+_METHODS = ("get", "post", "put", "patch", "delete")
+_OPERATION = frozenset({*_PROSE, "operationId", "parameters", "requestBody", "responses"})
+_PARAMETER = frozenset({*_PROSE, "in", "name", "required", "schema"})
+_PARAMETER_IN = frozenset({"query", "path", "header"})
+_BODY = frozenset({*_PROSE, "content", "required"})
+_ANSWER = frozenset({*_PROSE, "content", "headers"})
+_HEADER = frozenset({*_PROSE, "schema"})
+_MEDIA = frozenset({"schema"})
+_MEDIA_TYPES = frozenset({"application/json"})
+_SCHEMA = frozenset(
+    {
+        *_PROSE,
+        "$ref",
+        "type",
+        "format",
+        "properties",
+        "required",
+        "items",
+        "anyOf",
+        "additionalProperties",
+        "default",
+        "enum",
+        "x-known-values",
+        "maxLength",
+        "minLength",
+        "maximum",
+        "exclusiveMaximum",
+        "minimum",
+        "exclusiveMinimum",
+    }
+)
 
 # 경계는 **느슨해지는 쪽**이 정해져 있다 — 위 끝은 커지거나 사라지면,
 # 아래 끝은 작아지거나 사라지면 느슨해진다
-_UPPER = frozenset({"maximum", "exclusiveMaximum", "maxLength", "maxItems", "maxProperties"})
-_LOWER = frozenset({"minimum", "exclusiveMinimum", "minLength", "minItems", "minProperties"})
+_UPPER = frozenset({"maxLength"})
+_LOWER = frozenset({"minLength"})
+# 포함 · 배제 경계는 **한 쌍이 한 제약이다** — `maximum: 5` 를 `exclusiveMaximum: 5` 로
+# 바꾸는 것은 지우고 더하는 둘이 아니라 조이는 하나다(PR #84 Codex 리뷰 2 라운드)
+_PAIRS = {"upper": ("maximum", "exclusiveMaximum"), "lower": ("minimum", "exclusiveMinimum")}
+_PAIRED = frozenset(key for pair in _PAIRS.values() for key in pair)
 
-_BRANCHES = ("anyOf", "oneOf")
-# `$ref` 로 풀려 경로 안에서 견주는 컴포넌트 — 쓰이지 않는 것은 계약이 아니다
-_RESOLVED_COMPONENTS = frozenset(
-    {"schemas", "parameters", "responses", "requestBodies", "headers", "examples"}
-)
-_METHODS = ("get", "put", "post", "delete", "options", "head", "patch", "trace")
+_BRANCHES = ("anyOf",)
 _VERSION = re.compile(r"\A(\d+)\.(\d+)\Z")
 _MISSING: Any = object()
 
@@ -70,21 +110,122 @@ def version(spec: Mapping[str, Any]) -> tuple[int, int] | None:
     return (int(matched[1]), int(matched[2])) if matched else None
 
 
+def _same(a: Any, b: Any) -> bool:
+    """**JSON 의 같음으로 견준다** — 파이썬에서는 `True == 1` 이라 불리언과 수가 섞인다."""
+    return json.dumps(a, sort_keys=True) == json.dumps(b, sort_keys=True)
+
+
+def _among(value: Any, values: Iterable[Any]) -> bool:
+    return any(_same(value, other) for other in values)
+
+
+# ── 모양을 묻는다 ─────────────────────────────────────────────────────────────
+
+
+def admit(spec: Mapping[str, Any]) -> list[str]:
+    """**판정이 아는 모양인가** — 빈 목록이면 견줄 수 있다. 아니면 모르는 자리마다 한 줄."""
+    found: list[str] = []
+    _only(spec, _TOP, "스펙", found)
+    _only(spec.get("components", {}), _COMPONENTS, "components", found)
+    for path, item in spec.get("paths", {}).items():
+        _only(item, frozenset(_METHODS), f"경로 {path}", found)
+        for method in _METHODS:
+            if method in item:
+                _Admit(spec, f"{method.upper()} {path}", found).operation(item[method])
+    return found
+
+
+def _only(value: Any, known: frozenset[str], where: str, found: list[str]) -> None:
+    if not isinstance(value, dict):
+        found.append(f"{where} 이 객체가 아니다")
+        return
+    found += [f"{where} 의 `{key}` 를 판정이 모른다" for key in sorted(set(value) - known)]
+
+
+class _Admit:
+    def __init__(self, spec: Mapping[str, Any], key: str, found: list[str]) -> None:
+        self._spec = spec
+        self._key = key
+        self._found = found
+
+    def operation(self, raw: Any) -> None:
+        _only(raw, _OPERATION, self._key, self._found)
+        for p in raw.get("parameters", []):
+            where = f"{self._key} 인자 `{p.get('name')}`"
+            _only(p, _PARAMETER, where, self._found)
+            if p.get("in") not in _PARAMETER_IN:
+                self._found.append(f"{where} 의 자리(`in`) {p.get('in')!r} 를 판정이 모른다")
+            self.schema(p.get("schema", {}), "request", where, ())
+        if "requestBody" in raw:
+            body = raw["requestBody"]
+            _only(body, _BODY, f"{self._key} 요청 본문", self._found)
+            self.content(body.get("content", {}), "request", f"{self._key} 요청 본문")
+        for status, answer in raw.get("responses", {}).items():
+            where = f"{self._key} 응답 {status}"
+            _only(answer, _ANSWER, where, self._found)
+            for name, header in answer.get("headers", {}).items():
+                _only(header, _HEADER, f"{where} 헤더 `{name}`", self._found)
+                self.schema(header.get("schema", {}), "response", where, ())
+            self.content(answer.get("content", {}), "response", where)
+
+    def content(self, content: Mapping[str, Any], side: Side, where: str) -> None:
+        for media, body in content.items():
+            if media not in _MEDIA_TYPES:
+                self._found.append(f"{where} 의 미디어 타입 `{media}` 를 판정이 모른다")
+            _only(body, _MEDIA, f"{where} `{media}`", self._found)
+            self.schema(body.get("schema", {}), side, where, ())
+
+    def schema(self, value: Any, side: Side, where: str, seen: tuple[str, ...]) -> None:
+        if not isinstance(value, dict):
+            self._found.append(f"{where} 의 스키마가 객체가 아니다")
+            return
+        _only(value, _SCHEMA, where, self._found)
+        if "$ref" in value:
+            ref = value["$ref"]
+            if set(value) - _PROSE != {"$ref"}:
+                self._found.append(f"{where} 의 `$ref` 옆에 둔 칸을 판정이 모른다")
+            if not isinstance(ref, str) or not ref.startswith("#/components/schemas/"):
+                self._found.append(f"{where} 의 `$ref` {ref!r} 를 판정이 모른다")
+                return
+            if ref in seen:
+                self._found.append(f"{where} 의 `$ref` {ref} 가 제 자신을 가리킨다")
+                return
+            target = (
+                self._spec.get("components", {}).get("schemas", {}).get(ref.rsplit("/")[-1])
+            )
+            if target is None:
+                self._found.append(f"{where} 의 `$ref` {ref} 가 가리키는 것이 없다")
+                return
+            self.schema(target, side, where, (*seen, ref))
+            return
+        if "additionalProperties" in value and not isinstance(
+            value["additionalProperties"], bool
+        ):
+            self._found.append(f"{where} 의 `additionalProperties` 가 참 · 거짓이 아니다")
+        # **요청이 받는 객체는 모르는 칸을 받지 않아야 한다** — 받는다면 옛 스키마에 없던 칸도
+        # 받던 요청이라, 새 칸을 넓히는 변경의 근거로 들 수 없다(PR #84 Codex 리뷰 2 라운드)
+        is_object = value.get("type") == "object" or "properties" in value
+        if side == "request" and is_object and value.get("additionalProperties") is not False:
+            self._found.append(f"{where} 의 요청 객체가 모르는 칸을 받는다")
+        for name, inner in value.get("properties", {}).items():
+            self.schema(inner, side, f"{where}.{name}", seen)
+        if "items" in value:
+            self.schema(value["items"], side, f"{where}[]", seen)
+        for branch in value.get("anyOf", []):
+            self.schema(branch, side, where, seen)
+
+
+# ── 견준다 ───────────────────────────────────────────────────────────────────
+
+
 def compare(old: Mapping[str, Any], new: Mapping[str, Any]) -> Diff:
-    """두 스펙 사이의 변화를 깨는 것 · 넓히는 것 · 새 이름으로 가른다."""
+    """두 스펙 사이의 변화를 깨는 것 · 넓히는 것 · 새 이름으로 가른다.
+
+    둘 다 `admit` 을 지난 스펙이어야 한다 — 그 밖의 모양은 견주지 않는다.
+    """
     diff = Diff()
     if old.get("openapi") != new.get("openapi"):
         diff.changes.append(Change("breaking", "openapi", "스펙 형식의 판이 바뀌었다"))
-    # **아는 칸만 견주면 모르는 칸의 변화가 빠져나간다**(PR #84 Codex 리뷰 — `security` ·
-    # `operationId`). 따로 가르지 않는 칸은 글만 걷고 통째로 견주어, 바뀌면 깨는 변경으로 센다
-    before_rest, after_rest = _Plain(old).top(), _Plain(new).top()
-    if before_rest != after_rest:
-        moved = sorted(
-            k
-            for k in set(before_rest) | set(after_rest)
-            if before_rest.get(k) != after_rest.get(k)
-        )
-        diff.changes.append(Change("breaking", "스펙", f"{moved} 이 바뀌었다"))
     old_paths, new_paths = old.get("paths", {}), new.get("paths", {})
     for path in sorted(set(old_paths) | set(new_paths)):
         for method in _METHODS:
@@ -101,46 +242,39 @@ def compare(old: Mapping[str, Any], new: Mapping[str, Any]) -> Diff:
 
 
 def operation(spec: Mapping[str, Any], key: str) -> dict[str, Any] | None:
-    """`"GET /lots"` 의 요청과 응답을 `$ref` 를 풀고 글을 걷어 낸 모양으로 돌려준다.
-
-    요청 인자 · 본문 · 응답은 칸마다 가르고, **그 밖의 칸은 `rest` 에 통째로 담는다** —
-    `operationId` · 실제로 걸리는 `security`(경로에 없으면 스펙 머리의 것) · 인자의 `style`
-    같은 것이다. `rest` 가 바뀌면 깨는 변경이다.
-    """
+    """`"GET /lots"` 의 요청과 응답을 `$ref` 를 풀고 글을 걷어 낸 모양으로 돌려준다."""
     method, _, path = key.partition(" ")
-    item = spec.get("paths", {}).get(path, {})
-    raw = item.get(method.lower())
+    raw = spec.get("paths", {}).get(path, {}).get(method.lower())
     if raw is None:
         return None
     plain = _Plain(spec)
-    # 경로 머리의 인자는 그 경로의 모든 메서드에 걸리고, 메서드의 같은 인자가 덮는다
-    parameters = {}
-    for p in [*item.get("parameters", []), *raw.get("parameters", [])]:
-        p = plain.node(p)
-        parameters[(p["in"], p["name"])] = {
-            "required": bool(p.get("required", False)),
-            "schema": plain.schema(p.get("schema", {})),
-            "rest": plain.rest(p, {"in", "name", "required", "schema"}),
-        }
-    body = None if raw.get("requestBody") is None else plain.node(raw["requestBody"])
-    rest = plain.rest(raw, {"parameters", "requestBody", "responses", "security"})
-    effective = {"security": raw.get("security", spec.get("security"))}
-    rest["security"] = plain.rest(effective, set())["security"]
-    rest["path"] = plain.rest(item, {*_METHODS, "parameters"})
+    body = raw.get("requestBody")
     return {
-        "parameters": parameters,
+        # 부르는 쪽이 스펙에서 지은 코드의 이름이다 — 바뀌면 그 메서드가 사라진다
+        "operation_id": raw.get("operationId"),
+        "parameters": {
+            (p["in"], p["name"]): {
+                "required": bool(p.get("required", False)),
+                "schema": plain.schema(p.get("schema", {})),
+            }
+            for p in raw.get("parameters", [])
+        },
         "body": None
         if body is None
         else {
             "required": bool(body.get("required", False)),
             "content": plain.content(body.get("content", {})),
-            "rest": plain.rest(body, {"required", "content"}),
         },
         "responses": {
-            status: plain.answer(plain.node(answer))
+            status: {
+                "headers": {
+                    name: plain.schema(header.get("schema", {}))
+                    for name, header in answer.get("headers", {}).items()
+                },
+                "content": plain.content(answer.get("content", {})),
+            }
             for status, answer in raw.get("responses", {}).items()
         },
-        "rest": rest,
     }
 
 
@@ -150,103 +284,29 @@ class _Plain:
     def __init__(self, spec: Mapping[str, Any]) -> None:
         self._spec = spec
 
-    def node(self, value: Any, seen: tuple[str, ...] = ()) -> Any:
-        while isinstance(value, dict) and "$ref" in value and value["$ref"] not in seen:
-            seen = (*seen, value["$ref"])
-            value = self._look_up(value["$ref"])
-        return value
-
     def content(self, content: Mapping[str, Any]) -> dict[str, Any]:
-        """미디어 타입마다 그 스키마 — 스키마 밖의 칸(`encoding` 등)은 `rest` 의 몫이다."""
-        return {
-            media: self.schema(self.node(body).get("schema", {}))
-            for media, body in content.items()
-        }
+        return {media: self.schema(body.get("schema", {})) for media, body in content.items()}
 
-    def answer(self, answer: Mapping[str, Any]) -> dict[str, Any]:
-        headers = {
-            name: self.node(header) for name, header in answer.get("headers", {}).items()
-        }
-        return {
-            "headers": {name: self.schema(h.get("schema", {})) for name, h in headers.items()},
-            "content": self.content(answer.get("content", {})),
-            "rest": {
-                "answer": self.rest(answer, {"headers", "content"}),
-                "headers": {name: self.rest(h, {"schema"}) for name, h in headers.items()},
-                "content": {
-                    media: self.rest(self.node(body), {"schema"})
-                    for media, body in answer.get("content", {}).items()
-                },
-            },
-        }
-
-    def top(self) -> dict[str, Any]:
-        """경로 밖에서 계약에 닿는 칸 — 스펙 머리의 `security` 는 경로마다 `rest` 로 간다.
-
-        컴포넌트 가운데 `$ref` 로 풀려 경로 안에서 견주는 것은 뺀다. 남는 것은 `$ref` 가
-        아니라 이름으로 불리는 것들(`securitySchemes` 등)이다.
-        """
-        components = {
-            k: v
-            for k, v in self._spec.get("components", {}).items()
-            if k not in _RESOLVED_COMPONENTS
-        }
-        rest = self.rest(self._spec, {"openapi", "info", "paths", "components", "security"})
-        rest["components"] = self.rest(components, set())
-        return rest
-
-    def rest(self, value: Mapping[str, Any], handled: set[str]) -> dict[str, Any]:
-        """따로 가르지 않는 칸 — `$ref` 를 풀고 글을 걷어 통째로 견줄 모양으로."""
-        stripped: dict[str, Any] = self._strip(
-            {k: v for k, v in value.items() if k not in handled}, ()
-        )
-        return stripped
-
-    def _strip(self, value: Any, seen: tuple[str, ...]) -> Any:
-        if isinstance(value, dict):
-            if "$ref" in value and value["$ref"] not in seen:
-                return self._strip(self._look_up(value["$ref"]), (*seen, value["$ref"]))
-            return {k: self._strip(v, seen) for k, v in value.items() if k not in _PROSE}
-        if isinstance(value, list):
-            return [self._strip(v, seen) for v in value]
-        return value
-
-    def schema(self, value: Any, seen: tuple[str, ...] = ()) -> Any:
-        if isinstance(value, dict) and "$ref" in value:
-            if value["$ref"] in seen:  # 제 자신을 가리키는 스키마 — 이름으로 남긴다
-                return {"$ref": value["$ref"]}
-            resolved = self.schema(self._look_up(value["$ref"]), (*seen, value["$ref"]))
-            # **3.1 은 `$ref` 옆에 제약을 둘 수 있다**(PR #84 Codex 리뷰) — 버리면 그 제약의
-            # 변화가 보이지 않는다. 겹치는 키가 없으면 합치고, 있으면 둘 다 걸리게 둔다
-            siblings = self.schema({k: v for k, v in value.items() if k != "$ref"}, seen)
-            if not siblings:
-                return resolved
-            if isinstance(resolved, dict) and not set(resolved) & set(siblings):
-                return {**resolved, **siblings}
-            return {"allOf": [resolved, siblings]}
+    def schema(self, value: Any) -> Any:
         if not isinstance(value, dict):
             return value
+        if "$ref" in value:  # `admit` 이 옆 칸과 제 자신을 가리키는 것을 막았다
+            return self.schema(
+                self._spec["components"]["schemas"][value["$ref"].rsplit("/")[-1]]
+            )
         plain: dict[str, Any] = {}
         for key, inner in value.items():
             if key in _PROSE:
                 continue
             if key == "properties":
-                plain[key] = {name: self.schema(s, seen) for name, s in inner.items()}
-            elif key in (*_BRANCHES, "allOf", "prefixItems"):
-                plain[key] = [self.schema(s, seen) for s in inner]
-            elif key in ("items", "not", "additionalProperties") and isinstance(inner, dict):
-                plain[key] = self.schema(inner, seen)
+                plain[key] = {name: self.schema(s) for name, s in inner.items()}
+            elif key in _BRANCHES:
+                plain[key] = [self.schema(s) for s in inner]
+            elif key == "items":
+                plain[key] = self.schema(inner)
             else:
                 plain[key] = inner
         return plain
-
-    def _look_up(self, ref: str) -> Any:
-        if not ref.startswith("#/"):
-            raise ValueError(f"이 스펙 밖을 가리키는 `$ref` 는 읽지 않는다: {ref}")
-        found: Any = self._spec
-        for part in ref[2:].split("/"):
-            found = found[part.replace("~1", "/").replace("~0", "~")]
-        return found
 
 
 class _Operation:
@@ -257,6 +317,9 @@ class _Operation:
         self._key = key
 
     def compare(self, old: Any, new: Any) -> None:
+        if old["operation_id"] != new["operation_id"]:
+            moved = f"{old['operation_id']!r} → {new['operation_id']!r}"
+            self._note("breaking", "operationId", moved)
         old_params, new_params = old["parameters"], new["parameters"]
         for where in sorted(set(old_params) | set(new_params)):
             label = f"{where[0]} 인자 `{where[1]}`"
@@ -268,9 +331,7 @@ class _Operation:
             else:
                 self._required(before["required"], after["required"], label)
                 self._schema(before["schema"], after["schema"], "request", label)
-                self._rest(before["rest"], after["rest"], label)
         self._body(old["body"], new["body"])
-        self._rest(old["rest"], new["rest"], "경로")
         old_answers, new_answers = old["responses"], new["responses"]
         for status in sorted(set(old_answers) | set(new_answers)):
             label = f"응답 {status}"
@@ -283,11 +344,6 @@ class _Operation:
             headers, content = f"{label} 헤더", f"{label} 본문"
             self._map(before["headers"], after["headers"], "response", headers, "widening")
             self._map(before["content"], after["content"], "response", content, "breaking")
-            self._rest(before["rest"]["answer"], after["rest"]["answer"], label)
-            for part in ("headers", "content"):
-                old_rest, new_rest = before["rest"][part], after["rest"][part]
-                for name in sorted(set(old_rest) & set(new_rest)):
-                    self._rest(old_rest[name], new_rest[name], f"{label} `{name}`")
 
     def _body(self, old: Any, new: Any) -> None:
         if old is None and new is None:
@@ -300,14 +356,6 @@ class _Operation:
             return
         self._required(old["required"], new["required"], "요청 본문")
         self._map(old["content"], new["content"], "request", "요청 본문", "widening")
-        self._rest(old["rest"], new["rest"], "요청 본문")
-
-    def _rest(self, old: Mapping[str, Any], new: Mapping[str, Any], where: str) -> None:
-        """따로 가르지 않는 칸 — 무엇이 바뀌든 깨는 변경으로 센다."""
-        for key in sorted(set(old) | set(new)):
-            before, after = old.get(key, _MISSING), new.get(key, _MISSING)
-            if before != after:
-                self._note("breaking", f"{where}.{key}", f"{_show(before)} → {_show(after)}")
 
     def _required(self, old: bool, new: bool, where: str) -> None:
         if old != new:
@@ -327,14 +375,16 @@ class _Operation:
                 self._schema(old[name], new[name], side, label)
 
     def _schema(self, old: Any, new: Any, side: Side, where: str) -> None:
-        if old == new:
+        if _same(old, new):
             return
         if not isinstance(old, dict) or not isinstance(new, dict):
             self._note("breaking", where, "스키마가 바뀌었다")
             return
-        for key in sorted(set(old) | set(new)):
+        for end, pair in _PAIRS.items():
+            self._pair(end, pair, old, new, side, where)
+        for key in sorted((set(old) | set(new)) - _PAIRED):
             before, after = old.get(key, _MISSING), new.get(key, _MISSING)
-            if before == after:
+            if before is not _MISSING and after is not _MISSING and _same(before, after):
                 continue
             label = f"{where}.{key}"
             if key == "properties":
@@ -384,10 +434,11 @@ class _Operation:
             )
 
     def _branches(self, old: Any, new: Any, side: Side, where: str) -> None:
+        """`anyOf` 의 갈래 — 하나라도 맞으면 되므로 갈래가 늘면 받는 것이 는다."""
         old = list(old if old is not _MISSING else [])
         new = list(new if new is not _MISSING else [])
-        gone = [branch for branch in old if branch not in new]
-        came = [branch for branch in new if branch not in old]
+        gone = [branch for branch in old if not _among(branch, new)]
+        came = [branch for branch in new if not _among(branch, old)]
         if len(gone) == len(came) == 1:  # 갈래 하나가 고쳐졌다 — 그 안으로 들어간다
             self._schema(gone[0], came[0], side, where)
             return
@@ -399,20 +450,20 @@ class _Operation:
             )
 
     def _values(self, old: Any, new: Any, side: Side, where: str, *, opened: bool) -> None:
-        for value in [v for v in new if v not in old]:
+        for value in [v for v in new if not _among(v, old)]:
             if opened and side == "response":
                 # **열린 문자열이라 스펙으로는 넓히는 변경이다** — 받던 요청에
                 # 나가는지는 저자가 가른다
                 self._diff.names.append(NewName(self._key, str(value), where))
             elif side == "request":
-                self._note("widening", where, f"값 `{value}` 이 섰다")
+                self._note("widening", where, f"값 {value!r} 이 섰다")
             else:  # 닫힌 열거에 응답의 값이 늘면 옛 스펙으로 검증하는 쪽이 응답을 거부한다
-                self._note("breaking", where, f"값 `{value}` 이 섰다")
-        for value in [v for v in old if v not in new]:
+                self._note("breaking", where, f"값 {value!r} 이 섰다")
+        for value in [v for v in old if not _among(v, new)]:
             # 이름을 빼는 것도 · 바꾸는 것(빼고 더하기)도 그 이름에 분기한 쪽을 깬다
             gone_is_safe = side == "response" and not opened
             self._note(
-                "widening" if gone_is_safe else "breaking", where, f"값 `{value}` 이 사라졌다"
+                "widening" if gone_is_safe else "breaking", where, f"값 {value!r} 이 사라졌다"
             )
 
     def _bound(self, key: str, old: Any, new: Any, side: Side, where: str) -> None:
@@ -420,18 +471,54 @@ class _Operation:
             looser = new is _MISSING
         else:
             looser = new > old if key in _UPPER else new < old
+        self._moved(looser, side, where, f"{_show(old)} → {_show(new)}")
+
+    def _pair(
+        self, end: str, pair: tuple[str, str], old: Any, new: Any, side: Side, where: str
+    ) -> None:
+        """포함 · 배제 경계 한 쌍을 **실제로 걸리는 끝** 하나로 견준다."""
+        before, after = _reach(old, end, pair), _reach(new, end, pair)
+        if before == after:
+            return
+        # 끝이 없으면 가장 느슨하다. 둘 다 있으면 더 멀리 닿는 쪽이 느슨하다
+        looser = after is None or (before is not None and after > before)
+        shown = f"{_show_pair(old, pair)} → {_show_pair(new, pair)}"
+        self._moved(looser, side, f"{where}.{pair[0]}", shown)
+
+    def _moved(self, looser: bool, side: Side, where: str, what: str) -> None:
         # 요청은 경계가 느슨해지면 받던 것을 다 받고, 응답은 조여지면 오던 것 안에서만 온다
         widening = looser if side == "request" else not looser
-        self._note(
-            "widening" if widening else "breaking", where, f"{_show(old)} → {_show(new)}"
-        )
+        self._note("widening" if widening else "breaking", where, what)
 
     def _note(self, kind: Kind, where: str, what: str) -> None:
         self._diff.changes.append(Change(kind, f"{self._key} {where}", what))
 
 
+def _reach(
+    schema: Mapping[str, Any], end: str, pair: tuple[str, str]
+) -> tuple[float, int] | None:
+    """경계 한 쌍이 실제로 거는 끝 — **클수록 멀리 닿는다**(느슨하다). 없으면 `None`.
+
+    위 끝은 (값, 포함이면 1 · 배제면 0), 아래 끝은 (-값, 같은 것)이다 — 같은 값에서는
+    포함이 배제보다 하나 더 받는다. 둘 다 걸려 있으면 더 좁은 쪽이 실제로 건다.
+    """
+    inclusive, exclusive = pair
+    sign = 1 if end == "upper" else -1
+    reaches = [
+        (sign * schema[key], int(key == inclusive))
+        for key in (inclusive, exclusive)
+        if key in schema
+    ]
+    return min(reaches) if reaches else None
+
+
 def _show(value: Any) -> str:
     return "(없음)" if value is _MISSING else repr(value)
+
+
+def _show_pair(schema: Mapping[str, Any], pair: tuple[str, str]) -> str:
+    shown = [f"{key}={schema[key]!r}" for key in pair if key in schema]
+    return " · ".join(shown) or "(없음)"
 
 
 # ── 판정 ───────────────────────────────────────────────────────────────────
@@ -451,7 +538,11 @@ def judge(
         return [f"판이 (앞자리).(뒷자리) 모양이 아니다 — 옛 {before} · 새 {after}"]
     if before[0] == 0:
         return []
-    problems: list[str] = []
+    # **모르는 모양은 견주지 않는다**(ADR 0021) — 견주면 그 모양의 변화가 조용히 빠져나간다
+    problems = [f"옛 계약: {line}" for line in admit(old)]
+    problems += [f"새 계약: {line}" for line in admit(new)]
+    if problems:
+        return [*problems, "판정이 모르는 모양이다 — 판정부터 넓힌다(`app/api/compat.py`)"]
     diff = compare(old, new)
     breaking = [c for c in diff.changes if c.kind == "breaking"]
     widening = [c for c in diff.changes if c.kind == "widening"]
@@ -588,9 +679,7 @@ def _accepts(schema: Any, value: Any) -> bool:
             _accepts(branch, value) for key in _BRANCHES for branch in schema.get(key, [])
         )
     if "enum" in schema:
-        return value in schema["enum"]
-    if "const" in schema:
-        return bool(value == schema["const"])
+        return _among(value, schema["enum"])
     if isinstance(value, bool):  # `bool` 은 `int` 의 하위형이다 — 수로 읽히지 않게 먼저 가른다
         return schema.get("type") in (None, "boolean")
     kinds = {"string": str, "integer": int, "number": int | float, "boolean": bool}

@@ -92,14 +92,17 @@ def test_the_version_moves_as_far_as_the_contract_moved() -> None:
     - 상태 코드가 서거나 사라진다, 응답 본문의 미디어 타입이 서거나 사라진다
     - 그 밖의 키워드(`type` · `format` · `pattern` · `default` ·
       `additionalProperties` …)가 바뀐다, 스펙 형식의 판(`openapi`)이 바뀐다
-    - 위에서 가르지 않는 칸이 바뀐다 — `operationId`, 그 경로에 실제로 걸리는 `security`
-      (경로에 없으면 스펙 머리의 것), 인자의 `style`, 이름으로 불리는 컴포넌트
-      (`securitySchemes` 등) 같은 것이다. 이 칸들은 글만 걷고 통째로 견준다
+    - `operationId` 가 바뀐다 — 부르는 쪽이 스펙에서 지은 메서드의 이름이다
 
     글(`description` · `title` · `summary` · 예시)이 바뀌는 것은 어느 쪽도 아니다.
-    `$ref` 는 풀어서 견주므로 컴포넌트의 이름만 바뀌는 것도 어느 쪽도 아니다 — `$ref`
-    옆에 둔 제약은 풀린 스키마에 합쳐 견준다. 경로 머리의 인자는 그 경로의 메서드마다
-    걸린 것으로 견준다.
+    `$ref` 는 풀어서 견주므로 컴포넌트의 이름만 바뀌는 것도 어느 쪽도 아니다. 포함 · 배제
+    경계(`maximum` · `exclusiveMaximum` 등)는 한 쌍을 실제로 걸리는 끝 하나로 견주고, 값은
+    JSON 의 같음으로 견준다(`true` 는 `1` 이 아니다).
+
+    **판정은 자기가 아는 모양만 견준다**(ADR 0021). 그 목록은 `app/api/compat.py` 의 「판정이
+    아는 모양」이 든다 — 그 밖의 칸 · 미디어 타입 · `$ref` 의 모양(옆 칸 · 제 자신을 가리키는
+    것), 모르는 칸을 받는 요청 객체가 옛 계약이나 새 계약에 나오면 견주지 않고 빨갛다. 새 모양을
+    쓰려면 판정부터 넓힌다.
 
     **기존 경로의 응답에 이름이 늘면 저자가 가른다** — 판을 올려도, 이름을 바꾸느라
     앞자리를 올려도 그렇다. `docs/openapi-declarations.json` 의 새 판 키 아래에 그 경로와
@@ -110,7 +113,8 @@ def test_the_version_moves_as_far_as_the_contract_moved() -> None:
     근거가 옛 사진에 없고 새 스펙에 있는지 견준다. 다른 판 키의 선언은 지나간 판의
     기록이라 읽지 않는다.
 
-    **이 검사가 못 보는 부류**(W-6 ③): 이름이 늘지 않는 좁힘(있는 이름의 조건을 조이는
+    **이 검사가 못 보는 부류**(W-6 ③): 아는 모양 안에서도 목록이 놓친 의미(예: 경계와
+    `type` 이 함께 바뀌는 것은 각각 따로 센다), 이름이 늘지 않는 좁힘(있는 이름의 조건을 조이는
     것 — 리뷰의 몫이다), 선언 밖으로 나가는 응답(ADR 0012 의 결과 그대로다), 그리고
     저자가 받던 요청에 나가는 이름을 넓히는 변경으로 선언하면서 **옛 스키마 밖의 입력을
     하나 덧붙여 근거로 드는 것** — 근거가 참인지는 보지만 그 이름이 근거의 입력에만
@@ -273,11 +277,7 @@ def _new_name_for_a_new_query(spec_: dict[str, Any]) -> None:
         pytest.param(_new_path, "1.0", "1.1", id="a-new-path-widens"),
         pytest.param(_gone_path, "1.1", "2.0", id="a-gone-path-breaks"),
         pytest.param(_new_type, "1.1", "2.0", id="a-new-type-breaks"),
-        pytest.param(_security, "1.1", "2.0", id="security-for-every-path-breaks"),
-        pytest.param(_security_on_one_path, "1.1", "2.0", id="security-on-a-path-breaks"),
         pytest.param(_renamed_operation, "1.1", "2.0", id="a-renamed-operation-breaks"),
-        pytest.param(_bound_beside_a_ref, "1.0", "1.1", id="a-bound-beside-a-ref-is-seen"),
-        pytest.param(_required_on_the_path, "1.1", "2.0", id="a-required-path-input-breaks"),
     ],
 )
 def test_the_judgment_asks_for_as_far_as_the_contract_moved(
@@ -409,22 +409,128 @@ def test_an_answer_bound_moves_the_other_way(bound: int, moves: str) -> None:
     assert compat.judge(old, new, {}) == []
 
 
-def test_security_for_every_path_and_its_schemes_are_each_seen() -> None:
-    """**스펙 머리의 `security` 는 경로마다 걸린다** — 이름으로 불리는 `securitySchemes` 도 따로
-    본다. 둘을 한 번에 바꾸면 하나만 보아도 빨개지므로 따로 어긋낸다(PR #84 Codex 리뷰)."""
-    schemes = {"bearer": {"type": "http", "scheme": "bearer"}}
+def _schemes_only(spec_: dict[str, Any]) -> None:
+    spec_["components"]["securitySchemes"] = {"bearer": {"type": "http", "scheme": "bearer"}}
+
+
+def _one_of(spec_: dict[str, Any]) -> None:
+    _schema(spec_, "RetestIn")["properties"]["x"] = {"oneOf": [{"type": "number"}]}
+
+
+def _const(spec_: dict[str, Any]) -> None:
+    _schema(spec_, "LotOut")["properties"]["k"] = {"const": 1}
+
+
+def _path_item_ref(spec_: dict[str, Any]) -> None:
+    spec_["components"]["pathItems"] = {"Ping": {"get": copy.deepcopy(_lots(spec_))}}
+    spec_["paths"]["/ping"] = {"$ref": "#/components/pathItems/Ping"}
+
+
+def _encoding(spec_: dict[str, Any]) -> None:
+    body = spec_["paths"]["/retests"]["post"]["requestBody"]["content"]["application/json"]
+    body["encoding"] = {"x": {"explode": True}}
+
+
+def _form(spec_: dict[str, Any]) -> None:
+    content = spec_["paths"]["/retests"]["post"]["requestBody"]["content"]
+    content["multipart/form-data"] = content["application/json"]
+
+
+def _recursive(spec_: dict[str, Any]) -> None:
+    tree = {"type": "object", "properties": {"child": {"$ref": "#/components/schemas/Tree"}}}
+    spec_["components"]["schemas"]["Tree"] = tree
+    _schema(spec_, "LotOut")["properties"]["tree"] = {"$ref": "#/components/schemas/Tree"}
+
+
+def _open_request(spec_: dict[str, Any]) -> None:
+    del _schema(spec_, "RetestIn")["additionalProperties"]
+
+
+@pytest.mark.parametrize(
+    "change",
+    [
+        pytest.param(_security, id="security-for-every-path"),
+        pytest.param(_schemes_only, id="security-schemes"),
+        pytest.param(_security_on_one_path, id="security-on-a-path"),
+        pytest.param(_bound_beside_a_ref, id="a-bound-beside-a-ref"),
+        pytest.param(_required_on_the_path, id="an-input-on-the-path-item"),
+        pytest.param(_one_of, id="one-of"),
+        pytest.param(_const, id="const"),
+        pytest.param(_path_item_ref, id="a-path-item-ref"),
+        pytest.param(_encoding, id="encoding"),
+        pytest.param(_form, id="a-form-body"),
+        pytest.param(_recursive, id="a-schema-that-holds-itself"),
+        pytest.param(_open_request, id="a-request-object-that-takes-any-field"),
+    ],
+)
+def test_a_shape_the_judgment_does_not_know_is_refused(
+    change: Callable[[dict[str, Any]], object],
+) -> None:
+    """**판정이 모르는 모양은 견주지 않고 빨갛다**(ADR 0021) — 판도, 선언도 덮지 못한다.
+
+    견주면 그 모양의 변화가 조용히 빠져나간다 — PR #84 Codex 리뷰 두 라운드가 낸 열한 건 가운데
+    열 건이 이 모양들이었다. 새 모양을 쓰려면 판정부터 넓힌다.
+    """
+    new = _closed()
+    change(new)
+    assert compat.admit(new) != []
+    for version in ("1.0", "1.1", "2.0"):
+        assert _judged(change, version) != [], version
+
+
+def test_the_spec_stays_within_what_the_judgment_knows() -> None:
+    """**지금 스펙은 판정이 아는 모양 안에 있다** — 밖으로 나가면 판정부터 넓힌다(ADR 0021)."""
+    assert compat.admit(app.openapi()) == []
+
+
+def _bounds(schema: dict[str, Any], **bounds: int) -> None:
+    for key in ("maximum", "exclusiveMaximum", "minimum", "exclusiveMinimum"):
+        schema.pop(key, None)
+    schema.update(bounds)
+
+
+def test_an_inclusive_and_an_exclusive_bound_are_one_constraint() -> None:
+    """**`maximum: 5` 를 `exclusiveMaximum: 5` 로 바꾸는 것은 조이는 하나다** — 지우는 것과
+    더하는 것 둘로 세면 지운 쪽이 깨는 변경으로 이겨 앞자리를 잘못 요구한다(PR #84 Codex
+    리뷰 2 라운드)."""
     old = _closed()
-    old["components"]["securitySchemes"] = schemes
+    _schema(old, "LotOut")["properties"]["balance"]["maximum"] = 5
     new = copy.deepcopy(old)
-    new["security"] = [{"bearer": []}]
-    new["info"]["version"] = "1.1"
+    _bounds(_schema(new, "LotOut")["properties"]["balance"], exclusiveMaximum=5)
+    new["info"]["version"] = "1.0"
     assert compat.judge(old, new, {}) != []
-    new["info"]["version"] = "2.0"
-    assert compat.judge(old, new, {}) == []
+    new["info"]["version"] = "1.1"
+    assert compat.judge(old, new, {}) == [], "응답이 조여졌다 — 넓히는 변경이다"
+
+    # 요청에서는 거꾸로 센다 — `lot_id` 의 `exclusiveMinimum: 0` 을 `minimum: 0` 으로 풀면
+    # 받던 것을 다 받으므로 넓히는 변경이다
+    old = _closed()
+    new = copy.deepcopy(old)
+    _bounds(_schema(new, "RetestIn")["properties"]["lot_id"], minimum=0, maximum=2147483647)
+    new["info"]["version"] = "1.0"
+    assert compat.judge(old, new, {}) != []
+    new["info"]["version"] = "1.1"
+    assert compat.judge(old, new, {}) == [], "요청이 느슨해졌다 — 넓히는 변경이다"
+
+
+def test_a_boolean_is_not_a_number() -> None:
+    """**JSON 의 같음으로 견준다** — 파이썬에서는 `True == 1` 이라 `[1]` 을 `[true]` 로 바꿔도
+    같아 보였다(PR #84 Codex 리뷰 2 라운드)."""
+
+    def mode(values: list[Any]) -> Callable[[dict[str, Any]], None]:
+        def change(spec_: dict[str, Any]) -> None:
+            _lots(spec_)["parameters"].append(
+                {"in": "query", "name": "mode", "schema": {"enum": values}}
+            )
+
+        return change
 
     old = _closed()
-    new = copy.deepcopy(old)
-    new["components"]["securitySchemes"] = schemes
-    assert compat.judge(old, new, {}) != [], "판이 그대로인데 계약이 움직였다"
+    mode([1])(old)
+    new = copy.deepcopy(_closed())
+    mode([True])(new)
+    for version in ("1.0", "1.1"):
+        new["info"]["version"] = version
+        assert compat.judge(old, new, {}) != [], version
     new["info"]["version"] = "2.0"
     assert compat.judge(old, new, {}) == []
