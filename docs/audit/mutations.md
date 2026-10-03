@@ -1389,3 +1389,12 @@ PostgreSQL 16)도 초록이다(392 passed).
 | — | 처음 서는 `x-known-values` 를 통째로 깨는 변경으로 셌다 | `test_the_first_known_name_is_an_addition_like_any_other` |
 | — | `anyOf` 옆의 제약을 받았다 | `test_a_shape_the_judgment_does_not_know_is_refused` 의 `a-constraint-beside-any-of` |
 | — | 없던 `anyOf` 를 갈래 0 으로 읽었다 | `test_an_any_of_that_was_not_there_was_no_constraint` |
+
+## 3단계 읽는 조각 B2 — 닫힌 응답 객체 · 형식이 붙은 근거 (`249e57b`, PR #84 Codex 리뷰 7 라운드)
+
+`app/api/compat.py` 의 거절을 하나씩 껐다. 껐을 때 `tests/test_contract_judgment.py` 에서 빨개진 검사를 적었다. 어긋냄 없이 돌린 대조군과 같은 트리의 `pytest` 전체(실제 PostgreSQL 16)는 초록이다.
+
+| NC | 무엇을 어긋냈나 | 빨개진 검사 |
+|---|---|---|
+| — | 응답 객체의 `additionalProperties` 를 받았다 | `test_a_shape_the_judgment_does_not_know_is_refused` 의 `a-closed-answer-object` |
+| — | 형식이 붙은 칸의 값을 근거로 받았다 | `test_a_formatted_value_is_not_a_reason` |
