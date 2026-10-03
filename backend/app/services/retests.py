@@ -79,6 +79,7 @@ class RetestRefusal(StrEnum):
     REASON_IS_NOT_INSPECTED_FOR_THIS_MATERIAL = "reason_is_not_inspected_for_this_material"
     REASON_POINTS_AT_A_MEASURED_ITEM = "reason_points_at_a_measured_item"
     ITEM_HAS_NO_SHELF_LIFE = "item_has_no_shelf_life"
+    REASON_IS_NOT_ACTIVE = "reason_is_not_active"
 
 
 @dataclass(frozen=True)

@@ -19,6 +19,7 @@ from sqlalchemy.orm import Session
 
 from app.core import codes, locks
 from app.db.code_attributes import NonconformityAttribute, NonconformityStageRule
+from app.db.common_codes import CommonCode
 from app.db.inspection import Inspection, InspectionMeasurement
 from app.db.inventory import Lot, StockLedgerEntry
 from app.db.master import Item, Partner
@@ -26,6 +27,7 @@ from app.db.quality import ProcessInspectionStandard
 from app.services.incoming import (
     IncomingInspection,
     Measurement,
+    Refusal,
     RefusedInspection,
     _next_lot_number,
     receive,
@@ -566,6 +568,45 @@ def test_a_reason_sent_with_an_out_of_spec_value_is_refused(prepared: Session) -
             _request(measurements=out_of_spec, nonconformity_code=_FOREIGN_REASON),
         )
 
+    assert prepared.query(Inspection).count() == 0
+
+
+def test_a_retired_reason_cannot_be_sent_by_a_person(prepared: Session) -> None:
+    """**꺼진 사유 코드는 새 판정에서 고르지 못한다**(이슈 #73).
+
+    공통코드는 지우는 대신 끄고, 끈 코드는 옛 기록에서만 읽힌다 — 관문 1 의 규칙 줄이
+    남아 있다는 것만 물으면 꺼진 사유로 새 불합격이 선다. 반품 쪽과 같은 이름이다.
+    """
+    reason = prepared.get(CommonCode, (codes.NC_REASON, _FOREIGN_REASON))
+    assert reason is not None
+    reason.is_active = False
+    prepared.flush()
+
+    with pytest.raises(RefusedInspection) as refused:
+        receive(prepared, _request(nonconformity_code=_FOREIGN_REASON))
+
+    assert refused.value.code == Refusal.REASON_IS_NOT_ACTIVE
+    assert prepared.query(Inspection).count() == 0
+
+
+def test_a_deviation_whose_reason_was_retired_is_refused(prepared: Session) -> None:
+    """**측정값이 고르는 사유도 꺼진 코드는 고르지 않는다**(PR #81 Codex 리뷰). 고르면 꺼진
+    사유로 새 특채까지 선다 — 그 항목의 사유가 모두 꺼졌으면 이름으로 거절한다."""
+    reason = prepared.get(CommonCode, (codes.NC_REASON, _MOISTURE_REASON))
+    assert reason is not None
+    reason.is_active = False
+    prepared.flush()
+
+    with pytest.raises(RefusedInspection) as refused:
+        receive(
+            prepared,
+            _request(
+                measurements=(Measurement(_GRAIN, 30.0), Measurement(_MOISTURE, 9.9)),
+                special_acceptance=True,
+            ),
+        )
+
+    assert refused.value.code == Refusal.REASON_IS_NOT_ACTIVE
     assert prepared.query(Inspection).count() == 0
 
 
