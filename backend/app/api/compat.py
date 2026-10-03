@@ -39,7 +39,8 @@ _COMPONENTS = frozenset({"schemas"})
 _METHODS = ("get", "post", "put", "patch", "delete")
 _OPERATION = frozenset({*_PROSE, "operationId", "parameters", "requestBody", "responses"})
 _PARAMETER = frozenset({*_PROSE, "in", "name", "required", "schema"})
-_PARAMETER_IN = frozenset({"query", "path", "header"})
+# 요청 헤더는 이름의 대소문자를 가리지 않는 등 따로 가를 것이 있다 — 쓰는 날 넓힌다
+_PARAMETER_IN = frozenset({"query", "path"})
 _BODY = frozenset({*_PROSE, "content", "required"})
 _ANSWER = frozenset({*_PROSE, "content", "headers"})
 _HEADER = frozenset({*_PROSE, "schema"})
@@ -198,6 +199,10 @@ class _Admit:
                 return
             self.schema(target, side, where, (*seen, ref))
             return
+        # **열거의 값은 문자열만 안다** — 수는 `1` 과 `1.0` 이 같고 불리언과도 섞여, 그 같음을
+        # 다시 지어야 한다(PR #84 Codex 리뷰 4 라운드). 이 저장소의 열거는 이름이라 문자열이다
+        if not all(isinstance(item, str) for item in value.get("enum", [])):
+            self._found.append(f"{where} 의 열거에 문자열이 아닌 값이 있다")
         if "additionalProperties" in value and not isinstance(
             value["additionalProperties"], bool
         ):
@@ -611,7 +616,13 @@ def _declared(entries: Iterable[Any], problems: list[str]) -> dict[tuple[str, st
         if not ok:
             problems.append(f"선언의 모양이 맞지 않는다: {entry!r}")
             continue
-        found[(entry["operation"], entry["name"])] = entry
+        key = (entry["operation"], entry["name"])
+        if key in found:
+            # 어느 것을 믿을지가 파일의 순서에 달리면 선언이 아니다(PR #84 Codex 리뷰
+            # 4 라운드)
+            problems.append(f"같은 경로 · 이름의 선언이 둘이다: {key}")
+            continue
+        found[key] = entry
     return found
 
 
@@ -622,6 +633,8 @@ def _is_input(item: Any) -> bool:
         and isinstance(item.get("loc"), list)
         and len(item["loc"]) >= 1
         and all(isinstance(part, str | int) for part in item["loc"])
+        # 근거의 값은 스칼라만 안다 — 배열 · 객체는 그 안의 제약까지 되물어야 한다(4 라운드)
+        and isinstance(item.get("value", ""), str | int | float | bool)
     )
 
 

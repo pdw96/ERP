@@ -445,6 +445,18 @@ def _recursive(spec_: dict[str, Any]) -> None:
     _schema(spec_, "LotOut")["properties"]["tree"] = {"$ref": "#/components/schemas/Tree"}
 
 
+def _numeric_enum(spec_: dict[str, Any]) -> None:
+    _lots(spec_)["parameters"].append(
+        {"in": "query", "name": "mode", "schema": {"enum": [1, True]}}
+    )
+
+
+def _header_input(spec_: dict[str, Any]) -> None:
+    _lots(spec_)["parameters"].append(
+        {"in": "header", "name": "X-Trace", "schema": {"type": "string"}}
+    )
+
+
 def _open_request(spec_: dict[str, Any]) -> None:
     del _schema(spec_, "RetestIn")["additionalProperties"]
 
@@ -464,6 +476,8 @@ def _open_request(spec_: dict[str, Any]) -> None:
         pytest.param(_form, id="a-form-body"),
         pytest.param(_recursive, id="a-schema-that-holds-itself"),
         pytest.param(_open_request, id="a-request-object-that-takes-any-field"),
+        pytest.param(_numeric_enum, id="an-enum-of-numbers"),
+        pytest.param(_header_input, id="a-header-input"),
     ],
 )
 def test_a_shape_the_judgment_does_not_know_is_refused(
@@ -514,29 +528,6 @@ def test_an_inclusive_and_an_exclusive_bound_are_one_constraint() -> None:
     assert compat.judge(old, new, {}) != []
     new["info"]["version"] = "1.1"
     assert compat.judge(old, new, {}) == [], "요청이 느슨해졌다 — 넓히는 변경이다"
-
-
-def test_a_boolean_is_not_a_number() -> None:
-    """**JSON 의 같음으로 견준다** — 파이썬에서는 `True == 1` 이라 `[1]` 을 `[true]` 로 바꿔도
-    같아 보였다(PR #84 Codex 리뷰 2 라운드)."""
-
-    def mode(values: list[Any]) -> Callable[[dict[str, Any]], None]:
-        def change(spec_: dict[str, Any]) -> None:
-            _lots(spec_)["parameters"].append(
-                {"in": "query", "name": "mode", "schema": {"enum": values}}
-            )
-
-        return change
-
-    old = _closed()
-    mode([1])(old)
-    new = copy.deepcopy(_closed())
-    mode([True])(new)
-    for version in ("1.0", "1.1"):
-        new["info"]["version"] = version
-        assert compat.judge(old, new, {}) != [], version
-    new["info"]["version"] = "2.0"
-    assert compat.judge(old, new, {}) == []
 
 
 def _branches_on_the_limit(spec_: dict[str, Any]) -> None:
@@ -603,3 +594,40 @@ def test_a_reason_must_be_a_value_the_new_schema_takes_whole() -> None:
 
     assert compat.judge(old, new, declared("fast")) == []
     assert compat.judge(old, new, declared("strict")) != [], "여섯 글자 — 길이에 걸린다"
+
+
+def _with_a_sort(spec_: dict[str, Any]) -> None:
+    _new_name(spec_)
+    _lots(spec_)["parameters"].append(
+        {
+            "in": "query",
+            "name": "sort",
+            "schema": {"type": "array", "items": {"type": "string"}},
+        }
+    )
+
+
+def _widening(*because: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "operation": "GET /lots",
+        "name": "limit_is_for_another_list",
+        "change": "widening",
+        "because": list(because),
+    }
+
+
+def test_two_declarations_of_one_name_are_refused() -> None:
+    """**같은 경로 · 이름의 선언이 둘이면 빨갛다** — 어느 것을 믿을지가 파일의 순서에 달리면
+    선언이 아니다(PR #84 Codex 리뷰 4 라운드)."""
+    sort = {"loc": ["query", "sort"]}
+    broken = _broken("GET /lots", "limit_is_for_another_list")
+    assert _judged(_with_a_sort, "1.1", {"1.1": [_widening(sort)]}) == []
+    assert _judged(_with_a_sort, "1.1", {"1.1": [broken, _widening(sort)]}) != []
+    assert _judged(_with_a_sort, "2.0", {"2.0": [_widening(sort), broken]}) != []
+
+
+def test_a_reason_value_is_a_scalar() -> None:
+    """**근거의 값은 스칼라만 안다** — 배열 · 객체는 그 안의 제약까지 되물어야 해서 판정이 받지
+    않는다(PR #84 Codex 리뷰 4 라운드)."""
+    whole = {"loc": ["query", "sort"], "value": ["bad"]}
+    assert _judged(_with_a_sort, "1.1", {"1.1": [_widening(whole)]}) != []
