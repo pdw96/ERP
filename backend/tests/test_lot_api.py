@@ -9,6 +9,7 @@
 - 목록을 커서로 넘기면 겹치지도 빠지지도 않는가, 커서와 상한을 이름으로 거절하는가(ADR 0020)
 """
 
+import base64
 from collections.abc import Iterator
 from datetime import timedelta
 
@@ -245,6 +246,20 @@ def test_a_limit_out_of_range_is_refused_not_trimmed(client: TestClient, limit: 
     assert client.get("/lots", params={"limit": limit}).status_code == 422
 
 
+def _tampered(stray: str) -> str:
+    """내준 커서의 속에 base64 밖의 글자를 넷 끼운 것 — 넷이라 길이가 네 배수로 남아 디코더가
+    그 글자들을 조용히 버리고 원래 커서를 읽는다."""
+    issued = cursors.issue(cursors.LotCursor(awaiting_retest=True, after=1))
+    version, _, packed = issued.partition(".")
+    return f"{version}.{packed[:4]}{stray * 4}{packed[4:]}"
+
+
+def _spelled(body: str) -> str:
+    """뜻은 같거나 비슷하지만 이 판이 낸 글자가 아닌 커서."""
+    packed = base64.urlsafe_b64encode(body.encode()).decode().rstrip("=")
+    return f"v1.{packed}"
+
+
 @pytest.mark.parametrize(
     ("cursor", "name"),
     [
@@ -252,12 +267,26 @@ def test_a_limit_out_of_range_is_refused_not_trimmed(client: TestClient, limit: 
         ("v2.eyJhIjp0cnVlLCJpZCI6MX0", "cursor_is_not_readable"),
         ("v1.bm90LWpzb24", "cursor_is_not_readable"),
         ("v1.한", "cursor_is_not_readable"),
+        (_tampered("$"), "cursor_is_not_readable"),
+        (_tampered("."), "cursor_is_not_readable"),
+        (_spelled('{"a": true, "id": 1}'), "cursor_is_not_readable"),
+        (_spelled('{"a":true,"id":2147483648}'), "cursor_is_not_readable"),
         (
             cursors.issue(cursors.LotCursor(awaiting_retest=False, after=1)),
             "cursor_is_for_another_list",
         ),
     ],
-    ids=["no-version", "unknown-version", "not-json", "not-ascii", "another-list"],
+    ids=[
+        "no-version",
+        "unknown-version",
+        "not-json",
+        "not-ascii",
+        "a-stray-dollar",
+        "a-stray-dot",
+        "not-as-issued",
+        "beyond-integer",
+        "another-list",
+    ],
 )
 def test_a_cursor_this_list_did_not_issue_is_named(
     client: TestClient, cursor: str, name: str

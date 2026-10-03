@@ -15,6 +15,8 @@ import json
 from dataclasses import dataclass
 
 _VERSION = "v1"
+# 대리키 칸(PostgreSQL `integer`)의 끝 — 경계의 `_INT4_MAX` 와 같은 값이다.
+_INT4_MAX = 2_147_483_647
 
 
 class UnreadableCursor(ValueError):
@@ -51,6 +53,15 @@ def read(token: str) -> LotCursor:
     awaiting, after = body.get("a"), body.get("id")
     if not isinstance(awaiting, bool) or isinstance(after, bool) or not isinstance(after, int):
         raise UnreadableCursor(token)
-    if after <= 0:
+    if not 0 < after <= _INT4_MAX:
+        # 대리키는 PostgreSQL `integer` 다 — 넘는 수를 그대로 내려보내면 범위 오류(500)다
+        # (PR #83 Codex 리뷰 2 라운드).
         raise UnreadableCursor(token)
-    return LotCursor(awaiting_retest=awaiting, after=after)
+    cursor = LotCursor(awaiting_retest=awaiting, after=after)
+    # **내준 그대로의 글자만 받는다.** 디코더는 base64 밖의 글자를 조용히 버리고
+    # JSON 은 공백 · 키 순서를 가리지 않아, 망가진 커서가 원래 것처럼 읽혔다
+    # (PR #83 Codex 리뷰 1 · 2 라운드 — 같은 함수에 틈이 거듭 나서 하나씩 막지 않고
+    # 입력을 「이 판이 낸 글자」로 좁혔다).
+    if issue(cursor) != token:
+        raise UnreadableCursor(token)
+    return cursor
