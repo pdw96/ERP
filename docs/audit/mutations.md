@@ -1244,3 +1244,22 @@ PostgreSQL 16)도 초록이다(392 passed).
 | NC | 무엇을 어긋냈나 | 빨개진 검사 |
 |---|---|---|
 | — | 켜졌는지 거르지 않고 첫 사유를 골랐다(`if active` 를 뺐다) | `test_a_deviation_whose_reason_was_retired_is_refused` · `test_a_deviation_whose_reason_was_retired_is_named` |
+
+## 3단계 읽는 조각 A — 현장 시계 (`74b06d9`, ADR 0019)
+
+`app/core/clock.py` · `app/services/site_clock.py` 와 쓰기 경로 셋을 하나씩 어긋낸 뒤 `tests/test_site_clock.py` ·
+`tests/test_retest_path.py` 를 돌렸다. 어긋냄 없이 돌린 대조군과 같은 트리의 `pytest` 전체(실제 PostgreSQL 16)는 초록이다.
+시간대를 보는 검사는 UTC 와 14 · 12 시간 떨어진 고정 오프셋 시간대로 잰다 — 컨테이너(UTC)와 현장이 같은 시간대면
+「컨테이너 시각을 쓴다」는 회귀가 보이지 않고, 서울로만 재면 하루의 몇 시간에만 빨개진다.
+
+| NC | 무엇을 어긋냈나 | 빨개진 검사 |
+|---|---|---|
+| — | `clock.now()` 가 컨테이너 시각을 냈다 | `test_now_is_the_site_wall_clock` · `test_a_clock_nobody_set_does_not_tell_the_time` 둘 |
+| — | 시간대가 비었을 때의 분기를 껐다 | `test_a_clock_nobody_set_does_not_tell_the_time` 의 `missing` — 예외만 보던 검사로는 빨개지지 않아(빈 이름도 「모르는 시간대」로 멈춘다) 메시지까지 보게 고친 뒤 다시 쟀다 |
+| — | 오프셋 전환을 묻지 않았다 | `test_a_zone_whose_wall_clock_turns_back_is_refused` · `test_the_app_does_not_start_on_a_clock_it_cannot_trust` 의 `turns-back` |
+| — | 저장된 미래 시각을 묻지 않았다 | `test_a_stamp_later_than_the_site_now_stops_the_clock` |
+| — | 앱에서 lifespan 을 뺐다 | `test_the_app_does_not_start_on_a_clock_it_cannot_trust` 둘 |
+| — | 검사의 도착일 경계를 `date.today()` 로 되돌렸다 | `test_the_gate_draws_today_on_the_site_calendar` — 서울로만 재는 검사로는 빨개지지 않아(서울과 UTC 는 하루의 몇 시간에만 날짜가 갈린다) 두 시간대로 재는 검사를 더한 뒤 다시 쟀다 |
+| — | 검사의 판정 시각을 `datetime.now()` 로 되돌렸다 | `test_the_write_paths_stamp_the_site_wall_clock` · `test_the_gate_draws_today_on_the_site_calendar` · `test_a_stamp_later_than_the_site_now_stops_the_clock` |
+| — | 반품 시각을 `datetime.now()` 로 되돌렸다 | `test_the_write_paths_stamp_the_site_wall_clock` |
+| — | 재검사의 판정 시각을 `datetime.now()` 로 되돌렸다 | `test_a_retest_is_judged_on_the_site_wall_clock` 를 비롯한 `test_retest_path.py` 서른둘 |
