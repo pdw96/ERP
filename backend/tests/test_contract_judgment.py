@@ -90,8 +90,8 @@ def test_the_version_moves_as_far_as_the_contract_moved() -> None:
     - 응답의 닫힌 열거에 값이 선다, 열린 이름이든 닫힌 열거든 **이름이 빠지거나
       바뀐다**
     - 상태 코드가 서거나 사라진다, 응답 본문의 미디어 타입이 서거나 사라진다
-    - 그 밖의 키워드(`type` · `format` · `pattern` · `default` ·
-      `additionalProperties` …)가 바뀐다, 스펙 형식의 판(`openapi`)이 바뀐다
+    - 판정이 아는 키워드 가운데 위에서 가르지 않는 것(`type` · `format` · `default` ·
+      `additionalProperties`)이 바뀐다, 스펙 형식의 판(`openapi`)이 바뀐다
     - `operationId` 가 바뀐다 — 부르는 쪽이 스펙에서 지은 메서드의 이름이다
 
     글(`description` · `title` · `summary`)이 바뀌는 것은 어느 쪽도 아니다. 예시
@@ -457,6 +457,10 @@ def _header_input(spec_: dict[str, Any]) -> None:
     )
 
 
+def _limit_beside_branches(spec_: dict[str, Any]) -> None:
+    _limit(spec_)["schema"]["anyOf"] = [{"maximum": 1}]
+
+
 def _open_request(spec_: dict[str, Any]) -> None:
     del _schema(spec_, "RetestIn")["additionalProperties"]
 
@@ -478,6 +482,7 @@ def _open_request(spec_: dict[str, Any]) -> None:
         pytest.param(_open_request, id="a-request-object-that-takes-any-field"),
         pytest.param(_numeric_enum, id="an-enum-of-numbers"),
         pytest.param(_header_input, id="a-header-input"),
+        pytest.param(_limit_beside_branches, id="a-constraint-beside-any-of"),
     ],
 )
 def test_a_shape_the_judgment_does_not_know_is_refused(
@@ -530,23 +535,37 @@ def test_an_inclusive_and_an_exclusive_bound_are_one_constraint() -> None:
     assert compat.judge(old, new, {}) == [], "요청이 느슨해졌다 — 넓히는 변경이다"
 
 
-def _branches_on_the_limit(spec_: dict[str, Any]) -> None:
-    _limit(spec_)["schema"]["anyOf"] = [{"maximum": 1}]
-
-
 def test_an_any_of_that_was_not_there_was_no_constraint() -> None:
     """**없던 `anyOf` 는 갈래 0 이 아니라 제약이 없던 것이다** — 요청에 처음 서면 받는 것이
-    준다(PR #84 Codex 리뷰 3 라운드). 응답에서 다 사라지면 오는 것이 는다."""
-    assert _judged(_branches_on_the_limit, "1.1") != []
-    assert _judged(_branches_on_the_limit, "2.0") == []
+    준다(PR #84 Codex 리뷰 3 라운드). 응답에서는 처음 서면 오는 것이 준다.
+
+    `anyOf` 옆에는 글과 기본값만 둘 수 있으므로(5 라운드), 제약이 없던 스키마에 선다.
+    """
+    branches = {"anyOf": [{"type": "string"}, {"type": "null"}]}
+
+    def a_mode(schema: dict[str, Any]) -> Callable[[dict[str, Any]], None]:
+        def change(spec_: dict[str, Any]) -> None:
+            _lots(spec_)["parameters"].append({"in": "query", "name": "mode", "schema": schema})
+
+        return change
 
     old = _closed()
-    _schema(old, "LotOut")["properties"]["balance"]["anyOf"] = [{"maximum": 1}]
+    a_mode({})(old)
     new = _closed()
+    a_mode(copy.deepcopy(branches))(new)
     new["info"]["version"] = "1.1"
-    assert compat.judge(old, new, {}) != []
+    assert compat.judge(old, new, {}) != [], "요청에 처음 선 갈래는 받는 것을 줄인다"
     new["info"]["version"] = "2.0"
     assert compat.judge(old, new, {}) == []
+
+    old = _closed()
+    _schema(old, "LotOut")["properties"]["note"] = {}
+    new = _closed()
+    _schema(new, "LotOut")["properties"]["note"] = copy.deepcopy(branches)
+    new["info"]["version"] = "1.0"
+    assert compat.judge(old, new, {}) != []
+    new["info"]["version"] = "1.1"
+    assert compat.judge(old, new, {}) == [], "응답에 처음 선 갈래는 오는 것을 줄인다"
 
 
 def test_a_header_name_is_the_same_in_any_case() -> None:
@@ -631,3 +650,22 @@ def test_a_reason_value_is_a_scalar() -> None:
     않는다(PR #84 Codex 리뷰 4 라운드)."""
     whole = {"loc": ["query", "sort"], "value": ["bad"]}
     assert _judged(_with_a_sort, "1.1", {"1.1": [_widening(whole)]}) != []
+
+
+def test_the_first_known_name_is_an_addition_like_any_other() -> None:
+    """**처음 서는 `x-known-values` 도 빈 목록에서 는 것이다** — 첫 이름도 선언을 거친다
+    (PR #84 Codex 리뷰 5 라운드)."""
+    old = _closed()
+    del _schema(old, "LotListRefusalDetail")["properties"]["type"]["x-known-values"]
+    new = _closed()
+    # 판을 올려도 선언 없이는 빨갛다 — 통째로 깨는 변경으로 세면 앞자리만으로 초록이 된다
+    new["info"]["version"] = "2.0"
+    assert compat.judge(old, new, {}) != [], "선언이 없다"
+    declared = {
+        "2.0": [
+            _broken("GET /lots", "cursor_is_not_readable"),
+            _broken("GET /lots", "cursor_is_for_another_list"),
+        ]
+    }
+    new["info"]["version"] = "2.0"
+    assert compat.judge(old, new, declared) == []

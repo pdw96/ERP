@@ -216,6 +216,10 @@ class _Admit:
             self.schema(inner, side, f"{where}.{name}", seen)
         if "items" in value:
             self.schema(value["items"], side, f"{where}[]", seen)
+        # **`anyOf` 옆에는 글과 기본값만 둔다** — 옆에 제약이 있으면 갈래 하나만 보고 그 제약을
+        # 놓친다(PR #84 Codex 리뷰 5 라운드). FastAPI 는 선택 칸을 이 모양으로 짓는다
+        if "anyOf" in value and set(value) - _PROSE - {"anyOf", "default"}:
+            self._found.append(f"{where} 의 `anyOf` 옆에 둔 제약을 판정이 모른다")
         for branch in value.get("anyOf", []):
             self.schema(branch, side, where, seen)
 
@@ -403,8 +407,11 @@ class _Operation:
                 self._schema(before, after, side, f"{where}[]")
             elif key == "enum" and before is not _MISSING and after is not _MISSING:
                 self._values(before, after, side, label, opened=False)
-            elif key == "x-known-values" and before is not _MISSING and after is not _MISSING:
-                self._values(before, after, side, label, opened=True)
+            elif key == "x-known-values":
+                # 처음 서는 목록은 빈 목록에서 는 것이다 — 첫 이름도 선언을 거친다(5 라운드)
+                old_names = [] if before is _MISSING else before
+                new_names = [] if after is _MISSING else after
+                self._values(old_names, new_names, side, label, opened=True)
             elif key in _UPPER or key in _LOWER:
                 self._bound(key, before, after, side, label)
             else:
