@@ -47,6 +47,8 @@ services:
         condition: service_completed_successfully
     environment:
       ERP_DATABASE_URL: postgresql+psycopg://erp:erp@postgres:5432/erp
+      # 「오늘」과 「지금」을 가르는 현장 시간대(ADR 0019). 없으면 뜨지 않는다.
+      ERP_SITE_TIMEZONE: Asia/Seoul
     ports:
       # **루프백에만 연다.** 인증이 없는 쓰기 엔드포인트이고, 모든 인터페이스에
       # 열면 같은 네트워크의 누구나 로트를 만들 수 있다. 권한 층이 서는 것은

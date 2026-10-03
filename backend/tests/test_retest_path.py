@@ -25,7 +25,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 from sqlalchemy.pool import NullPool
 
-from app.core import codes
+from app.core import clock, codes
 from app.db.base import Base
 from app.db.code_attributes import (
     NonconformityAttribute,
@@ -129,7 +129,7 @@ def an_expired_lot(
     (`material_is_already_expired`). 로트의 만료일은 고칠 수도 없으므로 처음부터 지난 날로
     짓는다.
     """
-    today = date.today()
+    today = clock.today()
     arrived = today - timedelta(days=400)
     material = session.scalars(select(Item).where(Item.code == "RM-01")).one()
     supplier = session.scalars(select(Partner).where(Partner.code == "SUP-01")).one()
@@ -232,7 +232,7 @@ def test_a_pass_renews_the_expiry_from_the_day_it_was_judged(planted: Session) -
         retested.inspection_id,
         codes.JUDGMENT_PASSED,
         None,
-        date.today() + timedelta(days=SHELF_LIFE),
+        clock.today() + timedelta(days=SHELF_LIFE),
         None,
     )
     planted.expire_all()
@@ -255,6 +255,20 @@ def test_a_retest_pins_what_it_measured_as_a_time_variant_retest(planted: Sessio
         True,
     )
     assert row.applied_upper_spec == 0.5
+
+
+def test_a_retest_is_judged_on_the_site_wall_clock(
+    planted: Session, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """**판정 시각과 새 만료일이 현장의 시계에서 나온다**(ADR 0019) — UTC 와 14 시간 떨어진
+    곳이라 컨테이너 시각을 쓰면 어느 시각에 돌려도 드러난다."""
+    monkeypatch.setenv("ERP_SITE_TIMEZONE", "Etc/GMT-14")
+    retested = retest(planted, a_retest(an_expired_lot(planted).id))
+    judged = planted.get(Inspection, retested.inspection_id)
+    assert judged is not None
+
+    assert abs(clock.now() - judged.judged_at) < timedelta(minutes=1)
+    assert retested.renewed_expiry_date == clock.today() + timedelta(days=SHELF_LIFE)
 
 
 def test_a_failure_throws_away_everything_left(planted: Session) -> None:
@@ -344,7 +358,7 @@ def test_a_pass_without_a_shelf_life_is_named(planted: Session) -> None:
 def test_a_lot_that_expires_today_is_still_in_date(planted: Session) -> None:
     """**만료일 당일까지는 쓸 수 있다** — 트리거와 같은 경계다(아래 「경계」 절이 둘을
     견준다)."""
-    lot = an_expired_lot(planted, expires=date.today())
+    lot = an_expired_lot(planted, expires=clock.today())
 
     assert _refused(planted, a_retest(lot.id)) == RetestRefusal.LOT_HAS_NOT_EXPIRED
 
@@ -402,8 +416,8 @@ def test_a_lot_that_is_not_raw_material_is_named(planted: Session) -> None:
         lot_origin=codes.LOT_FROM_OWN,
         warehouse=codes.WAREHOUSE_FINISHED,
         quantity=10.0,
-        produced_date=date.today() - timedelta(days=400),
-        expiry_date=date.today() - timedelta(days=10),
+        produced_date=clock.today() - timedelta(days=400),
+        expiry_date=clock.today() - timedelta(days=10),
     )
     planted.add(made)
     planted.flush()
@@ -584,7 +598,7 @@ def test_the_write_path_and_the_trigger_draw_the_same_line(
 ) -> None:
     """**둘이 갈리면 트리거가 이긴다 — 이름 없는 500 이다.** 같은 로트를 쓰기 경로와 SQL 로 한
     번씩 넣어 본다. 오늘 만료면 둘 다 거절하고, 어제 만료면 둘 다 받는다."""
-    lot = an_expired_lot(planted, expires=date.today() - timedelta(days=days_past))
+    lot = an_expired_lot(planted, expires=clock.today() - timedelta(days=days_past))
 
     attempt = planted.begin_nested()
     if takes_a_retest:
@@ -601,10 +615,10 @@ def test_the_write_path_and_the_trigger_draw_the_same_line(
         item_type=material.item_type,
         material_group=GROUP,
         target_lot_id=lot.id,
-        judged_at=datetime.now(),
+        judged_at=clock.now(),
         judged_by="검사원 1",
         result=codes.JUDGMENT_PASSED,
-        renewed_expiry_date=date.today() + timedelta(days=SHELF_LIFE),
+        renewed_expiry_date=clock.today() + timedelta(days=SHELF_LIFE),
     )
     if takes_a_retest:
         planted.add(by_hand)

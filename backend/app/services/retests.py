@@ -28,13 +28,13 @@ IQC 와 같다 — 검사원이 넣는 것은 측정값과, 계산이 보지 못
 
 from collections import Counter
 from dataclasses import dataclass
-from datetime import date, datetime, timedelta
+from datetime import date, timedelta
 from enum import StrEnum
 
 from sqlalchemy import Numeric, case, cast, func, select
 from sqlalchemy.orm import Session
 
-from app.core import codes
+from app.core import clock, codes
 from app.db.code_attributes import TxnTypeAttribute
 from app.db.inspection import Inspection, InspectionMeasurement
 from app.db.inventory import Lot, StockLedgerEntry
@@ -248,7 +248,7 @@ def retest(session: Session, request: IncomingRetest) -> Retested:
             f"재검사가 보는 것은 원자재 로트뿐이다 — {lot.lot_number} 는 {item.item_type} 이다",
         )
 
-    judged_at = datetime.now()
+    judged_at = clock.now()
     _must_have_expired(session, lot, judged_at.date())
     left = _balance(session, lot)
     if left <= 0:

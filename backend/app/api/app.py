@@ -13,7 +13,8 @@
 import logging
 import re
 import uuid
-from collections.abc import Awaitable, Callable, Iterator, Mapping
+from collections.abc import AsyncIterator, Awaitable, Callable, Iterator, Mapping
+from contextlib import asynccontextmanager
 from functools import lru_cache
 from typing import Annotated, Any
 
@@ -47,6 +48,7 @@ from app.services.incoming import (
 )
 from app.services.retests import IncomingRetest, retest
 from app.services.returns import IncomingReturn, RefusedReturn, return_to_supplier
+from app.services.site_clock import assert_the_site_clock_holds
 
 # **이 API 의 판이다 — 패키지의 판과 다른 축이다.** 같은 코드가 계약을 깨지 않고
 # 여러 번 배포될 수 있고, 반대로 코드를 한 줄도 안 고치고 계약만 넓힐 수도 있다.
@@ -80,6 +82,20 @@ from app.services.returns import IncomingReturn, RefusedReturn, return_to_suppli
 # 아무것도 지키지 않게 된다(실제로 돌연변이가 그것을 드러냈다).
 API_VERSION = "0.1"
 
+
+@asynccontextmanager
+async def the_site_clock_must_hold(_: FastAPI) -> AsyncIterator[None]:
+    """**현장 시계를 믿을 수 없으면 뜨지 않는다**(ADR 0019).
+
+    뜬 뒤에 첫 요청이 시간대가 없다는 500 을 받는 것보다, 뜨지 않고 그 까닭을
+    로그에 남기는 쪽이 고칠 사람에게 빠르다. 무엇을 묻는지는
+    `app/services/site_clock.py` 가 든다.
+    """
+    with _sessions()() as session:
+        assert_the_site_clock_holds(session)
+    yield
+
+
 app = FastAPI(
     title="조기경보 ERP — 관문 1 · 구매반품 · 재검사",
     summary=(
@@ -104,6 +120,7 @@ app = FastAPI(
         " 열거로 들고, **그 열거에 없는 값은 셋째 무리**다."
     ),
     version=API_VERSION,
+    lifespan=the_site_clock_must_hold,
     # **끝 슬래시를 다른 경로로 돌려보내지 않는다** (감사 ㉝ OB-1 — ⑯ OB-3 · ㉛ OB-2 에
     # 이은 세 번째). 기본값은 `/inspections/` 에 본문 없는 307 을 내는데, 그것은
     # 선언 밖의 응답이었다 — 리다이렉트를 따라가지 않는 클라이언트(httpx 의 기본)는

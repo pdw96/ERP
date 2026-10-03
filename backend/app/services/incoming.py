@@ -19,13 +19,13 @@
 
 from collections import Counter
 from dataclasses import dataclass
-from datetime import date, datetime, timedelta
+from datetime import date, timedelta
 from enum import StrEnum
 
 from sqlalchemy import String, select, text
 from sqlalchemy.orm import Session
 
-from app.core import codes, locks
+from app.core import clock, codes, locks
 from app.db.code_attributes import NonconformityAttribute, NonconformityStageRule
 from app.db.common_codes import CommonCode
 from app.db.inspection import Inspection, InspectionMeasurement
@@ -400,7 +400,7 @@ def receive(session: Session, request: IncomingInspection) -> Judged:
     supplier = _supplier(session, request.supplier_code)
     assert item.material_group is not None  # 원자재는 자재군을 갖는다 (CHECK)
 
-    if request.received_date > date.today():
+    if request.received_date > clock.today():
         # **아직 오지 않은 물건은 검사하지 못한다.** 막지 않으면 판정일(오늘)이
         # 입고일보다 앞서 `ck_inspection_judged_after_arrival` 이 **결과와 무관하게**
         # 물고, 검사원은 제약 이름이 담긴 **500** 을 본다 — 잘 만들어진 요청
@@ -520,7 +520,7 @@ def receive(session: Session, request: IncomingInspection) -> Judged:
     else:
         result = codes.JUDGMENT_FAILED
 
-    judged_at = datetime.now()
+    judged_at = clock.now()
     inspection = Inspection(
         item_id=item.id,
         item_type=item.item_type,

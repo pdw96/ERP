@@ -20,6 +20,11 @@ class Settings(BaseSettings):
     # 사고이지 편의가 아니므로** 기본값이 꺼짐이다.
     seed_enabled: bool = False
 
+    # 「오늘」과 「지금」을 가르는 현장 시간대 — IANA 이름(ADR 0019).
+    # **기본값이 없다** — 비어 있으면 `app.core.clock` 이 시각을 내지 않고
+    # 멈추고, 앱은 뜨지 않는다. 마이그레이션은 이 값을 읽지 않는다.
+    site_timezone: str | None = None
+
 
 def get_settings() -> Settings:
     """설정 한 벌을 읽어 온다."""

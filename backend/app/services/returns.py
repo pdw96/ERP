@@ -37,13 +37,12 @@
 """
 
 from dataclasses import dataclass
-from datetime import datetime
 from enum import StrEnum
 
 from sqlalchemy import Float, Numeric, case, cast, func, literal, select
 from sqlalchemy.orm import Session
 
-from app.core import codes
+from app.core import clock, codes
 from app.db.code_attributes import NonconformityStageRule, TxnTypeAttribute
 from app.db.common_codes import CommonCode
 from app.db.inspection import Inspection
@@ -271,7 +270,7 @@ def return_to_supplier(session: Session, request: IncomingReturn) -> Returned:
 
     # **시각은 서버가 적는다.** 판정 시각과 같은 시계라 「판정보다 앞선 반품」이
     # 이 경로에서는 나지 않는다.
-    returned_at = datetime.now()
+    returned_at = clock.now()
     document = PurchaseReturn(
         inspection_id=inspection.id,
         inspection_result=inspection.result,

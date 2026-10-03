@@ -66,6 +66,16 @@ def guard_against_the_app_database(monkeypatch: pytest.MonkeyPatch) -> None:
     )
 
 
+@pytest.fixture(autouse=True)
+def a_site_clock(monkeypatch: pytest.MonkeyPatch) -> None:
+    """**현장 시간대를 준다**(ADR 0019) — 없으면 쓰기 경로가 시각을 내지 않는다.
+
+    컨테이너(CI 는 UTC)와 다른 시간대를 일부러 고른다 — 같으면 「컨테이너 시각을
+    쓴다」는 회귀를 테스트가 보지 못한다. 시간대 자체를 보는 테스트는 다시 덮는다.
+    """
+    monkeypatch.setenv("ERP_SITE_TIMEZONE", "Asia/Seoul")
+
+
 @pytest.fixture(scope="session")
 def engine() -> Iterator[Engine]:
     """테스트 세션 하나가 쓰는 엔진."""

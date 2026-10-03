@@ -12,7 +12,7 @@ import asyncio
 import json
 import logging
 from collections.abc import Iterator
-from datetime import date, timedelta
+from datetime import timedelta
 
 import pytest
 from fastapi import FastAPI, Request, Response
@@ -24,7 +24,7 @@ from sqlalchemy.orm import Session
 from app.api import app as api
 from app.api import schemas, spec
 from app.api.app import API_VERSION, app, session_scope
-from app.core import codes
+from app.core import clock, codes
 from app.db.constraints import blank_characters, is_present
 from app.db.inventory import Lot, StockLedgerEntry
 from app.services import incoming
@@ -134,7 +134,7 @@ def test_a_delivery_that_has_not_arrived_is_refused(client: TestClient) -> None:
     나간다.** 검사 표에 도착일이 서기 전에는 로트의 CHECK 만 물어 불합격이 201 로
     지나갔다(NC-77 · 109) — **경계가 그 갈림을 없앴고, 지금은 이름을 말한다.**
     """
-    tomorrow = (date.today() + timedelta(days=1)).isoformat()
+    tomorrow = (clock.today() + timedelta(days=1)).isoformat()
 
     response = client.post("/inspections", json=_PAYLOAD | {"received_date": tomorrow})
 
