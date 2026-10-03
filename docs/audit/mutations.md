@@ -1309,3 +1309,23 @@ PostgreSQL 16)도 초록이다(392 passed).
 | — | 목록의 이름에 `unknown_lot` 을 더했다 | `test_the_spec_declares_what_the_read_paths_answer` |
 | — | 로트 하나의 이름에 `cursor_is_not_readable` 을 더했다 | `test_the_spec_declares_what_the_read_paths_answer` |
 | — | 스펙 산문을 「400 · 404 · 405 · 500 은 라우트 밖의 일이다」로 되돌렸다 | `test_the_spec_declares_what_the_read_paths_answer` |
+
+## 3단계 읽는 조각 B2 — 계약의 호환 판정 (`c23b31d`, ADR 0018)
+
+`app/api/compat.py` 의 가름을 하나씩 어긋낸 뒤 `tests/test_contract_judgment.py` 를 돌렸다. 마지막 넷은 판정 테스트 자체를 실제 스펙으로 돌린 것이다 — 기준을 이 PR 의 첫 커밋(`c23cdb1`, 판 `1.0`)으로 주고 코드를 어긋냈다. 어긋냄 없이 돌린 대조군과 같은 트리의 `pytest` 전체(실제 PostgreSQL 16)는 초록이다.
+
+| NC | 무엇을 어긋냈나 | 빨개진 검사 |
+|---|---|---|
+| — | 옛 판의 앞자리가 0 이어도 창이 열려 있던 것으로 보지 않았다 | `test_a_window_that_was_open_takes_anything` · `test_the_version_moves_as_far_as_the_contract_moved`(기준 `origin/main` 이 `0.1` 이다) |
+| — | 깨는 변경에도 판이 (앞자리, 뒷자리) 순서로 오르기만 하면 받았다 | `test_the_judgment_asks_for_as_far_as_the_contract_moved` 의 `*-breaks` 여섯 · `test_a_renamed_name_breaks` · `test_a_name_declared_breaking_moves_the_first_place` · `test_an_answer_bound_moves_the_other_way` |
+| — | 계약이 그대로인데 판이 움직인 것을 받았다 | `test_the_judgment_asks_for_as_far_as_the_contract_moved` 의 `prose-is-not-the-contract` |
+| — | 기존 경로에 새로 나가는 이름을 선언 없이 넓히는 변경으로 셌다 | `test_a_new_name_on_an_old_path_needs_the_authors_word` 외 넷 |
+| — | 넓히는 변경이라는 선언의 근거를 옛 사진과 견주지 않았다 | `test_a_name_declared_widening_must_point_at_an_input_the_old_schema_did_not_take` · `test_a_new_enum_value_in_the_request_is_a_reason_for_a_new_name` |
+| — | 경계의 변화를 요청 · 응답 가리지 않고 요청처럼 셌다 | `test_an_answer_bound_moves_the_other_way` — 처음 쓴 검사로는 빨개지지 않아(응답의 경계를 움직이는 경우가 없었다) 그 검사를 더한 뒤 다시 쟀다 |
+| — | 요청의 칸이 필수가 되는 것을 넓히는 변경으로 셌다 | `test_the_judgment_asks_for_as_far_as_the_contract_moved` 의 `a-required-request-field-breaks` |
+| — | 새 상태 코드를 넓히는 변경으로 셌다 | `test_the_judgment_asks_for_as_far_as_the_contract_moved` 의 `a-new-status-breaks` |
+| — | 선언을 지금 판의 키만이 아니라 모든 판의 키에서 읽었다 | `test_a_declaration_of_another_version_is_not_read` |
+| — | 글(`description` 등)을 계약으로 셌다 | `test_the_judgment_asks_for_as_far_as_the_contract_moved` 의 `prose-is-not-the-contract` |
+| — | 계약을 그대로 두고 `API_VERSION` 만 `1.1` 로 올렸다 | `test_the_version_moves_as_far_as_the_contract_moved` |
+| — | `unknown_lot` 을 `lot_is_unknown` 으로 바꿨다 | `test_the_version_moves_as_far_as_the_contract_moved` — 선언이 없다는 것과 깨는 변경에 앞자리가 오르지 않았다는 것 둘을 낸다 |
+| — | 기준을 없는 리비전으로 주었다 | `test_the_version_moves_as_far_as_the_contract_moved` — 건너뛰지 않고 실패한다 |
