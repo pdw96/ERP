@@ -407,3 +407,24 @@ def test_an_answer_bound_moves_the_other_way(bound: int, moves: str) -> None:
     assert compat.judge(old, new, {}) != []
     new["info"]["version"] = moves
     assert compat.judge(old, new, {}) == []
+
+
+def test_security_for_every_path_and_its_schemes_are_each_seen() -> None:
+    """**스펙 머리의 `security` 는 경로마다 걸린다** — 이름으로 불리는 `securitySchemes` 도 따로
+    본다. 둘을 한 번에 바꾸면 하나만 보아도 빨개지므로 따로 어긋낸다(PR #84 Codex 리뷰)."""
+    schemes = {"bearer": {"type": "http", "scheme": "bearer"}}
+    old = _closed()
+    old["components"]["securitySchemes"] = schemes
+    new = copy.deepcopy(old)
+    new["security"] = [{"bearer": []}]
+    new["info"]["version"] = "1.1"
+    assert compat.judge(old, new, {}) != []
+    new["info"]["version"] = "2.0"
+    assert compat.judge(old, new, {}) == []
+
+    old = _closed()
+    new = copy.deepcopy(old)
+    new["components"]["securitySchemes"] = schemes
+    assert compat.judge(old, new, {}) != [], "판이 그대로인데 계약이 움직였다"
+    new["info"]["version"] = "2.0"
+    assert compat.judge(old, new, {}) == []
