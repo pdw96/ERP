@@ -212,6 +212,10 @@ class _Admit:
         is_object = value.get("type") == "object" or "properties" in value
         if side == "request" and is_object and value.get("additionalProperties") is not False:
             self._found.append(f"{where} 의 요청 객체가 모르는 칸을 받는다")
+        # **응답 객체는 칸을 닫지 않는다** — 닫으면 칸을 더하는 것이 넓히는 변경이 아니게 된다
+        # (PR #84 Codex 리뷰 7 라운드). 이 저장소의 응답 모델은 칸을 닫지 않는다
+        if side == "response" and "additionalProperties" in value:
+            self._found.append(f"{where} 의 응답 객체가 `additionalProperties` 를 건다")
         for name, inner in value.get("properties", {}).items():
             self.schema(inner, side, f"{where}.{name}", seen)
         if "items" in value:
@@ -657,11 +661,20 @@ def _not_new(old: Mapping[str, Any], new: Mapping[str, Any], key: str, item: Any
             return f"근거의 칸 {loc} 이 옛 요청 스키마에도 있었다 — 받던 요청이다"
         return ""
     value = item["value"]
+    if _formatted(after):
+        # 판정은 형식(`format`)의 뜻을 모른다 — 그 값을 FastAPI 가 받는지 물을 수 없다(7 라운드)
+        return f"근거의 값 {loc} 이 형식(`format`)이 붙은 칸이라 받는지 물을 수 없다"
     if after is None or not _accepts(after, value):
         return f"근거의 값 {loc} = {value!r} 을 새 요청 스키마가 받지 않는다"
     if before is not None and _accepts(before, value):
         return f"근거의 값 {loc} = {value!r} 을 옛 요청 스키마도 받았다 — 받던 요청이다"
     return ""
+
+
+def _formatted(schema: Any) -> bool:
+    if not isinstance(schema, dict):
+        return False
+    return "format" in schema or any(_formatted(branch) for branch in schema.get("anyOf", []))
 
 
 def _find(plain: Any, loc: list[Any]) -> Any:

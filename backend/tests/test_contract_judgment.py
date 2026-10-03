@@ -111,7 +111,8 @@ def test_the_version_moves_as_far_as_the_contract_moved() -> None:
     이름을 적고 `"change"` 를 고른다. 가르는 선은 옛 요청 스키마다(ADR 0018). 받던
     요청에 나가면 `"breaking"`, 옛 요청 스키마 밖이던 입력에만 나가면 `"widening"` 이고
     그 입력을 `"because"` 에 pydantic 의 `loc` 모양으로 든다 — 새 칸이면
-    `{"loc": [...]}`, 열거의 새 값이면 `{"loc": [...], "value": ...}`(값은 스칼라). 판정이
+    `{"loc": [...]}`, 열거의 새 값이면 `{"loc": [...], "value": ...}`(값은 스칼라이고, 그 칸에
+    형식(`format`)이 붙지 않았어야 한다). 판정이
     그 근거가 옛 사진에 없고 새 스펙의 제약을 모두 지나는지 견준다. 같은 경로 · 이름의
     선언은 하나다. 다른 판 키의 선언은 지나간 판의 기록이라 읽지 않는다.
 
@@ -462,6 +463,10 @@ def _limit_beside_branches(spec_: dict[str, Any]) -> None:
     _limit(spec_)["schema"]["anyOf"] = [{"maximum": 1}]
 
 
+def _closed_answer(spec_: dict[str, Any]) -> None:
+    _schema(spec_, "LotOut")["additionalProperties"] = False
+
+
 def _open_request(spec_: dict[str, Any]) -> None:
     del _schema(spec_, "RetestIn")["additionalProperties"]
 
@@ -484,6 +489,7 @@ def _open_request(spec_: dict[str, Any]) -> None:
         pytest.param(_numeric_enum, id="an-enum-of-numbers"),
         pytest.param(_header_input, id="a-header-input"),
         pytest.param(_limit_beside_branches, id="a-constraint-beside-any-of"),
+        pytest.param(_closed_answer, id="a-closed-answer-object"),
     ],
 )
 def test_a_shape_the_judgment_does_not_know_is_refused(
@@ -670,3 +676,24 @@ def test_the_first_known_name_is_an_addition_like_any_other() -> None:
     }
     new["info"]["version"] = "2.0"
     assert compat.judge(old, new, declared) == []
+
+
+def test_a_formatted_value_is_not_a_reason() -> None:
+    """**형식(`format`)이 붙은 칸의 값은 근거가 못 된다** — 판정은 그 형식의 뜻을 몰라
+    FastAPI 가 그 값을 받는지 물을 수 없다(PR #84 Codex 리뷰 7 라운드)."""
+
+    def a_day(values: list[str]) -> Callable[[dict[str, Any]], None]:
+        def change(spec_: dict[str, Any]) -> None:
+            schema = {"type": "string", "format": "date", "enum": values}
+            _lots(spec_)["parameters"].append({"in": "query", "name": "day", "schema": schema})
+
+        return change
+
+    old = _closed()
+    a_day(["2026-01-01"])(old)
+    new = _closed()
+    a_day(["2026-01-01", "not-a-date"])(new)
+    _new_name(new)
+    new["info"]["version"] = "1.1"
+    reason = {"loc": ["query", "day"], "value": "not-a-date"}
+    assert compat.judge(old, new, {"1.1": [_widening(reason)]}) != []
