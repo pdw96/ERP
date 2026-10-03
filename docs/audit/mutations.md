@@ -1342,3 +1342,19 @@ PostgreSQL 16)도 초록이다(392 passed).
 | — | `$ref` 옆의 제약을 버렸다 | `test_the_judgment_asks_for_as_far_as_the_contract_moved` 의 `a-bound-beside-a-ref-is-seen` |
 | — | 경로 머리의 인자를 견주지 않았다 | `test_the_judgment_asks_for_as_far_as_the_contract_moved` 의 `a-required-path-input-breaks` |
 | — | 로컬 기준을 `origin/main` 하나로 되돌렸다 | `test_the_version_moves_as_far_as_the_contract_moved` — 원격 이름이 다른 클론에서 기준을 읽지 못한다 |
+
+## 3단계 읽는 조각 B2 — 판정이 아는 모양 (`0e8c991`, PR #84 Codex 리뷰 2 라운드 · ADR 0021)
+
+`app/api/compat.py` 의 거절과 고침을 하나씩 껐다. 껐을 때 `tests/test_contract_judgment.py` 에서 빨개진 검사를 적었다. 어긋냄 없이 돌린 대조군과 같은 트리의 `pytest` 전체(실제 PostgreSQL 16)는 초록이다.
+
+| NC | 무엇을 어긋냈나 | 빨개진 검사 |
+|---|---|---|
+| — | 판정이 모양을 묻지 않고 견줬다 | `test_a_shape_the_judgment_does_not_know_is_refused` 의 `a-schema-that-holds-itself` |
+| — | 모르는 칸을 거절하지 않았다 | `test_a_shape_the_judgment_does_not_know_is_refused` 의 여덟(`security-*` · `an-input-on-the-path-item` · `one-of` · `const` · `a-path-item-ref` · `encoding`) |
+| — | `$ref` 옆의 칸을 거절하지 않았다 | `test_a_shape_the_judgment_does_not_know_is_refused` 의 `a-bound-beside-a-ref` — 처음 쓴 검사로는 빨개지지 않아(옆에 둔 `maxProperties` 가 모르는 키라 따로 걸렸다) 아는 키(`maxLength`)로 바꾼 뒤 다시 쟀다 |
+| — | 제 자신을 가리키는 `$ref` 를 거절하지 않았다 | `test_a_shape_the_judgment_does_not_know_is_refused` 의 `a-schema-that-holds-itself` |
+| — | 모르는 칸을 받는 요청 객체를 거절하지 않았다 | `test_a_shape_the_judgment_does_not_know_is_refused` 의 `a-request-object-that-takes-any-field` |
+| — | 모르는 미디어 타입을 거절하지 않았다 | `test_a_shape_the_judgment_does_not_know_is_refused` 의 `a-form-body` |
+| — | 포함 · 배제 경계의 쌍을 견주지 않았다 | `test_an_inclusive_and_an_exclusive_bound_are_one_constraint` · `test_the_judgment_asks_for_as_far_as_the_contract_moved` 의 `a-looser-request-bound-widens` · `a-tighter-request-bound-breaks` |
+| — | 값을 파이썬의 `==` 로 견줬다 | `test_a_boolean_is_not_a_number` |
+| — | `operationId` 를 견주지 않았다 | `test_the_judgment_asks_for_as_far_as_the_contract_moved` 의 `a-renamed-operation-breaks` |
