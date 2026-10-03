@@ -1235,3 +1235,12 @@ PostgreSQL 16)도 초록이다(392 passed).
 |---|---|---|
 | — | `must_be_a_reason_a_person_inspects` 의 꺼진 사유 분기를 껐다(`if False:`) | `test_a_retired_reason_cannot_be_sent_by_a_person` · `test_a_retired_reason_a_person_wrote_is_named` |
 | — | `RetestRefusal` 에서 `REASON_IS_NOT_ACTIVE` 를 뺐다 | `test_the_names_shared_with_the_inspection_path_mean_the_same` · `test_a_retired_reason_a_person_wrote_is_named` · `test_the_spec_matches_the_snapshot_in_the_repository` |
+
+## 이슈 #73 — 측정값이 고르는 사유 (`350b553`, PR #81 Codex 리뷰)
+
+`reason_for` 가 켜진 사유만 고르는 것을 어긋낸 뒤 `tests/test_write_path.py` · `tests/test_retest_path.py` 를 돌렸다. 어긋냄
+없이 돌린 대조군과 같은 트리의 `pytest` 전체(실제 PostgreSQL 16)는 초록이다.
+
+| NC | 무엇을 어긋냈나 | 빨개진 검사 |
+|---|---|---|
+| — | 켜졌는지 거르지 않고 첫 사유를 골랐다(`if active` 를 뺐다) | `test_a_deviation_whose_reason_was_retired_is_refused` · `test_a_deviation_whose_reason_was_retired_is_named` |
