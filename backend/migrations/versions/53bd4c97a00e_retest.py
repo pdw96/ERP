@@ -20,15 +20,22 @@
 단계마다 차는 칸을 이미 채우고, 반품은 IQC 를 가리키며, 원장에는 폐기 줄이 없다. 로트의 만료일을
 고정하는 트리거는 지금 있는 값을 묻지 않는다 — 그 값이 라벨에 찍혀 나간 값이다.
 
-**올릴 때 잠근다.** 칸을 더하고 제약을 거는 표(`inspections` · `inspection_measurements` ·
-`stock_ledger_entries` · `lots` · `process_inspection_standards` · `purchase_returns`)와 트리거가
-걸리는 표에 ACCESS EXCLUSIVE 가 커밋까지 남는다(목록을 세지 않는다). `migrations/env.py` 가
+**올릴 때 잠근다.** 칸이나 유일키를 더하는 표(`inspections` · `inspection_measurements` ·
+`stock_ledger_entries` · `lots` · `process_inspection_standards`)와 트리거가 걸리는 표에 ACCESS
+EXCLUSIVE 가 커밋까지 남는다(목록을 세지 않는다) — 읽기까지 멈춘다. `purchase_returns` 는 외래키
+하나만 받아 SHARE ROW EXCLUSIVE 다 — 쓰기만 멈춘다(감사 ㊳). 잠금의 길이는 행 수가 정한다 — CHECK ·
+외래키 · `SET NOT NULL` 이 옛 줄 전부를 검증하고, 유일키와 인덱스가 만들어지며, 측정 줄 전부에 단계를
+옮겨 채우는 `UPDATE` 가 그 잠금 아래에서 돈다. 행 수에 비례하는 그 구간이다. `migrations/env.py` 가
 전체를 트랜잭션 하나로 감싼다.
 
 **내릴 때 멈춘다 — 재검사가 하나라도 있으면.** 이 리비전은 구조만 세우므로 사라지는 것은 사람이
 나중에 넣은 재검사뿐이고, 그것은 다시 만들 수 없다 — 그 판정과 갱신 만료일, 폐기 줄의 근거가
 이 표에만 있다. 폐기 줄은 재검사 없이 설 수 없으므로(외래키) 재검사를 세면 둘 다 센다(W-6 ①).
 **세기 전에 잠근다** — 재검사를 넣는 트랜잭션이 커밋되기 전에 세면 0 을 보고 지나간다.
+
+**내릴 때도 잠근다**(감사 ㊳). `DROP TRIGGER` 가 `lots` · `inspections` 에 ACCESS EXCLUSIVE 를 잡아
+두 표의 **읽기까지** 커밋까지 멈춘다. 원장과 검사의 CHECK 를 앞 리비전의 모양으로 다시 세우고 칸을
+`SET NOT NULL` 로 되돌리며 모든 줄을 다시 검증한다 — 올릴 때와 같이 행 수에 비례하는 구간이다.
 
 > **이 가드가 못 보는 부류**(W-6 ③): 재검사 없이 원장에 직접 넣은 폐기 줄 — 이 리비전의
 > 외래키가 서는 동안 설 수 없다.

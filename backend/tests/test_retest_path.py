@@ -38,7 +38,7 @@ from app.db.master import Item, Partner
 from app.services import incoming
 from app.services.incoming import Measurement, RefusedInspection
 from app.services.retests import IncomingRetest, Retested, RetestRefusal, retest
-from app.services.returns import return_to_supplier
+from app.services.returns import RefusedReturn, ReturnRefusal, return_to_supplier
 from tests.factories import add_code, make_item
 from tests.test_return_path import _from_the_lot, plant_return_codes
 from tests.test_write_path import (
@@ -533,6 +533,19 @@ def test_the_names_shared_with_the_inspection_path_mean_the_same() -> None:
     }
 
     assert {name.value for name in shared} <= {name.value for name in RetestRefusal}
+
+
+def test_the_return_path_names_a_retest_it_cannot_take(planted: Session) -> None:
+    """**반품은 수입검사만 가리킨다** — 재검사의 id 는 있는 검사라 `unknown_inspection` 으로
+    말하면 부르는 쪽이 id 를 의심한다(감사 ㊴). 반품 경로의 이름이지만 재검사가 서야 날 수
+    있어 여기 둔다."""
+    lot = an_expired_lot(planted)
+    retested = retest(planted, a_retest(lot.id))
+
+    with pytest.raises(RefusedReturn) as refused:
+        return_to_supplier(planted, _from_the_lot(retested.inspection_id, 1.0))
+
+    assert refused.value.code == ReturnRefusal.INSPECTION_IS_NOT_INCOMING
 
 
 # ── 경계 — 쓰기 경로와 트리거가 같은 날을 가른다 (ADR 0016) ───────────────

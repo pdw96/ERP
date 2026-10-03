@@ -72,6 +72,7 @@ class ReturnRefusal(StrEnum):
     """
 
     UNKNOWN_INSPECTION = "unknown_inspection"
+    INSPECTION_IS_NOT_INCOMING = "inspection_is_not_incoming"
     UNKNOWN_SETTLE_TYPE = "unknown_settle_type"
     SETTLE_TYPE_IS_NOT_ACTIVE = "settle_type_is_not_active"
     REASON_IS_MISSING = "reason_is_missing"
@@ -110,21 +111,22 @@ def _inspection(session: Session, inspection_id: int) -> Inspection:
     """
     # `key_share=True` 가 `FOR NO KEY UPDATE` 다 — 트리거와 같은 잠금이고, 문서를 넣을
     # 때 외래키가 잡는 `KEY SHARE` 와 부딪치지 않는다(`ledger_guards.py` 머리).
-    #
-    # **반품이 가리킬 수 있는 것은 IQC 뿐이다**(`fk_purchase_return_inspection_stage`). 재검사는
-    # 이미 재고인 로트를 다시 본 판정이라 돌려보낼 입고분이 없다 — 이 경로에는 「없는 검사」와
-    # 같다. 이름을 따로 두면 계약의 열거가 넓어지므로 재검사 쓰기 경로가 서는 조각에서 본다.
     inspection = session.scalars(
-        select(Inspection)
-        .where(
-            Inspection.id == inspection_id,
-            Inspection.inspection_stage == codes.STAGE_INCOMING,
-        )
-        .with_for_update(key_share=True)
+        select(Inspection).where(Inspection.id == inspection_id).with_for_update(key_share=True)
     ).one_or_none()
     if inspection is None:
         raise RefusedReturn(
             ReturnRefusal.UNKNOWN_INSPECTION, f"반품이 가리킬 수입검사가 없다: {inspection_id}"
+        )
+    # **반품이 가리킬 수 있는 것은 IQC 뿐이다**(`fk_purchase_return_inspection_stage`). 재검사는
+    # 이미 재고인 로트를 다시 본 판정이라 돌려보낼 입고분이 없다. 그 id 는 **있는 검사**라
+    # 「없는 검사」로 말하면 부르는 쪽이 id 를 의심한다 — 이름을 따로 둔다(감사 ㊴, 소유자가
+    # 2026-10-03 에 정했다). 잠근 뒤에 묻는 것은 무해하다 — 단계는 고쳐지지 않는 칸이다.
+    if inspection.inspection_stage != codes.STAGE_INCOMING:
+        raise RefusedReturn(
+            ReturnRefusal.INSPECTION_IS_NOT_INCOMING,
+            f"반품은 수입검사만 가리킨다 — 이 검사는 {inspection.inspection_stage} 다: "
+            f"{inspection_id}",
         )
     return inspection
 

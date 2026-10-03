@@ -200,9 +200,9 @@ class RetestOut(BaseModel):
 
 
 class RefusalDetail(BaseModel):
-    """업무 규칙이 거절할 때 `detail[]` 에 실리는 줄.
+    """검사의 업무 규칙이 거절할 때 `detail[]` 에 실리는 줄.
 
-    `type` 이 **기계가 읽는 자리**다. 이름 목록은 `Refusal` 한 벌이고 여기 다시
+    `type` 이 **기계가 읽는 자리**다. 이름 목록은 `Refusal` 이 들고 여기 다시
     적지 않는다 — 두 벌이면 갈린다.
     """
 
@@ -215,9 +215,10 @@ class ValidationDetail(BaseModel):
     """pydantic 이 거절할 때 `detail[]` 에 실리는 줄.
 
     **같은 칸에 두 벌의 이름 공간이 산다.** `missing` · `extra_forbidden` 은
-    pydantic 이 정한 이름이고 위의 `Refusal` 은 우리가 정한 이름인데, 둘 다
-    `type` 으로 나간다. 그래서 `type` 을 하나의 닫힌 열거로 적으면 **거짓**이
-    된다 — 두 모양을 함께 적어 부르는 쪽이 어느 쪽인지 가릴 수 있게 한다.
+    pydantic 이 정한 이름이고 업무 규칙의 이름(경로마다 열거 — 짝으로 실리는
+    `…RefusalDetail` 이 든다)은 우리가 정한 이름인데, 둘 다 `type` 으로 나간다.
+    그래서 `type` 을 하나의 닫힌 열거로 적으면 **거짓**이 된다 — 두 모양을 함께
+    적어 부르는 쪽이 어느 쪽인지 가릴 수 있게 한다.
     """
 
     loc: list[str | int]
@@ -228,8 +229,8 @@ class ValidationDetail(BaseModel):
 class Refused(BaseModel):
     """검사 422 의 본문.
 
-    **두 경로가 한 모양이다**(NC-75). 다른 것은 `type` 의 이름 공간뿐이고,
-    그것을 위의 두 모델이 스펙에 적는다(감사 ⑫ NC-134).
+    **업무 규칙의 거절과 pydantic 의 거절이 한 모양이다**(NC-75). 다른 것은
+    `type` 의 이름 공간뿐이고, 그것을 위의 두 모델이 스펙에 적는다(감사 ⑫ NC-134).
     """
 
     detail: list[RefusalDetail | ValidationDetail]
@@ -267,7 +268,7 @@ class RetestRefused(BaseModel):
 class Transport(StrEnum):
     """라우트 **밖에서** 나는 거절의 이름 — `detail[].type` 의 셋째 이름 공간.
 
-    `Refusal` 은 업무 규칙이 거절할 때의 이름이고 이쪽은 **요청이 라우트에
+    업무 규칙의 이름(경로마다 열거)은 업무 규칙이 거절할 때의 것이고 이쪽은 **요청이 라우트에
     닿기 전이나 처리가 터진 뒤**의 이름이다. 둘을 한 열거로 합치지 않는 것은
     **층이 다르기 때문**이다 — 업무 이름은 관문 2 가 늘리고 이쪽은 늘지 않는다.
 
