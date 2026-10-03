@@ -72,6 +72,7 @@ class ReturnRefusal(StrEnum):
     """
 
     UNKNOWN_INSPECTION = "unknown_inspection"
+    INSPECTION_IS_NOT_INCOMING = "inspection_is_not_incoming"
     UNKNOWN_SETTLE_TYPE = "unknown_settle_type"
     SETTLE_TYPE_IS_NOT_ACTIVE = "settle_type_is_not_active"
     REASON_IS_MISSING = "reason_is_missing"
@@ -115,7 +116,17 @@ def _inspection(session: Session, inspection_id: int) -> Inspection:
     ).one_or_none()
     if inspection is None:
         raise RefusedReturn(
-            ReturnRefusal.UNKNOWN_INSPECTION, f"그런 검사가 없다: {inspection_id}"
+            ReturnRefusal.UNKNOWN_INSPECTION, f"반품이 가리킬 수입검사가 없다: {inspection_id}"
+        )
+    # **반품이 가리킬 수 있는 것은 IQC 뿐이다**(`fk_purchase_return_inspection_stage`). 재검사는
+    # 이미 재고인 로트를 다시 본 판정이라 돌려보낼 입고분이 없다. 그 id 는 **있는 검사**라
+    # 「없는 검사」로 말하면 부르는 쪽이 id 를 의심한다 — 이름을 따로 둔다(감사 ㊴, 소유자가
+    # 2026-10-03 에 정했다). 잠근 뒤에 묻는 것은 무해하다 — 단계는 고쳐지지 않는 칸이다.
+    if inspection.inspection_stage != codes.STAGE_INCOMING:
+        raise RefusedReturn(
+            ReturnRefusal.INSPECTION_IS_NOT_INCOMING,
+            f"반품은 수입검사만 가리킨다 — 이 검사는 {inspection.inspection_stage} 다: "
+            f"{inspection_id}",
         )
     return inspection
 
@@ -201,8 +212,10 @@ def _rejected_would_be_exceeded(
 ) -> bool:
     """불합격분은 원장 밖이라 **반품 문서끼리의 합**을 센다 — 반품 문서 트리거와 같은 셈이다.
 
-    검사 줄은 `_inspection()` 이 이미 잠갔다.
+    검사 줄은 `_inspection()` 이 이미 잠갔다. 그 검사는 IQC 라 수량이 언제나 있다
+    (`ck_inspection_incoming_names_its_delivery`).
     """
+    assert inspection.quantity is not None
     returned = (
         select(func.coalesce(func.sum(cast(PurchaseReturn.quantity, Numeric)), 0))
         .where(PurchaseReturn.inspection_id == inspection.id, PurchaseReturn.lot_id.is_(None))

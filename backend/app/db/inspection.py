@@ -1,6 +1,6 @@
-"""검사 기록 — 관문 1 수입검사 한 건.
+"""검사 기록 — 관문 1 수입검사와 만료 재검사.
 
-**이 표가 로트를 만든다.** 원칙 ① 이 「재고 로트는 합격 후에 생긴다」이므로
+**IQC 가 로트를 만든다.** 원칙 ① 이 「재고 로트는 합격 후에 생긴다」이므로
 로트를 만드는 것은 입고가 아니라 **판정**이고, 그 판정이 여기 산다.
 
 판정은 셋이다 — 합격 · 불합격 · 특채. 로트가 서는 것은 합격과 특채뿐이며,
@@ -11,9 +11,13 @@
 승격한다 — 지금 권한 체계를 정하면 사람이 늘지도 않았는데 그 층을 미리 당기는
 것이 된다.
 
-**이 조각은 IQC 하나다.** 단계 칸이 있지만 값은 못박혀 있다 — 관문 2 는 범위
-밖이고, 받을 수 없는 단계를 받는 칸은 빈 기준정보와 같다. 넓히는 것은
-마이그레이션이다.
+**재검사는 로트를 만들지 않고 있는 로트를 가리킨다**(3단계). 만료된 로트가 재고를
+떠나지 않고 검사로 돌아오는 자리이며, 합격하면 갱신 만료일이 이 줄에 박히고 불합격하면
+그 로트의 잔량 전부가 원장에 폐기출고 한 줄로 나간다. 판정 · 판정자 · 사유 · 측정 줄이
+IQC 와 같은 모양이라 표를 따로 두지 않았다(`docs/schema-3단계.md`).
+
+**받는 단계는 IQC 와 재검사 둘이다.** 관문 2 는 범위 밖이고, 받을 수 없는 단계를 받는
+칸은 빈 기준정보와 같다. 넓히는 것은 마이그레이션이다.
 """
 
 from datetime import date, datetime
@@ -25,6 +29,7 @@ from sqlalchemy import (
     DateTime,
     Float,
     ForeignKeyConstraint,
+    Index,
     Integer,
     String,
     UniqueConstraint,
@@ -76,12 +81,74 @@ class Inspection(Base):
             group_code=codes.INSP_STAGE,
             name="inspection_stage",
         ),
-        # **이 조각은 관문 1 뿐이다.** 다른 단계를 받아 두면 판정 경로가 없는
-        # 줄이 서고, 그것은 화면에서 검사받은 것처럼 보인다. 관문 2 가 오는 날
-        # 이 CHECK 를 넓히는 마이그레이션이 함께 온다.
+        # **판정 경로가 선 단계만 받는다** — IQC 와 재검사. 다른 단계를 받아 두면
+        # 판정 경로가 없는 줄이 서고, 그것은 화면에서 검사받은 것처럼 보인다. 관문
+        # 2 가 오는 날 이 CHECK 를 넓히는 마이그레이션이 함께 온다.
         CheckConstraint(
-            f"inspection_stage = '{codes.STAGE_INCOMING}'",
-            name="ck_inspection_stage_is_incoming",
+            f"inspection_stage IN ({_quoted(codes.INSPECTION_STAGES_BUILT)})",
+            name="ck_inspection_stage_is_built",
+        ),
+        # ── 단계마다 차는 칸 ────────────────────────────────────────────────
+        # **들어온 물건의 칸은 IQC 에만 있다.** 재검사는 이미 재고인 로트를 다시 보는
+        # 것이라 공급사 · 공급사 로트번호 · 입고 수량 · 도착일이 없다 — 그것은 그 로트를
+        # 만든 IQC 가 든다(원칙 ⑥).
+        #
+        # **재검사 줄은 로트를 만들 수 없다.** 로트는 검사를 도착일 · 수량과 쌍으로
+        # 가리키고(`fk_lot_inspection_received_date` · `fk_lot_inspection_quantity`), 로트
+        # 쪽 두 칸은 비지 않는다. 이 CHECK 가 재검사의 두 칸을 비우므로 짝이 없다.
+        CheckConstraint(
+            f"inspection_stage = '{codes.STAGE_INCOMING}'"
+            " OR (supplier_id IS NULL AND supplier_lot_number IS NULL"
+            " AND quantity IS NULL AND received_date IS NULL)",
+            name="ck_inspection_delivery_only_for_incoming",
+        ),
+        # 반대 방향 — IQC 는 무엇을 누구에게 얼마나 받았는지 빠짐없이 든다. 도착일은
+        # 빠져 있다 — 그 칸이 서기 전의 IQC 줄에는 없을 수 있다(아래 `received_date`).
+        CheckConstraint(
+            f"inspection_stage <> '{codes.STAGE_INCOMING}'"
+            " OR (supplier_id IS NOT NULL AND supplier_lot_number IS NOT NULL"
+            " AND quantity IS NOT NULL)",
+            name="ck_inspection_incoming_names_its_delivery",
+        ),
+        # **재검사는 로트를 가리키고, IQC 는 가리키지 않는다.** 양방향이다 — 재검사가
+        # 로트를 비우면 아래 외래키가 통째로 건너뛰어지고, IQC 가 로트를 가리키면 로트를
+        # 만드는 판정과 로트를 다시 보는 판정이 한 줄에 섞인다.
+        CheckConstraint(
+            f"(inspection_stage = '{codes.RETEST_STAGE}') = (target_lot_id IS NOT NULL)",
+            name="ck_inspection_target_lot_only_for_retest",
+        ),
+        # **같은 품목의 로트여야 한다.** 측정 줄이 기준을 고르는 자재군은 검사의 품목에서
+        # 오므로, 로트와 검사가 다른 품목을 말하면 남의 기준으로 잰 재검사가 선다.
+        #
+        # `use_alter` — 로트도 검사를 가리키므로 두 표가 서로를 가리킨다. 표를 먼저 세우고
+        # 이 외래키를 뒤에 붙인다.
+        ForeignKeyConstraint(
+            ["target_lot_id", "item_id"],
+            ["lots.id", "lots.item_id"],
+            name="fk_inspection_target_lot",
+            use_alter=True,
+        ),
+        # **갱신 만료일은 합격한 재검사에만 있다.** 양방향이다 — 합격한 재검사가 비워
+        # 두면 로트의 지금 만료일이 옛 만료일로 남아 곧바로 다시 재검사를 받고, 그 밖의
+        # 줄이 들고 있으면 만료일을 바꿀 수 없는 판정이 바꾼 것이 된다.
+        CheckConstraint(
+            f"(inspection_stage = '{codes.RETEST_STAGE}'"
+            f" AND result = '{codes.JUDGMENT_PASSED}') = (renewed_expiry_date IS NOT NULL)",
+            name="ck_inspection_renewal_only_for_a_passed_retest",
+        ),
+        # **합격한 그날 만료된 로트로 남지 않는다.** 경계는 만료 판정과 같다 — 만료일
+        # 당일까지는 쓸 수 있다(`docs/schema-3단계.md` 「만료의 경계」). 계산식(판정일 +
+        # 설정기간)은 쓰기 경로가 들고 여기서는 순서만 본다(ADR 0017).
+        CheckConstraint(
+            "renewed_expiry_date IS NULL OR renewed_expiry_date >= judged_at::date",
+            name="ck_inspection_renewal_after_judgement",
+        ),
+        # **재검사에는 특채가 없다** — 관문 2 가 범위 밖이다. 시드의 재검사 사유는 전부
+        # 특채가 닫혀 있어 외래키도 막지만, 그것은 데이터이고 플래그는 고칠 수 있다.
+        CheckConstraint(
+            f"inspection_stage <> '{codes.RETEST_STAGE}'"
+            f" OR result <> '{codes.JUDGMENT_SPECIAL}'",
+            name="ck_inspection_retest_has_no_special_acceptance",
         ),
         # ── 무엇을 검사했는가 ───────────────────────────────────────────────
         ForeignKeyConstraint(
@@ -213,6 +280,21 @@ class Inspection(Base):
         # **로트가 수량을 가리킬 상대**(감사 ㉟ NC-225). 검사 한 건은 로트 하나를 통째로
         # 만들므로 둘의 수량은 같은 사실이다 — 다시 적지 않고 가리킨다.
         UniqueConstraint("id", "quantity", name="uq_inspection_id_quantity"),
+        # **단계를 가리킬 상대.** 측정 줄은 재검사인지에 따라 고를 수 있는 기준이 다르고,
+        # 반품 문서는 IQC 만 가리킨다 — 둘 다 이 쌍으로 그 검사의 단계를 든다.
+        UniqueConstraint("id", "inspection_stage", name="uq_inspection_id_stage"),
+        # **원장의 폐기 줄이 가리킬 상대.** 같은 로트 · 같은 판정 · 같은 시각을 함께
+        # 가리키면 폐기 줄이 남의 로트나 합격한 재검사를 근거로 설 수 없다.
+        UniqueConstraint(
+            "id",
+            "target_lot_id",
+            "result",
+            "judged_at",
+            name="uq_inspection_retest_ledger_match",
+        ),
+        # **재검사를 로트로 찾는 자리.** 트리거가 그 로트를 잠근 채 앞선 재검사를 읽으므로
+        # 찾을 길이 있어야 한다 — 외래키 칸에 인덱스는 저절로 서지 않는다.
+        Index("ix_inspection_target_lot", "target_lot_id"),
     )
 
     id: Mapped[int] = mapped_column(primary_key=True)
@@ -234,7 +316,9 @@ class Inspection(Base):
     # 품목이 아는 사실을 그대로 든다 — 위의 외래키가 둘을 묶는다.
     material_group: Mapped[str] = mapped_column(String(30))
 
-    supplier_id: Mapped[int] = mapped_column(Integer)
+    # **IQC 에만 찬다** — 재검사는 들어온 물건이 아니다
+    # (`ck_inspection_delivery_only_for_incoming`).
+    supplier_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
     supplier_type: Mapped[str] = mapped_column(
         String(10), default=codes.SUPPLIER, server_default=codes.SUPPLIER
     )
@@ -242,9 +326,10 @@ class Inspection(Base):
     # **로트 번호와 같지 않을 수 있다.** 공급사가 붙여 온 번호를 그대로 적는
     # 자리이며, 우리 로트 번호는 우리가 짓는다 — 남이 지은 번호를 우리 유일키에
     # 그대로 쓰면 두 공급사가 같은 번호를 쓸 때 둘째 입고가 거부된다.
-    supplier_lot_number: Mapped[str] = mapped_column(String(50))
+    supplier_lot_number: Mapped[str | None] = mapped_column(String(50), nullable=True)
 
-    quantity: Mapped[float] = mapped_column(Float)
+    # 들어온 양 — IQC 에만 찬다. 재검사는 로트를 통째로 보고, 그 양은 원장의 합이다.
+    quantity: Mapped[float | None] = mapped_column(Float, nullable=True)
 
     # **물건이 도착한 날.** 로트에도 같은 칸이 있지만 **로트는 불합격에 서지
     # 않으므로** 그쪽만으로는 불합격의 도착일이 어디에도 남지 않는다 — 클레임과
@@ -275,6 +360,14 @@ class Inspection(Base):
     # 특채가 열린 사유를 가리키게 하는 **자리**다 — 그래서 이 칸에 담긴 것은
     # 「이 줄이 특채이며 그 사유가 특채를 여는 사유였다」는 사실 하나뿐이다.
     special_acceptance_allowed: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+
+    # **재검사가 다시 보는 로트.** IQC 는 로트를 만들고(`lots.inspection_id`), 재검사는 있는
+    # 로트를 가리킨다 — 단계에 따라 정확히 한쪽만 선다.
+    target_lot_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # **합격한 재검사의 새 만료일.** 판정일에서 품목의 설정기간을 센 값을 쓰기 경로가 박는다
+    # (ADR 0017). 로트의 `expiry_date` 는 고치지 않는다 — 라벨에 찍혀 나간 값이다(원칙 ⑦).
+    # 로트의 **지금** 만료일은 가장 최근에 합격한 재검사의 이 값, 없으면 로트의 만료일이다.
+    renewed_expiry_date: Mapped[date | None] = mapped_column(Date, nullable=True)
 
 
 class InspectionMeasurement(Base):
@@ -322,6 +415,38 @@ class InspectionMeasurement(Base):
             ["inspection_id", "material_group"],
             ["inspections.id", "inspections.material_group"],
             name="fk_inspection_measurement_inspection",
+        ),
+        # **검사의 단계를 든다** — 재검사인지가 이 줄이 고를 수 있는 기준을 가른다.
+        ForeignKeyConstraint(
+            ["inspection_id", "inspection_stage"],
+            ["inspections.id", "inspections.inspection_stage"],
+            name="fk_inspection_measurement_stage",
+        ),
+        # **재검사는 경시변화 항목만 잰다.** 재검사 줄은 기준을 플래그까지 더해 한 번 더
+        # 가리키므로, 짝이 있는 것은 `time_variant` 가 켜진 기준뿐이다 — 특채가 플래그로
+        # 사유를 가리키는 것과 같은 방식이다. 가리키는 줄이 있는 동안 그 기준의 플래그를
+        # 끄는 것도 막힌다.
+        ForeignKeyConstraint(
+            ["process_code", "item_code", "material_group", "standard_time_variant"],
+            [
+                "process_inspection_standards.process_code",
+                "process_inspection_standards.item_code",
+                "process_inspection_standards.material_group",
+                "process_inspection_standards.time_variant",
+            ],
+            name="fk_inspection_measurement_time_variant",
+        ),
+        # **양방향이다.** 재검사인데 비면 위의 외래키가 통째로 건너뛰어지고, IQC 인데 차
+        # 있으면 IQC 측정이 기준의 플래그를 잠근다 — IQC 는 경시변화가 아닌 항목도 잰다.
+        CheckConstraint(
+            f"(inspection_stage = '{codes.RETEST_STAGE}')"
+            " = (standard_time_variant IS NOT NULL)",
+            name="ck_inspection_measurement_time_variant_only_for_retest",
+        ),
+        # 차 있다면 참이다. 거짓을 받으면 꺼진 기준을 거짓으로 가리켜 외래키가 막지 못한다.
+        CheckConstraint(
+            "standard_time_variant IS NOT FALSE",
+            name="ck_inspection_measurement_retest_is_time_variant",
         ),
         # **기준이 실재함을 DB 가 보증한다.** 공정과 항목만 가리키면 자재군이
         # 풀리므로 셋을 함께 가리킨다 — 기준 표의 정체성이 그 셋이다.
@@ -412,6 +537,13 @@ class InspectionMeasurement(Base):
     # 구조로 고정된 칸(`stage_group` 같은)과 다르다.
     process_code: Mapped[str] = mapped_column(String(30))
     material_group: Mapped[str] = mapped_column(String(30))
+
+    # **값이 아니라 외래키의 자리다** — 검사의 단계를 쌍으로 든다. 기본값을 두지 않는다:
+    # 틀린 단계를 적으면 쌍 외래키가 막지만, 기본값이 있으면 재검사 측정을 IQC 로 적는
+    # 실수가 「빠뜨림」이 아니라 「거부」로 드러나는 자리가 사라진다.
+    inspection_stage: Mapped[str] = mapped_column(String(20))
+    # **재검사 줄에서만 차고, 차면 참이다** — `special_acceptance_allowed` 와 같은 자리다.
+    standard_time_variant: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
 
     measured_value: Mapped[float] = mapped_column(Float)
 

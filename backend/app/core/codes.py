@@ -180,7 +180,7 @@ TOTAL_EFFECTS = (
 )
 
 # **원장에 나는 유형.** 합격이 로트를 만들고 그 자리에 입고 한 줄이 남고,
-# 공급사에 돌려보낸 재고는 반품 한 줄로 빠진다.
+# 공급사에 돌려보낸 재고는 반품 한 줄로, 재검사에서 떨어진 로트는 폐기 한 줄로 빠진다.
 #
 # **열둘을 다 적지 않는다.** 나머지는 부르는 쪽이 없고, 부르는 쪽이 없는
 # 상수는 빈 기준정보와 같다 — 그 유형을 내는 조각이 설 때 하나씩 온다. 시드와
@@ -189,12 +189,15 @@ TXN_PURCHASE_RECEIPT = "구매입고"
 # 대물이든 대금이든 이 유형 하나다 — 원장은 「재고가 줄었다」만 적고, 정산
 # 구분은 반품 문서에 한 번만 산다(원칙 ⑥).
 TXN_PURCHASE_RETURN = "구매반품출고"
+# 재검사에서 떨어진 로트의 잔량 전부가 이 한 줄로 나간다. 근거 문서는 그 재검사다.
+TXN_DISPOSAL = "폐기출고"
 # **유형마다 잔량을 세는 방향**(Codex 리뷰 4 라운드). 시드가 `txn_type_attributes` 에 같은 값을
 # 심지만, 그 칸은 원장 줄이 서기 전까지 고칠 수 있다 — 줄이 들어올 때 잔량 트리거가 이 방향과
 # 견주어 거꾸로 선 유형의 첫 줄을 막는다. 원장 CHECK 가 받는 유형도 이 목록이다.
 LEDGER_EFFECTS = {
     TXN_PURCHASE_RECEIPT: EFFECT_INCREASE,
     TXN_PURCHASE_RETURN: EFFECT_DECREASE,
+    TXN_DISPOSAL: EFFECT_DECREASE,
 }
 LEDGER_TXN_TYPES = tuple(LEDGER_EFFECTS)
 
@@ -288,6 +291,9 @@ STAGE_PROCESSES: dict[str, tuple[str, ...]] = {
     "OQC": ("출하",),
 }
 RETEST_STAGE = "재검사"
+# **검사 표가 받는 단계.** 판정 경로가 선 단계만 받는다 — 받을 수 없는 단계를 받는 칸은
+# 빈 기준정보와 같다. 관문 2 가 오는 날 넓히는 마이그레이션이 함께 온다.
+INSPECTION_STAGES_BUILT = (STAGE_INCOMING, RETEST_STAGE)
 
 
 # ── 검사의 판정 ─────────────────────────────────────────────────────────────

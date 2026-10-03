@@ -204,6 +204,9 @@ class Lot(Base):
         # 원장의 입고 줄이 「그 로트를 만든 검사」를 가리키는지는 이 쌍이 없으면
         # 데이터베이스가 보증하지 못한다.
         UniqueConstraint("id", "inspection_id", name="uq_lot_id_inspection"),
+        # **재검사가 가리킬 상대.** 재검사는 로트를 품목과 쌍으로 가리켜, 남의 품목 기준으로
+        # 잰 재검사가 서지 않게 한다(`fk_inspection_target_lot`).
+        UniqueConstraint("id", "item_id", name="uq_lot_id_item"),
     )
 
     id: Mapped[int] = mapped_column(primary_key=True)
@@ -239,6 +242,10 @@ class Lot(Base):
 
     # 파생해 저장한다. 라벨에 찍혀 나갔으므로 설정기간을 바꿔도 이미 부여된
     # 만료일은 바뀌지 않는다 — 「밖으로 나간 값은 박아 둔다」.
+    #
+    # **고치지 않는다**(트리거 `lot_expiry_stays_as_labelled`, ADR 0016). 재검사가 이 값을
+    # 읽어 「만료됐는가」를 가르므로, 고칠 수 있으면 잠깐 과거로 돌려 재검사를 넣거나 앞으로
+    # 밀어 이미 선 재검사를 소급해 무효로 만든다. 갱신된 만료일은 재검사 기록에 산다.
     expiry_date: Mapped[date | None] = mapped_column(Date, nullable=True)
 
     # 예/아니오다. **재작업 2회인 로트는 존재할 수 없다** — 로트는 합격 후에만
@@ -342,6 +349,15 @@ class PurchaseReturn(Base):
             f" AND reason_stage = '{codes.STAGE_INCOMING}'",
             name="ck_purchase_return_reason_stage",
         ),
+        # **반품은 IQC 를 가리킨다.** 재검사도 판정 · 불합격을 들어 위의 판정 쌍만으로는
+        # 가려지지 않는다 — 불합격한 재검사를 들고 로트를 비우면 「재고가 된 적 없는
+        # 불합격분」의 반품이 되고, 재검사에는 입고 수량이 없어 합의 규칙이 물지 못한다.
+        # 위의 `reason_stage` 가 이미 IQC 로 못박혀 있어 그 칸을 단계 자리로 함께 쓴다.
+        ForeignKeyConstraint(
+            ["inspection_id", "reason_stage"],
+            ["inspections.id", "inspections.inspection_stage"],
+            name="fk_purchase_return_inspection_stage",
+        ),
         CheckConstraint(
             "(lot_id IS NULL) = (nonconformity_code IS NULL)",
             name="ck_purchase_return_reason_only_for_a_lot",
@@ -383,7 +399,8 @@ class PurchaseReturn(Base):
     nonconformity_group: Mapped[str] = mapped_column(
         String(20), default=codes.NC_REASON, server_default=codes.NC_REASON
     )
-    # 사유가 쓰일 수 있는 단계 — 값이 아니라 위의 외래키의 **자리**다(`ck_…_reason_stage`).
+    # 사유가 쓰일 수 있는 단계이자 반품이 가리키는 검사의 단계 — 값이 아니라 위의 두
+    # 외래키의 **자리**다(`ck_…_reason_stage`).
     reason_stage: Mapped[str] = mapped_column(
         String(30), default=codes.STAGE_INCOMING, server_default=codes.STAGE_INCOMING
     )
@@ -419,10 +436,11 @@ class StockLedgerEntry(Base):
     문서도 없는 유형이 원장에 서고, 그러면 잔량을 세는 쪽이 **그 줄을 더해야
     하는지 빼야 하는지 모른다.** 속성 줄을 가리키면 그 한 겹이 더 막힌다.
 
-    ### 원장에 나는 줄은 구매입고와 구매반품출고다
+    ### 원장에 나는 줄은 구매입고 · 구매반품출고 · 폐기출고다
 
     합격이 로트를 만들고 그 자리에 입고 한 줄이 남는다. 공급사에 돌려보낸 재고는
-    반품 문서와 함께 반품 한 줄로 빠진다. 나머지 유형은 내는 쪽이 아직 없으므로,
+    반품 문서와 함께 반품 한 줄로 빠진다. 재검사에서 떨어진 로트는 그 잔량 전부가
+    폐기 한 줄로 나간다. 나머지 유형은 내는 쪽이 아직 없으므로,
     받아 두면 **근거 문서가 없는 줄**이 서고 화면에서는 실제로 일어난 일처럼 보인다.
     그 유형을 내는 조각이 설 때 CHECK 가 함께 넓어진다.
 
@@ -483,6 +501,33 @@ class StockLedgerEntry(Base):
             f"(txn_type = '{codes.TXN_PURCHASE_RETURN}') = (purchase_return_id IS NOT NULL)",
             name="ck_stock_ledger_entry_return_names_its_document",
         ),
+        # **폐기 줄은 자기를 떨어뜨린 재검사를 가리킨다 — 같은 로트 · 불합격 · 같은 시각까지.**
+        # 재검사만 가리키면 남의 로트를 폐기하거나 합격한 재검사로 폐기하는 줄이 선다.
+        # 양은 가리키지 않는다 — 재검사는 양을 들지 않고, 「잔량 전부」는 트리거가 본다.
+        ForeignKeyConstraint(
+            ["retest_id", "lot_id", "retest_result", "occurred_at"],
+            [
+                "inspections.id",
+                "inspections.target_lot_id",
+                "inspections.result",
+                "inspections.judged_at",
+            ],
+            name="fk_stock_ledger_entry_retest",
+        ),
+        # **양방향이다.** 폐기 줄인데 재검사가 비면 위의 외래키가 통째로 건너뛰어지고,
+        # 폐기가 아닌데 차면 다른 줄이 폐기의 근거를 들고 있다.
+        CheckConstraint(
+            f"(txn_type = '{codes.TXN_DISPOSAL}') = (retest_id IS NOT NULL)",
+            name="ck_stock_ledger_entry_disposal_names_its_retest",
+        ),
+        # **판정 칸은 재검사와 함께 차고, 차면 불합격이다.** 비면 위의 외래키가 건너뛰어진다.
+        # 두 조건을 따로 적는다 — 「재검사가 있고 판정이 불합격」을 한 식으로 쓰면 판정이 빌 때
+        # `NULL = '불합격'` 이 NULL 이 되어 CHECK 가 통과시킨다.
+        CheckConstraint(
+            "(retest_id IS NULL) = (retest_result IS NULL)"
+            f" AND (retest_result IS NULL OR retest_result = '{codes.JUDGMENT_FAILED}')",
+            name="ck_stock_ledger_entry_disposal_follows_a_failure",
+        ),
         # `NaN >= 0` 이 참이라 하한만으로는 막지 못한다. 한 줄이 들어오면 이후의
         # **모든 잔량 합계가 `NaN`** 이 되고 비교가 전부 거짓이라 재고가 조용히
         # 사라진다 — 원장은 합으로 읽는 표이므로 그 피해가 표 하나에 그치지 않는다.
@@ -515,6 +560,14 @@ class StockLedgerEntry(Base):
             unique=True,
             postgresql_where=text("purchase_return_id IS NOT NULL"),
         ),
+        # **재검사 하나에 폐기 줄은 하나다** — 그리고 커밋할 때 그 줄을 찾는 자리다
+        # (`retest_failure_has_its_disposal_line`).
+        Index(
+            "uq_stock_ledger_entry_one_line_per_retest",
+            "retest_id",
+            unique=True,
+            postgresql_where=text("retest_id IS NOT NULL"),
+        ),
     )
 
     id: Mapped[int] = mapped_column(primary_key=True)
@@ -529,14 +582,19 @@ class StockLedgerEntry(Base):
     quantity: Mapped[float] = mapped_column(Float)
     occurred_at: Mapped[datetime] = mapped_column(DateTime)
 
-    # **그 로트를 만든 검사를 가리킨다.** 입고 줄에는 그것이 근거이고, 반품 줄에는
-    # 「어느 판정으로 들어온 물건을 돌려보냈는가」다. 반품은 검사를 아는 로트만
-    # 하므로(`PurchaseReturn`) 비어 있을 수 없다 — 판정에서 나지 않은 로트의
-    # 줄(전기이월 · 생산입고 · 그 로트의 폐기)이 서는 날 함께 넓어진다.
+    # **그 로트를 만든 검사를 가리킨다.** 입고 줄에는 그것이 근거이고, 반품 · 폐기 줄에는
+    # 「어느 판정으로 들어온 물건이 나갔는가」다. 반품은 검사를 아는 로트만 하고, 폐기는
+    # 잔량이 있는 로트만 하는데 잔량은 입고 줄에서 오므로 비어 있을 수 없다 — 판정에서
+    # 나지 않은 로트의 줄(전기이월 · 생산입고)이 서는 날 함께 넓어진다.
     inspection_id: Mapped[int] = mapped_column(Integer)
 
     # 반품 줄에서만 찬다 — 위의 양방향 CHECK 가 그것을 건다.
     purchase_return_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+
+    # 폐기 줄에서만 찬다 — 그 로트를 떨어뜨린 재검사.
+    retest_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # **값을 나르는 칸이 아니라 외래키의 자리다** — 차면 언제나 불합격이다.
+    retest_result: Mapped[str | None] = mapped_column(String(10), nullable=True)
 
 
 install_ledger_guards(ledger=StockLedgerEntry.__table__, returns=PurchaseReturn.__table__)

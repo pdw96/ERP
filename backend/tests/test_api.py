@@ -379,7 +379,7 @@ def test_the_spec_lists_every_refusal_name(client: TestClient) -> None:
     ]
 
 
-@pytest.mark.parametrize("path", ["/inspections", "/purchase-returns"])
+@pytest.mark.parametrize("path", ["/inspections", "/purchase-returns", "/retests"])
 def test_the_spec_declares_every_answer_that_actually_goes_out(
     client: TestClient, path: str
 ) -> None:
@@ -469,7 +469,7 @@ def test_the_spec_matches_the_snapshot_in_the_repository() -> None:
     )
 
 
-@pytest.mark.parametrize("path", ["/inspections", "/purchase-returns"])
+@pytest.mark.parametrize("path", ["/inspections", "/purchase-returns", "/retests"])
 def test_the_spec_says_which_header_names_the_request(client: TestClient, path: str) -> None:
     """**`X-Request-Id` 의 규약이 밖이 읽는 자리에 있다** (감사 ⑯ NC-160).
 

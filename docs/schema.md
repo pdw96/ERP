@@ -33,7 +33,7 @@
 | 12 | `process_inspection_standards` | 품질 기준정보 | 공정 × 검사항목 |
 | 13 | `supplier_items` | 구매 기준정보 | 공급사별 품목 |
 | 14 | `lots` | 재고관리 | 재고 로트 (통합) |
-| 15 | `inspections` | 품질관리 | 검사 기록 — 관문 1 수입검사 |
+| 15 | `inspections` | 품질관리 | 검사 기록 — 관문 1 수입검사 · 만료 재검사 |
 | 16 | `inspection_measurements` | 품질관리 | 측정값 줄 — 검사 한 건의 항목별 실측 |
 | 17 | `stock_ledger_entries` | 재고관리 | 수불 원장 — 로트가 생기고 움직인 사실 |
 | 18 | `purchase_returns` | 구매관리 | 구매반품 문서 — 무엇을 얼마나 왜 공급사에 돌려보냈나 |
@@ -277,6 +277,8 @@ PostgreSQL 의 기본키는 `NULL` 을 받지 않으므로 자재군을 PK 에 �
 
 **단위까지 가리킬 상대가 있다.** `UNIQUE NULLS NOT DISTINCT (process_code, item_code, material_group, unit)` — **행을 좁히지 않는다.** 위의 셋이 이미 유일하므로 넷째를 더해도 같은 줄이고, 목적은 `inspection_measurements` 의 측정 줄이 **단위까지 쌍으로 가리킬 상대**를 만드는 것이다. 그래서 가리키는 줄이 있는 동안 이 칸을 바꾸는 것 자체가 막힌다 — **거래 데이터가 자기 근거를 잠근다.** 이 유일키가 없으면 그쪽 `applied_unit` 쌍 외래키가 설 자리를 잃는다.
 
+**경시변화 플래그까지 가리킬 상대도 있다.** `UNIQUE NULLS NOT DISTINCT (process_code, item_code, material_group, time_variant)` — 같은 이유로 행을 좁히지 않는다. 재검사 측정 줄이 `time_variant` 가 켜진 기준만 가리키게 하고(16번), 재검사가 잰 기준의 플래그를 끄는 것을 막는다.
+
 **규격은 유한한 수여야 한다.** 순서 CHECK 는 `NaN` 을 막지 못한다 — `NaN > 하한` 이 참이고 `중심선 <= NaN` 도 참이라 줄이 그대로 선다. 그리고 판정하는 쪽에서 `측정값 <= 상한` 이 **언제나 참**이 되어, 규격이 있는 것처럼 보이는데 아무것도 걸러 내지 않는 기준이 남는다. 불합격이 한 건도 나지 않는 공정은 정상으로 보인다. 상·하한 · 중심선 · σ 넷 다 `is_finite()` 가 걸린다.
 
 **σ 를 비워 둔다.** 규격에서 뽑은 σ 는 어떤 계수를 쓰든 Cpk 를 그 계수의
@@ -346,6 +348,8 @@ PostgreSQL 의 기본키는 `NULL` 을 받지 않으므로 자재군을 PK 에 �
 - **양방향** — `(inspection_id IS NULL) = (inspection_result IS NULL)`
 - `UNIQUE (inspection_id)` — 한 판정은 로트를 한 번만 만든다
 - `UNIQUE (id, inspection_id)` — 행을 좁히지 않는다. **원장 줄이 가리킬 상대**다
+- `UNIQUE (id, item_id)` — 행을 좁히지 않는다. **재검사가 가리킬 상대**다 (15번의 `fk_inspection_target_lot`)
+- **트리거** `lot_expiry_stays_as_labelled` — `expiry_date` 는 **고치지 않는다.** 재검사가 이 값을 읽어 만료를 가르므로, 고칠 수 있으면 과거로 돌려 재검사를 넣거나 앞으로 밀어 이미 선 재검사를 소급해 무효로 만든다. 갱신된 만료일은 재검사 기록에 산다(ADR 0016)
 
 ### 로트 번호는 우리가 짓는다 — `RM-01-260921-01`
 
@@ -392,27 +396,34 @@ PostgreSQL 의 기본키는 `NULL` 을 받지 않으므로 자재군을 PK 에 �
 
 ---
 
-## 15. `inspections` — 검사 기록 (관문 1)
+## 15. `inspections` — 검사 기록 (관문 1 · 재검사)
 
-**이 표가 로트를 만든다.** 원칙 ① 이 「재고 로트는 합격 후에 생긴다」이므로
+**IQC 가 로트를 만든다.** 원칙 ① 이 「재고 로트는 합격 후에 생긴다」이므로
 로트를 만드는 것은 입고가 아니라 **판정**이고, 그 판정이 여기 앉는다. 칸의
 세부는 `app/db/inspection.py` 에 있다 — 여기에는 왜 그 모양인가만 적는다.
+
+**재검사는 로트를 만들지 않고 있는 로트를 가리킨다**(3단계). 만료된 로트가 검사로 돌아와,
+합격하면 갱신 만료일이 그 줄에 박히고 불합격하면 그 로트의 잔량 전부가 원장에 폐기출고 한
+줄로 나간다. 판정 · 판정자 · 사유 · 측정 줄이 IQC 와 같은 모양이라 같은 표에 둔다. 초안과
+지으면서 갈린 자리는 `schema-3단계.md` 의 「`inspections` 가 바뀌는 자리」와 「조각 3」 절이다.
 
 | 칸 | 형 | 비고 |
 |---|---|---|
 | `id` | PK | |
-| `inspection_stage` | str(20) | `INSP_STAGE`. **`IQC` 로 못박혀 있다** |
+| `inspection_stage` | str(20) | `INSP_STAGE`. **`IQC` · `재검사` 둘만** 받는다 |
 | `item_id` · `item_type` | 복합 FK → `items` | 원자재만 |
 | `material_group` | 복합 FK → `items` | **품목이 아는 사실을 그대로 든다** |
-| `supplier_id` · `supplier_type` | 복합 FK → `partners` | 공급사만 |
-| `supplier_lot_number` | str(50) | 공급사가 붙여 온 번호. **우리 로트 번호가 아니다** |
-| `quantity` | float | `>= 0` 과 `is_finite()` 를 함께 |
+| `supplier_id` · `supplier_type` | 복합 FK → `partners` (`supplier_id` NULL) | 공급사만. **IQC 에만 찬다** |
+| `supplier_lot_number` | str(50) NULL | 공급사가 붙여 온 번호. **우리 로트 번호가 아니다.** IQC 에만 찬다 |
+| `quantity` | float NULL | `>= 0` 과 `is_finite()` 를 함께. IQC 에만 찬다 — 재검사는 로트를 통째로 보고 그 양은 원장의 합이다 |
 | `received_date` | date NULL | **물건이 도착한 날.** 로트는 불합격에 서지 않으므로 이 칸이 없으면 불합격의 도착일이 사라진다. 이 칸이 서기 전의 줄에는 비어 있다 |
 | `judged_at` | datetime | **도착일과 갈릴 수 있다** — 뒤늦게 적은 입고를 일부러 받는다 |
 | `judged_by` | str(50) | **판정자.** 사용자 표 없이 식별 칸으로 |
 | `result` | str(10) | 합격 · 불합격 · 특채 |
 | `nonconformity_code` | str(30) NULL | 합격이면 비고, 아니면 찬다 |
 | `special_acceptance_allowed` | bool NULL | **특채인 줄에서만 차고, 차면 참이다** |
+| `target_lot_id` | 복합 FK → `lots` (`item_id` 와 쌍) NULL | **재검사가 다시 보는 로트.** 재검사에만 찬다 |
+| `renewed_expiry_date` | date NULL | **합격한 재검사의 새 만료일.** 판정일 + 품목의 `shelf_life_days` 를 쓰기 경로가 박는다(ADR 0017). 로트의 `expiry_date` 는 고치지 않는다 |
 
 **제약**
 - `CHECK result IN ('합격','불합격','특채')` — 넷째 판정이 생기는 것은 코드값이 느는 것이 아니라 원칙 ① 이 바뀌는 것이라 공통코드 그룹으로 두지 않는다
@@ -421,13 +432,25 @@ PostgreSQL 의 기본키는 `NULL` 을 받지 않으므로 자재군을 PK 에 �
 - `FK (사유 × 단계 × 특채가부) → nonconformity_stage_rules` — **원칙 ① 의 예외가 서는 자리다.** 짝이 있는 것은 특채가 열린 사유뿐이므로, 닫힌 사유로 특채를 적으면 거부된다
 - **양방향** — `(result = '특채') = (special_acceptance_allowed IS NOT NULL)`. 복합 외래키는 한 칸이라도 `NULL` 이면 검사하지 않으므로, 이것이 없으면 특채 줄이 칸을 비워 위의 외래키를 통째로 건너뛴다
 - `CHECK special_acceptance_allowed IS NOT FALSE` — 거짓은 **외래키가 통과시킨다.** `(IQ-PSD, IQC, FALSE)` 는 실재하는 줄이기 때문이다
-- `CHECK inspection_stage = 'IQC'` · `CHECK item_type = '원자재'` · `CHECK supplier_type = '공급사'`
+- `CHECK inspection_stage IN ('IQC', '재검사')` · `CHECK item_type = '원자재'` · `CHECK supplier_type = '공급사'` — 재검사도 원자재만이다. 원자재가 아닌 로트는 IQC 를 지나지 않고, 그 로트를 만드는 판정이 서는 관문 2 가 범위 밖이다
+- **단계마다 차는 칸** — 재검사는 공급사 · 공급사 로트번호 · 입고 수량 · 도착일을 비우고(`ck_inspection_delivery_only_for_incoming`), IQC 는 앞의 셋을 빠짐없이 든다(`ck_inspection_incoming_names_its_delivery`). **재검사가 도착일과 수량을 비우므로 로트가 재검사를 가리킬 수 없다** — 로트는 검사를 그 둘과 쌍으로 가리키고, 로트 쪽 두 칸은 비지 않는다
+- **양방향** — `(inspection_stage = '재검사') = (target_lot_id IS NOT NULL)`. 재검사가 로트를 비우면 아래 외래키가 통째로 건너뛰어진다
+- `FK (target_lot_id, item_id) → lots (id, item_id)` — **같은 품목의 로트여야 한다.** 측정 줄의 기준은 검사의 품목에서 오므로, 다르면 남의 기준으로 잰 재검사가 선다. 로트도 검사를 가리키므로 이 외래키는 표가 선 뒤에 붙는다(`use_alter`)
+- **양방향** — `(inspection_stage = '재검사' AND result = '합격') = (renewed_expiry_date IS NOT NULL)`
+- `CHECK renewed_expiry_date IS NULL OR renewed_expiry_date >= judged_at::date` — **합격한 그날 만료된 로트로 남지 않는다.** 경계는 만료 판정과 같다(아래 트리거)
+- `CHECK inspection_stage <> '재검사' OR result <> '특채'` — **재검사에는 특채가 없다.** 사유의 플래그가 켜져 있어도 — 플래그는 고칠 수 있는 데이터다
 - `judged_by` 와 `supplier_lot_number` 에 `is_present()`
 - `FK (item_id, material_group) → items` — **자재군은 지어내는 값이 아니라 품목이 이미 아는 사실이다.** 이 칸이 여기 있는 이유는 측정 줄이고, 그 쓰임은 16번에 있다
 - `CHECK received_date IS NULL OR judged_at::date >= received_date` — **도착이 판정보다 먼저다.** `NULL` 은 통과한다 — 이 칸이 서기 전의 줄에는 도착일이 없고, 「모른다」를 「위반이다」로 세면 제약이 이미 선 사실을 막는다
 - `UNIQUE (id, received_date)` — 행을 좁히지 않는다. **로트가 도착일을 가리킬 상대**다 (14번의 `fk_lot_inspection_received_date`)
 - `UNIQUE (id, item_id)` — 같은 이유로 **로트가 품목을 가리킬 상대**다 (14번의 `fk_lot_inspection_item`)
 - `UNIQUE (id, quantity)` — **로트가 수량을 가리킬 상대**다 (14번의 `fk_lot_inspection_quantity`)
+- `UNIQUE (id, inspection_stage)` — **단계를 가리킬 상대**다 — 측정 줄(16번)과 반품 문서(18번)가 쌍으로 든다
+- `UNIQUE (id, target_lot_id, result, judged_at)` — **원장의 폐기 줄이 가리킬 상대**다 (17번의 `fk_stock_ledger_entry_retest`)
+- **인덱스** `ix_inspection_target_lot (target_lot_id)` — 트리거가 로트를 잠근 채 앞선 재검사를 읽는 자리다
+- **트리거** `retest_comes_only_to_an_expired_lot` — **만료된 로트에만 재검사가 선다**(ADR 0016). 로트 줄을 `FOR NO KEY UPDATE` 로 잠근 뒤 지금 만료일(가장 최근에 합격한 재검사의 갱신 만료일, 없으면 `lots.expiry_date`)을 판정일과 견준다. **경계 — 만료일 당일까지는 쓸 수 있다**: 지금 만료일이 판정일보다 앞설 때만 만료다. IQC 쓰기 경로의 「이미 지난 자재」와 같은 경계다. 같은 잠금 아래에서 앞선 불합격 재검사 · 앞선 재검사보다 이른 판정 · 만료일 없음(NULL) · 잔량 0 을 거절한다. `BEFORE INSERT` 다 — `AFTER` 면 방금 넣은 합격의 갱신 만료일이 「가장 최근」으로 잡힌다
+- **트리거** `inspection_keeps_its_stage` — 어느 줄도 단계를 바꾸지 않고, 재검사 줄은 고치지도 지우지도 않는다. 규칙이 읽는 줄을 고정한다 — 판정 시각을 고치면 만료되지 않은 로트로 옮겨 가고, 합격 재검사를 지우면 지금 만료일이 되돌아간다
+- **지연 제약 트리거** `retest_failure_has_its_disposal_line` — 떨어진 재검사는 **커밋할 때** 원장에 폐기 줄이 있어야 한다. 반품 문서와 그 원장 줄의 자리와 같다
 - **트리거** `inspection_stays_behind_its_returns` — 반품이 가리키는 검사는 **어느 칸도** 고치지 않는다 — 칸을 골라 고정했더니 라운드마다 한 칸씩 더 났다(수량 · 공급사 · 품목 · 시각, 사유, 공급사 로트번호). 반품 문서는 그 값을 검사에서 따라가므로, 움직이면 반품이 다른 공급사로 간 것이 되거나 합 규칙의 분모가 바뀐다(감사 ㉟ NC-223 · Codex 리뷰)
 
 ### 도착일이 로트에만 살던 자리 — 불합격에서만 사라졌다
@@ -472,6 +495,8 @@ PostgreSQL 의 외래키가 기본키나 유일키에만 붙기 때문이다.
 |---|---|---|
 | `inspection_id` · `item_code` | PK | **한 검사에서 같은 항목을 두 번 적지 않는다** |
 | `process_code` · `material_group` | 복합 FK → 기준 표 (`item_code` 와 함께) | 기준이 실재함을 DB 가 보증한다 |
+| `inspection_stage` | str(20) | **검사의 단계를 쌍으로 든다.** 값이 아니라 외래키의 자리다. 기본값이 없다 |
+| `standard_time_variant` | bool NULL | **재검사 줄에서만 차고, 차면 참이다** — 특채 플래그와 같은 자리다 |
 | `measured_value` | float | `is_finite()` — **하한이 없으므로 단독으로** |
 | `applied_upper_spec` · `applied_lower_spec` | float NULL | **판정 시점의 규격.** 각각은 빌 수 있어도 둘 다 비지는 못한다 |
 | `applied_unit` | str(20) | **그 숫자의 뜻.** 비울 수 없다 — 비우면 아래 쌍 외래키를 그냥 빠져나간다(한 칸이라도 `NULL` 이면 검사하지 않는다). **「비어 보이는 값」을 여기서 또 막지 않는다** — 그 명제는 12번이 들고 있고 아래 외래키가 이 줄까지 나른다. 규격만 박고 단위를 두고 오면, 기준에서 `µm` → `mm` 로 고치는 순간 숫자는 그대로인데 **읽히는 뜻이 천 배 달라진다.** 세는 항목은 잰 줄이 서지 않으므로 여기 들어오지 않는다 |
@@ -479,6 +504,9 @@ PostgreSQL 의 외래키가 기본키나 유일키에만 붙기 때문이다.
 **제약**
 - `FK (inspection_id, material_group) → inspections` — **검사와 같은 자재군이어야 한다**
 - `FK (process_code, item_code, material_group) → process_inspection_standards` — 공정과 항목만 가리키면 자재군이 풀린다. 기준 표의 정체성이 그 셋이다
+- `FK (inspection_id, inspection_stage) → inspections (id, inspection_stage)` — 단계는 검사에서 온다
+- `FK (process_code, item_code, material_group, standard_time_variant) → process_inspection_standards (…, time_variant)` — **재검사는 경시변화 항목만 잰다**(`PRD.md` 성공 기준 5). 짝이 있는 것은 플래그가 켜진 기준뿐이고, 가리키는 줄이 있는 동안 그 플래그를 끌 수 없다
+- **양방향** — `(inspection_stage = '재검사') = (standard_time_variant IS NOT NULL)` · `CHECK standard_time_variant IS NOT FALSE`. 재검사 측정이 비우면 위의 외래키가 건너뛰어지고, IQC 측정이 채우면 IQC 가 플래그를 잠근다
 - `CHECK` 규격이 **둘 다 비지는 못한다** — 둘 다 비었다는 것은 재는 항목이 아니라는 뜻이다
 - `is_finite()` 를 **각 규격 칸에 단독으로** — 서로의 순서를 보는 CHECK 는 `NaN` 을 통과시킨다(`NaN > 하한` 이 참이다)
 - `CHECK` 상한 > 하한 (둘 다 있을 때)
@@ -544,16 +572,20 @@ PostgreSQL 의 외래키가 기본키나 유일키에만 붙기 때문이다.
 | `occurred_at` | datetime | |
 | `inspection_id` | FK → `lots` (`lot_id` 와 쌍) | 줄이 **그 로트를 만든** 검사를 가리킨다 — 입고 줄의 근거이고, 반품 줄에는 「어느 판정으로 들어온 물건인가」다 |
 | `purchase_return_id` | FK → `purchase_returns` NULL | **반품 줄에서만 찬다** — 그 줄의 근거 문서 |
+| `retest_id` · `retest_result` | 복합 FK → `inspections` NULL | **폐기 줄에서만 찬다** — 그 로트를 떨어뜨린 재검사. 판정 칸은 외래키의 자리이고 차면 불합격이다 |
 
 **제약**
 - `FK (lot_id, inspection_id) → lots (id, inspection_id)` — **홀로 검사를 가리키는 외래키는 없다.** 아래 「입고 줄은 그 로트를 만든 검사를 가리킨다」
 - `FK (txn_type_group, txn_type) → txn_type_attributes` — 공통코드를 가리키면 「그 코드가 있다」까지만 증명된다. **총량 영향이 없는 유형**이 원장에 서면 잔량을 세는 쪽이 그 줄을 더해야 하는지 빼야 하는지 모른다
-- `CHECK txn_type IN ('구매입고', '구매반품출고')` — **근거 문서가 선 유형만** 받는다. 나머지는 내는 쪽이 뒤의 단계에 있고, 받아 두면 **근거 문서가 없는 줄**이 선다
+- `CHECK txn_type IN ('구매입고', '구매반품출고', '폐기출고')` — **근거 문서가 선 유형만** 받는다. 나머지는 내는 쪽이 뒤의 단계에 있고, 받아 두면 **근거 문서가 없는 줄**이 선다
 - `FK (purchase_return_id, lot_id, quantity, occurred_at) → purchase_returns (id, lot_id, quantity, returned_at)` — 반품 줄은 자기 문서를 **같은 로트 · 같은 수량 · 같은 시각까지** 가리킨다
 - **양방향** — `(txn_type = '구매반품출고') = (purchase_return_id IS NOT NULL)`
 - **부분 유일 인덱스** `(purchase_return_id) WHERE purchase_return_id IS NOT NULL` — 문서 하나에 원장 줄은 하나다
+- `FK (retest_id, lot_id, retest_result, occurred_at) → inspections (id, target_lot_id, result, judged_at)` — 폐기 줄은 자기 재검사를 **같은 로트 · 불합격 · 같은 시각까지** 가리킨다. 양은 가리키지 않는다 — 재검사는 양을 들지 않고, 「잔량 전부」는 트리거가 본다
+- **양방향** — `(txn_type = '폐기출고') = (retest_id IS NOT NULL)`. 판정 칸은 `(retest_id IS NULL) = (retest_result IS NULL)` 이고 차면 `'불합격'` 이다 — 두 조건을 한 식으로 쓰면 판정이 빌 때 `NULL = '불합격'` 이 NULL 이 되어 통과한다(어긋내 확인했다)
+- **부분 유일 인덱스** `(retest_id) WHERE retest_id IS NOT NULL` — 재검사 하나에 폐기 줄은 하나다
 - **인덱스** `ix_stock_ledger_entry_lot (lot_id)` — 트리거가 줄마다 그 로트의 줄을 합하는 자리다. 입고 줄만 담은 부분 유일 인덱스는 그 합에 쓰이지 못한다(Codex 리뷰 2 라운드)
-- **트리거** `stock_ledger_entry_keeps_the_balance` — 한 로트의 줄을 합한 잔량이 0 밑으로 내려가지 않고, 입고 줄의 수량은 로트 수량과 같으며, 줄을 고치거나 지우지 않는다. 같은 자리를 로트 쪽에서 `lot_quantity_stays_with_its_ledger` 가 지킨다 — 원장에 줄이 선 로트의 수량을 고치지 않는다. **CHECK 로 적을 수 없는 규칙이라 트리거다**(ADR 0013, `app/db/ledger_guards.py`). 로트 줄을 `FOR NO KEY UPDATE` 로 잠근다 — `FOR UPDATE` 는 반품 문서의 외래키가 잡는 `KEY SHARE` 와 부딪쳐 교착이 났다. 유형 속성 줄은 `FOR SHARE` 로 읽어, 그 유형의 첫 줄이 커밋되기 전에 방향을 바꾸는 갱신을 그 뒤로 세운다. 줄의 유형이 `txn_type_attributes` 에 선 방향이 `codes.LEDGER_EFFECTS` 와 다르면 받지 않고, 나가는 줄의 시각이 그 로트의 입고 줄보다 앞서면 받지 않는다(Codex 리뷰 4 라운드)
+- **트리거** `stock_ledger_entry_keeps_the_balance` — 한 로트의 줄을 합한 잔량이 0 밑으로 내려가지 않고, 입고 줄의 수량은 로트 수량과 같으며, 줄을 고치거나 지우지 않는다. 같은 자리를 로트 쪽에서 `lot_quantity_stays_with_its_ledger` 가 지킨다 — 원장에 줄이 선 로트의 수량을 고치지 않는다. **CHECK 로 적을 수 없는 규칙이라 트리거다**(ADR 0013, `app/db/ledger_guards.py`). 로트 줄을 `FOR NO KEY UPDATE` 로 잠근다 — `FOR UPDATE` 는 반품 문서의 외래키가 잡는 `KEY SHARE` 와 부딪쳐 교착이 났다. 유형 속성 줄은 `FOR SHARE` 로 읽어, 그 유형의 첫 줄이 커밋되기 전에 방향을 바꾸는 갱신을 그 뒤로 세운다. 줄의 유형이 `txn_type_attributes` 에 선 방향이 `codes.LEDGER_EFFECTS` 와 다르면 받지 않고, 나가는 줄의 시각이 그 로트의 입고 줄보다 앞서면 받지 않는다(Codex 리뷰 4 라운드). **폐기 줄은 잔량 전부다** — 그 줄이 들어간 뒤의 잔량이 0 이 아니면 받지 않는다
 - `CHECK quantity >= 0` **이고 유한한 수** — 원장은 합으로 읽는 표라 `NaN` 한 줄의 피해가 표 하나에 그치지 않는다
 - **부분 유일 인덱스** `(lot_id) WHERE txn_type = '구매입고'` — 로트 하나에 입고 줄은 하나다
 
@@ -600,7 +632,7 @@ PostgreSQL 의 외래키가 기본키나 유일키에만 붙기 때문이다.
 | `lot_id` | FK → `lots` (`inspection_id` 와 쌍) NULL | 재고가 된 것을 돌려보낼 때만 |
 | `settle_type` | str(10) | `SETTLE_TYPE` — 대물 · 대금. 원장 유형은 둘 다 구매반품출고다 |
 | `nonconformity_code` | str(30) NULL | `NC_REASON` — **재고 로트를 돌려보낼 때만.** 불합격분의 사유는 그 검사가 든다 |
-| `reason_stage` | str(30) | 사유가 쓰일 단계 — `IQC` 로 못박는다. 값이 아니라 외래키의 자리다 |
+| `reason_stage` | str(30) | 사유가 쓰일 단계이자 반품이 가리키는 검사의 단계 — `IQC` 로 못박는다. 값이 아니라 두 외래키의 자리다 |
 | `quantity` | float | `> 0` 이고 유한한 수 |
 | `returned_at` | datetime | |
 | `returned_by` | str(50) | 식별 칸. `is_present()` |
@@ -609,6 +641,7 @@ PostgreSQL 의 외래키가 기본키나 유일키에만 붙기 때문이다.
 - `CHECK (lot_id IS NULL) = (inspection_result = '불합격')` — 불합격이면 로트가 없고, 합격 · 특채면 있다
 - `CHECK (lot_id IS NULL) = (nonconformity_code IS NULL)`
 - `FK (nonconformity_group, nonconformity_code, reason_stage_group, reason_stage) → nonconformity_stage_rules` — **IQC 에서 쓸 수 있는 사유만.** 공통코드를 가리키면 사 온 자재를 완제품 불량 사유로 돌려보낸 기록이 선다(Codex 리뷰). 검사 기록과 같은 방식이다
+- `FK (inspection_id, reason_stage) → inspections (id, inspection_stage)` — **반품은 IQC 를 가리킨다.** 불합격한 재검사를 들고 로트를 비우면 「재고가 된 적 없는 불합격분」이 되는데, 재검사에는 입고 수량이 없어 합의 규칙이 물지 못한다
 - `UNIQUE (id, lot_id, quantity, returned_at)` — 행을 좁히지 않는다. **원장의 반품 줄이 가리킬 상대**다
 - **인덱스** `ix_purchase_return_inspection (inspection_id)` — 트리거가 검사 줄을 잠근 채 같은 검사의 반품을 합하는 자리다(Codex 리뷰 3 라운드)
 - **트리거** `purchase_return_stays_within_what_came` — 반품 시각이 그 검사의 판정 시각보다, 재고 로트면 그 로트의 입고 줄 시각보다 앞서지 않고, 한 불합격 검사에서 돌려보낸 합이 그 검사가 받은 수량을 넘지 않는다(원장 밖의 합이라 원장 트리거가 보지 못한다). 문서를 고치거나 지우지 않는다. 그 검사 줄을 `FOR NO KEY UPDATE` 로 잠가 같은 검사의 반품이 줄을 선다

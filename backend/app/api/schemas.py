@@ -15,6 +15,7 @@ from pydantic import AfterValidator, BaseModel, ConfigDict, Field
 from app.core import codes
 from app.db.constraints import blank_characters
 from app.services.incoming import Refusal
+from app.services.retests import RetestRefusal
 from app.services.returns import ReturnRefusal
 
 # **데이터베이스가 깎는 글자와 같은 목록이다.** 두 벌로 적지 않는다 —
@@ -159,13 +160,49 @@ class PurchaseReturnOut(BaseModel):
     ledger_entry_id: int | None
 
 
+class RetestIn(BaseModel):
+    """만료 재검사 한 건 — **로트를 가리킨다.** 품목 · 자재군 · 다시 볼 항목은 거기서
+    따라간다."""
+
+    model_config = _ONLY_THE_FIELDS_WE_NAME
+
+    # 검사 응답의 `lot_id` 다.
+    lot_id: int = Field(gt=0, le=_INT4_MAX)
+    judged_by: Present = Field(min_length=1, max_length=50)
+    measurements: list[MeasurementIn] = Field(default_factory=list)
+    # 세는 경시변화 항목(포장)에서 **사람이 잡은** 결함. 계산은 이것을 보지 못한다.
+    nonconformity_code: Present | None = Field(default=None, max_length=30)
+
+
+class RetestOut(BaseModel):
+    """재검사가 끝난 뒤 남은 것.
+
+    **돌려주는 칸마다 까닭이 있다**(감사 ⑫ NC-137) —
+
+    - `inspection_id` — 재검사에는 다른 손잡이가 없다. 같은 로트에 재검사가 여럿 설 수 있다
+    - `renewed_expiry_date` — **합격이면 새 만료일이다.** 계산이 낸 값이고(ADR 0017) 라벨에 다시
+      찍힐 값이라, 부르는 쪽이 다시 셈하게 하면 한 사실을 두 번 짓게 된다. 불합격이면 비어 있다
+    - `ledger_entry_id` — 떨어졌으면 잔량 전부가 원장에서 나갔다는 것을 부르는 쪽이 확인할
+      자리다. 합격이면 비어 있다
+    """
+
+    inspection_id: int
+    # 재검사에는 특채가 없다 — 판정은 둘이다. 목록은 `codes` 에서 끌어온다.
+    result: str = Field(
+        json_schema_extra={"enum": [codes.JUDGMENT_PASSED, codes.JUDGMENT_FAILED]}
+    )
+    nonconformity_code: str | None
+    renewed_expiry_date: date | None
+    ledger_entry_id: int | None
+
+
 # ── 거절의 본문 — **스펙이 그 이름을 든다** ────────────────────────────────
 
 
 class RefusalDetail(BaseModel):
-    """업무 규칙이 거절할 때 `detail[]` 에 실리는 줄.
+    """검사의 업무 규칙이 거절할 때 `detail[]` 에 실리는 줄.
 
-    `type` 이 **기계가 읽는 자리**다. 이름 목록은 `Refusal` 한 벌이고 여기 다시
+    `type` 이 **기계가 읽는 자리**다. 이름 목록은 `Refusal` 이 들고 여기 다시
     적지 않는다 — 두 벌이면 갈린다.
     """
 
@@ -178,9 +215,10 @@ class ValidationDetail(BaseModel):
     """pydantic 이 거절할 때 `detail[]` 에 실리는 줄.
 
     **같은 칸에 두 벌의 이름 공간이 산다.** `missing` · `extra_forbidden` 은
-    pydantic 이 정한 이름이고 위의 `Refusal` 은 우리가 정한 이름인데, 둘 다
-    `type` 으로 나간다. 그래서 `type` 을 하나의 닫힌 열거로 적으면 **거짓**이
-    된다 — 두 모양을 함께 적어 부르는 쪽이 어느 쪽인지 가릴 수 있게 한다.
+    pydantic 이 정한 이름이고 업무 규칙의 이름(경로마다 열거 — 짝으로 실리는
+    `…RefusalDetail` 이 든다)은 우리가 정한 이름인데, 둘 다 `type` 으로 나간다.
+    그래서 `type` 을 하나의 닫힌 열거로 적으면 **거짓**이 된다 — 두 모양을 함께
+    적어 부르는 쪽이 어느 쪽인지 가릴 수 있게 한다.
     """
 
     loc: list[str | int]
@@ -191,8 +229,8 @@ class ValidationDetail(BaseModel):
 class Refused(BaseModel):
     """검사 422 의 본문.
 
-    **두 경로가 한 모양이다**(NC-75). 다른 것은 `type` 의 이름 공간뿐이고,
-    그것을 위의 두 모델이 스펙에 적는다(감사 ⑫ NC-134).
+    **업무 규칙의 거절과 pydantic 의 거절이 한 모양이다**(NC-75). 다른 것은
+    `type` 의 이름 공간뿐이고, 그것을 위의 두 모델이 스펙에 적는다(감사 ⑫ NC-134).
     """
 
     detail: list[RefusalDetail | ValidationDetail]
@@ -212,10 +250,25 @@ class ReturnRefused(BaseModel):
     detail: list[ReturnRefusalDetail | ValidationDetail]
 
 
+class RetestRefusalDetail(BaseModel):
+    """재검사의 업무 규칙이 거절할 때 `detail[]` 에 실리는 줄 — 이름은 `RetestRefusal` 이
+    든다."""
+
+    loc: list[str]
+    msg: str
+    type: RetestRefusal
+
+
+class RetestRefused(BaseModel):
+    """재검사 422 의 본문 — `Refused` 와 **같은 모양이고 업무 이름의 열거만 다르다.**"""
+
+    detail: list[RetestRefusalDetail | ValidationDetail]
+
+
 class Transport(StrEnum):
     """라우트 **밖에서** 나는 거절의 이름 — `detail[].type` 의 셋째 이름 공간.
 
-    `Refusal` 은 업무 규칙이 거절할 때의 이름이고 이쪽은 **요청이 라우트에
+    업무 규칙의 이름(경로마다 열거)은 업무 규칙이 거절할 때의 것이고 이쪽은 **요청이 라우트에
     닿기 전이나 처리가 터진 뒤**의 이름이다. 둘을 한 열거로 합치지 않는 것은
     **층이 다르기 때문**이다 — 업무 이름은 관문 2 가 늘리고 이쪽은 늘지 않는다.
 

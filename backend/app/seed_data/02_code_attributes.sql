@@ -15,7 +15,7 @@ INSERT INTO txn_type_attributes (group_code, code, total_effect, paired_code, so
   ('TXN_TYPE', '판매출고',     '감소',   NULL, '출하 실적'),
   ('TXN_TYPE', '재고구분대체', '불변',   NULL, '양불이동'),
   ('TXN_TYPE', '조정',         '양방향', NULL, '재고조정'),
-  ('TXN_TYPE', '폐기출고',     '감소',   NULL, '재작업 불가 · OQC 불합격');
+  ('TXN_TYPE', '폐기출고',     '감소',   NULL, '재작업 불가 · OQC 불합격 · 재검사 불합격');
 
 -- 짝은 **양쪽에서** 서로를 가리켜야 한다. 위에서 한 방향만 적은 것은 넣는
 -- 순서 때문이다 — 가리킬 줄이 아직 없으면 외래키가 막는다.

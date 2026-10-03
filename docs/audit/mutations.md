@@ -1170,3 +1170,58 @@ PostgreSQL 16)도 초록이다(392 passed).
 | NC | 무엇을 어긋냈나 | 빨개진 검사 |
 |---|---|---|
 | — | 두 라우트가 `refused.message` 대신 상수를 싣게 했다 | `test_something_we_cannot_judge_comes_back_named` · `test_a_business_refusal_names_itself_in_the_same_shape` |
+
+## 3단계 조각 3 — 재검사 스키마 (`1de458b`)
+
+트리거와 CHECK 를 하나씩 어긋낸 뒤 `tests/test_retest.py` 를, 내릴 때의 가드는 `tests/test_migrations.py -k retest` 를
+돌렸다. 어긋냄 없이 돌린 대조군과 같은 트리의 `pytest` 전체(실제 PostgreSQL 16)는 초록이다. 마지막 줄은 어긋냄이 아니라
+처음 쓴 CHECK 그대로이고, 그 검사가 그 식에서 먼저 빨갛게 나와 식을 고쳤다.
+
+| NC | 무엇을 어긋냈나 | 빨개진 검사 |
+|---|---|---|
+| — | 재검사 트리거에서 로트 잠금(`FOR NO KEY UPDATE`)을 뺐다 | `test_two_retests_at_once_do_not_both_find_the_lot_expired` · `test_a_retest_behind_a_failure_finds_the_lot_disposed` |
+| — | 재검사 트리거를 `AFTER INSERT` 로 걸었다 | `test_a_passed_retest_renews_the_expiry_on_its_own_row` 를 비롯해 합격 재검사를 넣는 검사 전부 — 방금 넣은 갱신 만료일이 「가장 최근」으로 잡힌다 |
+| — | 앞선 불합격 재검사를 묻지 않게 했다 | `test_a_lot_that_failed_its_retest_is_not_retested_again` · `test_a_failure_still_waiting_for_its_disposal_blocks_a_pass` · `test_a_retest_behind_a_failure_finds_the_lot_disposed` |
+| — | 만료일이 NULL 인 분기를 껐다 | `test_a_lot_without_an_expiry_is_not_retested` |
+| — | 만료의 경계를 `>=` 에서 `>` 로 바꿨다(만료일 당일을 만료로 셌다) | `test_a_lot_that_has_not_expired_is_not_retested` 의 `on-the-expiry-day` |
+| — | 잔량 0 의 거절을 껐다 | `test_a_lot_with_nothing_left_is_not_retested` |
+| — | 앞선 재검사보다 이른 판정의 거절을 껐다 | `test_a_retest_does_not_slip_in_before_an_earlier_one` |
+| — | 원장 트리거에서 「폐기 줄은 잔량 전부」를 껐다 | `test_a_disposal_takes_the_whole_balance` |
+| — | 단계가 바뀌는 것의 거절을 껐다 | `test_an_inspection_keeps_the_stage_it_came_in_with` |
+| — | 재검사 줄을 고치는 것의 거절을 껐다 | `test_a_retest_is_never_rewritten` 셋 |
+| — | 재검사 줄을 지우는 것의 거절을 껐다 | `test_a_retest_is_never_erased` |
+| — | 로트 만료일의 고정을 껐다 | `test_a_lots_expiry_stays_as_labelled` 셋 |
+| — | 떨어진 재검사의 폐기 줄을 커밋 때 묻지 않게 했다 | `test_a_failed_retest_cannot_stand_without_its_disposal` |
+| — | 폐기 줄의 판정 CHECK 를 한 식(`(id IS NULL AND result IS NULL) OR (id IS NOT NULL AND result = '불합격')`)으로 썼다 — 처음 쓴 모양이다 | `test_a_disposal_carries_the_failure_it_follows` — 판정이 빌 때 `NULL = '불합격'` 이 NULL 이라 CHECK 가 그 줄을 받았다 |
+| — | 내릴 때 세기 전의 `LOCK TABLE inspections` 를 뺐다 | `test_downgrade_does_not_miss_a_retest_still_being_written` |
+| — | 내릴 때의 재검사 수 가드를 껐다 | `test_downgrade_counts_the_retests_that_would_vanish` · `test_downgrade_does_not_miss_a_retest_still_being_written` |
+
+## 3단계 조각 4 — 재검사 쓰기 경로 (`330e335`)
+
+쓰기 경로(`app/services/retests.py`)의 지킴을 하나씩 어긋낸 뒤 `tests/test_retest_path.py` · `tests/test_retest_api.py` 를
+돌렸다. 어긋냄 없이 돌린 대조군과 같은 트리의 `pytest` 전체(실제 PostgreSQL 16)는 초록이다. 잰 트리와 이 커밋은 테스트
+독스트링 한 줄의 줄바꿈만 다르다.
+
+| NC | 무엇을 어긋냈나 | 빨개진 검사 |
+|---|---|---|
+| — | 로트 줄의 잠금(`FOR NO KEY UPDATE`)을 뺐다 | `test_two_retests_at_once_the_second_is_named` 둘 — 둘째가 이름 대신 트리거의 거절을 받는다 |
+| — | 만료의 경계를 `>=` 에서 `>` 로 바꿨다 | `test_a_lot_that_expires_today_is_still_in_date` · `test_the_write_path_and_the_trigger_draw_the_same_line` 의 `expires-today` · `test_a_business_refusal_names_itself_in_the_same_shape`(API) |
+| — | 앞선 불합격 재검사를 묻지 않게 했다 | `test_a_lot_that_failed_is_not_retested_again` · `test_two_retests_at_once_the_second_is_named` 의 `behind-a-failure` |
+| — | 설정기간이 없을 때의 거절을 껐다 | `test_a_pass_without_a_shelf_life_is_named` |
+| — | 새 만료일을 판정일이 아니라 옛 만료일에서 셌다 | `test_a_pass_renews_the_expiry_from_the_day_it_was_judged` · `test_a_pass_comes_back_with_its_new_expiry` |
+| — | 폐기 줄의 양을 잔량이 아니라 로트 수량으로 냈다 | `test_a_failure_throws_away_everything_left` · `test_a_failure_whose_balance_does_not_add_up_in_binary_still_empties_the_lot` |
+| — | 잔량을 `numeric` 이 아니라 `double` 로 셌다 | `test_a_failure_whose_balance_does_not_add_up_in_binary_still_empties_the_lot` — 처음 고른 수(33.3 · 0.1)에서는 초록이라 수를 33.3 · 66.6 으로 바꿔 다시 쟀다 |
+| — | 재지 않는 재검사의 거절을 껐다 | `test_nothing_to_measure_again_is_named` |
+| — | 경시변화가 아닌 항목의 거절을 껐다 | `test_measurements_that_do_not_fit_the_retest_are_named` 의 `not-time-variant` |
+| — | 기준을 경시변화로 거르지 않았다 | `test_retest_path.py` · `test_retest_api.py` 의 검사 스물넷 |
+| — | 잔량 0 의 거절을 껐다 | `test_a_lot_with_nothing_left_is_named` |
+| — | 만료일 없음의 거절을 껐다 | `test_a_lot_without_an_expiry_is_named` |
+
+## 3단계 조각 4 — 반품이 재검사를 가리킬 때의 이름 (`5f0a50e`, 감사 ㊴)
+
+반품 쓰기 경로(`app/services/returns.py`)가 재검사의 id 를 `inspection_is_not_incoming` 으로 거절하는 분기를
+어긋낸 뒤 `tests/test_retest_path.py` 를 돌렸다. 어긋냄 없이 돌린 대조군은 초록이다.
+
+| NC | 무엇을 어긋냈나 | 빨개진 검사 |
+|---|---|---|
+| — | 단계를 묻는 분기를 껐다(`if False:`) | `test_the_return_path_names_a_retest_it_cannot_take` — 문서의 외래키(`fk_purchase_return_inspection_stage`)가 이름 대신 막는다 |
