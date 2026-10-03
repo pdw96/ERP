@@ -353,3 +353,17 @@ def test_a_new_enum_value_in_the_request_is_a_reason_for_a_new_name() -> None:
 
     assert compat.judge(old, new, declared("strict")) == []
     assert compat.judge(old, new, declared("plain")) != []
+
+
+@pytest.mark.parametrize(("bound", "moves"), [(30, "1.1"), (80, "2.0")])
+def test_an_answer_bound_moves_the_other_way(bound: int, moves: str) -> None:
+    """**응답의 경계는 요청과 거꾸로 센다** — 조여지면 오던 것 안에서만 오고(넓히는 변경),
+    느슨해지면 부르는 쪽이 받아 본 적 없는 값이 온다(깨는 변경)."""
+    old = _closed()
+    _schema(old, "LotOut")["properties"]["lot_number"]["maxLength"] = 50
+    new = copy.deepcopy(old)
+    _schema(new, "LotOut")["properties"]["lot_number"]["maxLength"] = bound
+    new["info"]["version"] = "1.1" if moves == "2.0" else "1.0"
+    assert compat.judge(old, new, {}) != []
+    new["info"]["version"] = moves
+    assert compat.judge(old, new, {}) == []

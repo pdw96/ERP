@@ -378,21 +378,21 @@ def judge(
                 if why:
                     problems.append(f"{where} 을 넓히는 변경으로 선언했는데 {why}")
             widening.append(Change("widening", where, "선언 — 옛 요청 스키마 밖에만 나간다"))
-    shown = after[0], after[1]
+    moved = f"{before[0]}.{before[1]} → {after[0]}.{after[1]}"
     if breaking and after[0] <= before[0]:
         problems.append(
-            f"깨는 변경이 있는데 앞자리가 오르지 않았다({before} → {shown}):\n"
+            f"깨는 변경이 있는데 앞자리가 오르지 않았다({moved}):\n"
             + "\n".join(f"  - {c.where}: {c.what}" for c in breaking)
         )
     elif not breaking and widening and after <= before:
         problems.append(
-            f"넓히는 변경이 있는데 판이 오르지 않았다({before} → {shown}):\n"
+            f"넓히는 변경이 있는데 판이 오르지 않았다({moved}):\n"
             + "\n".join(f"  - {c.where}: {c.what}" for c in widening)
         )
     elif not breaking and not widening and after != before:
-        problems.append(f"계약이 그대로인데 판이 움직였다({before} → {shown})")
+        problems.append(f"계약이 그대로인데 판이 움직였다({moved})")
     elif after < before:
-        problems.append(f"판이 뒤로 갔다({before} → {shown})")
+        problems.append(f"판이 뒤로 갔다({moved})")
     return problems
 
 
