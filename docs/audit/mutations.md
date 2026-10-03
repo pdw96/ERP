@@ -1379,3 +1379,13 @@ PostgreSQL 16)도 초록이다(392 passed).
 | — | 헤더 인자를 받았다 | `test_a_shape_the_judgment_does_not_know_is_refused` 의 `a-header-input` |
 | — | 같은 경로 · 이름의 선언 둘을 받았다 | `test_two_declarations_of_one_name_are_refused` |
 | — | 배열을 근거의 값으로 받았다 | `test_a_reason_value_is_a_scalar` |
+
+## 3단계 읽는 조각 B2 — 처음 서는 이름 목록 · anyOf 옆 제약 (`f6dde51`, PR #84 Codex 리뷰 5 라운드)
+
+`app/api/compat.py` 의 고침을 하나씩 되돌린 뒤 `tests/test_contract_judgment.py` 를 돌렸다. 어긋냄 없이 돌린 대조군과 같은 트리의 `pytest` 전체(실제 PostgreSQL 16)는 초록이다. 3 라운드의 「없던 `anyOf`」 검사는 `anyOf` 옆 제약을 거절하게 되며 제약이 없던 스키마 위로 옮겼고, 같은 어긋냄으로 다시 쟀다.
+
+| NC | 무엇을 어긋냈나 | 빨개진 검사 |
+|---|---|---|
+| — | 처음 서는 `x-known-values` 를 통째로 깨는 변경으로 셌다 | `test_the_first_known_name_is_an_addition_like_any_other` |
+| — | `anyOf` 옆의 제약을 받았다 | `test_a_shape_the_judgment_does_not_know_is_refused` 의 `a-constraint-beside-any-of` |
+| — | 없던 `anyOf` 를 갈래 0 으로 읽었다 | `test_an_any_of_that_was_not_there_was_no_constraint` |
