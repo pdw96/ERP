@@ -6,8 +6,9 @@
 만든다 · 원장에 적는다」를 셋으로 나누면 **둘까지만 성공한 상태**가 생기고, 그것이
 원칙 ⑦ 이 없애려는 것이다.
 
-**읽는 엔드포인트가 없다.** 화면이 없으므로 부르는 쪽도 없고, 부르는 쪽이 없는
-엔드포인트는 빈 기준정보와 같다.
+**읽는 엔드포인트는 로트 둘이다**(3단계 읽는 조각) — 로트 하나의 지금(`GET /lots/{lot_id}`)과
+로트 목록(`GET /lots`, 재검사를 기다리는 것만 거를 수 있다). 화면 자리에 서는 것이라 그 이상은
+두지 않는다 — 부르는 쪽이 없는 엔드포인트는 빈 기준정보와 같다.
 """
 
 import logging
@@ -18,7 +19,7 @@ from contextlib import asynccontextmanager
 from functools import lru_cache
 from typing import Annotated, Any
 
-from fastapi import Depends, FastAPI, Request, status
+from fastapi import Depends, FastAPI, Path, Query, Request, status
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse, Response
 from fastapi.utils import is_body_allowed_for_status_code
@@ -26,9 +27,15 @@ from sqlalchemy.exc import DBAPIError
 from sqlalchemy.orm import Session, sessionmaker
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
+from app.api import cursor as cursors
 from app.api.schemas import (
+    _INT4_MAX,
     InspectionIn,
     InspectionOut,
+    LotOut,
+    LotPageOut,
+    LotRefusal,
+    LotRefused,
     PurchaseReturnIn,
     PurchaseReturnOut,
     Refused,
@@ -46,6 +53,7 @@ from app.services.incoming import (
     RefusedInspection,
     receive,
 )
+from app.services.lots import LotView, list_lots, look_up
 from app.services.retests import IncomingRetest, retest
 from app.services.returns import IncomingReturn, RefusedReturn, return_to_supplier
 from app.services.site_clock import assert_the_site_clock_holds
@@ -113,11 +121,13 @@ app = FastAPI(
         " 깨지면 앞자리, 호환되게 넓어지면 뒷자리."
         "\n\n거절의 본문은 어느 경로에서나 `detail[]` 한 모양이다."
         " `detail[].type` 이 기계가 읽는 자리이고 이름 공간이 셋이다 —"
-        " 업무 규칙의 이름(경로마다 자기 열거를 든다 — 검사는 `Refusal`,"
-        " 반품은 `ReturnRefusal`, 재검사는 `RetestRefusal`), 라우트 밖의 `Transport`,"
-        " 그리고 pydantic 이"
-        " 정한 이름(`missing` · `extra_forbidden` 등). 앞의 둘은 이 스펙이"
-        " 열거로 들고, **그 열거에 없는 값은 셋째 무리**다."
+        " 업무 규칙의 이름(경로마다 자기 목록을 든다), 라우트 밖의 이름,"
+        " 그리고 pydantic 이 정한 이름(`missing` · `extra_forbidden` 등)."
+        "\n\n**응답이 내는 이름은 열린 문자열이다** — 업무 거절과 라우트 밖 거절의"
+        " 이름, 판정(`result`) 같은 자리다. 알려진 값은 그 칸의 `x-known-values` 가"
+        " 들고 **늘 수 있다** — 늘어나는 것은 넓히는 변경이다. 모르는 이름을 받으면"
+        " 그 상태 코드의 거절로 읽는다 — 이름을 몰라도 422 는 「업무 규칙이나 검증이"
+        " 받지 않았다」이고, 400 · 404 · 405 · 500 은 라우트 밖의 일이다."
     ),
     version=API_VERSION,
     lifespan=the_site_clock_must_hold,
@@ -656,4 +666,122 @@ def post_retest(
         nonconformity_code=retested.nonconformity_code,
         renewed_expiry_date=retested.renewed_expiry_date,
         ledger_entry_id=retested.ledger_entry_id,
+    )
+
+
+def _read_answers(*, may_miss: bool) -> dict[int | str, dict[str, Any]]:
+    """읽는 라우트가 **실제로 내는 응답**의 선언 — `_answers` 와 같은 까닭으로 한 벌이다.
+
+    쓰는 라우트와 다른 것은 셋이다 — 성공이 200 이고, 본문이 없어 400 이 없으며, 404 가
+    라우트 밖의 일이 아니라 **그 로트가 없다**는 업무의 답일 수 있다(`may_miss`).
+    """
+    answers: dict[int | str, dict[str, Any]] = {
+        status.HTTP_200_OK: {"headers": _REQUEST_ID_SPEC},
+        status.HTTP_405_METHOD_NOT_ALLOWED: {
+            "model": TransportRefused,
+            "headers": _REQUEST_ID_SPEC | _ALLOW_SPEC,
+        },
+        status.HTTP_422_UNPROCESSABLE_CONTENT: {
+            "model": LotRefused,
+            "headers": _REQUEST_ID_SPEC,
+        },
+        status.HTTP_500_INTERNAL_SERVER_ERROR: {
+            "model": TransportRefused,
+            "headers": _REQUEST_ID_SPEC,
+        },
+    }
+    if may_miss:
+        answers[status.HTTP_404_NOT_FOUND] = {"model": LotRefused, "headers": _REQUEST_ID_SPEC}
+    return answers
+
+
+def _lot_out(view: LotView) -> LotOut:
+    return LotOut(
+        lot_id=view.lot_id,
+        lot_number=view.lot_number,
+        item_code=view.item_code,
+        received_quantity=view.received_quantity,
+        balance=view.balance,
+        labelled_expiry_date=view.labelled_expiry_date,
+        current_expiry_date=view.current_expiry_date,
+        awaiting_retest=view.awaiting_retest,
+    )
+
+
+@app.get("/lots/{lot_id}", response_model=LotOut, responses=_read_answers(may_miss=True))
+def get_lot(
+    lot_id: Annotated[int, Path(gt=0, le=_INT4_MAX)],
+    session: Annotated[Session, Depends(session_scope)],
+) -> LotOut | JSONResponse:
+    """로트 하나의 지금 — 잔량 · 라벨의 만료일 · 지금 만료일 · 재검사를 기다리는가.
+
+    `lot_id` 는 검사 응답의 그 값이다. 없으면 404 이고 이름은 `unknown_lot` 이다.
+    """
+    found = look_up(session, lot_id)
+    if found is None:
+        return _refusal(
+            status.HTTP_404_NOT_FOUND,
+            [
+                {
+                    "loc": ["path", "lot_id"],
+                    "msg": f"그런 로트가 없다: {lot_id}",
+                    "type": LotRefusal.UNKNOWN_LOT,
+                }
+            ],
+        )
+    return _lot_out(found)
+
+
+@app.get("/lots", response_model=LotPageOut, responses=_read_answers(may_miss=False))
+def get_lots(
+    session: Annotated[Session, Depends(session_scope)],
+    awaiting_retest: bool = False,
+    limit: Annotated[int, Query(ge=1, le=200)] = 50,
+    cursor: Annotated[str | None, Query(max_length=200)] = None,
+) -> LotPageOut | JSONResponse:
+    """로트 목록 — **대리키 순서로 넘긴다**(ADR 0020).
+
+    `awaiting_retest=true` 면 재검사를 기다리는 로트만 거른다. `limit` 은 1 이상
+    200 이하이고 벗어나면 422 다 — 조용히 줄이면 부르는 쪽은 다 받았다고 믿는다.
+    `next_cursor` 를 다음 요청의 `cursor` 로 그대로 돌려준다. 읽을 수 없는 커서와
+    다른 목록의 커서는 이름으로 거절한다.
+    """
+    after: int | None = None
+    if cursor is not None:
+        try:
+            position = cursors.read(cursor)
+        except cursors.UnreadableCursor:
+            return _refusal(
+                status.HTTP_422_UNPROCESSABLE_CONTENT,
+                [
+                    {
+                        "loc": ["query", "cursor"],
+                        "msg": "이 목록이 내준 커서가 아니다",
+                        "type": LotRefusal.CURSOR_IS_NOT_READABLE,
+                    }
+                ],
+            )
+        if position.awaiting_retest != awaiting_retest:
+            return _refusal(
+                status.HTTP_422_UNPROCESSABLE_CONTENT,
+                [
+                    {
+                        "loc": ["query", "cursor"],
+                        "msg": (
+                            "다른 거름으로 넘기던 커서다 —"
+                            " 처음 요청과 같은 거름으로 이어 읽는다"
+                        ),
+                        "type": LotRefusal.CURSOR_IS_FOR_ANOTHER_LIST,
+                    }
+                ],
+            )
+        after = position.after
+    page = list_lots(session, awaiting_retest=awaiting_retest, after=after, limit=limit)
+    return LotPageOut(
+        lots=[_lot_out(view) for view in page.lots],
+        next_cursor=None
+        if page.last_lot_id is None
+        else cursors.issue(
+            cursors.LotCursor(awaiting_retest=awaiting_retest, after=page.last_lot_id)
+        ),
     )

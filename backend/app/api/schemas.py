@@ -6,9 +6,10 @@
 모르는 자리에서 HTTP 의 사정을 알게 된다.
 """
 
+from collections.abc import Iterable
 from datetime import date
 from enum import StrEnum
-from typing import Annotated
+from typing import Annotated, Any
 
 from pydantic import AfterValidator, BaseModel, ConfigDict, Field
 
@@ -48,6 +49,23 @@ Present = Annotated[str, AfterValidator(_present)]
 # 부르는 쪽은 자기가 보낸 것이 반영됐다고 읽는다. 뒤에 좁히는 것은 그 자체가
 # 파괴적 변경이라, 정할 수 있는 때는 소비자가 붙기 전인 지금뿐이다.
 _ONLY_THE_FIELDS_WE_NAME = ConfigDict(extra="forbid")
+
+
+def known_names(names: Iterable[str]) -> Any:
+    """**응답이 내는 이름은 열린 문자열이다**(ADR 0018).
+
+    닫힌 `enum` 으로 적으면 그 스펙으로 코드를 짓거나 응답을 검증하는 부르는 쪽이
+    새 값을 받는 날 응답 자체를 거부한다 — 그래서 값을 하나 더하는 것이 깨는 변경이
+    된다. 알려진 값의 목록은 `x-known-values` 가 들고, 그 목록은 늘 수 있다.
+    **목록은 여기 다시 적지 않는다** — 부르는 자리가 열거나 `codes` 를 넘긴다.
+    """
+    return Field(
+        json_schema_extra={"x-known-values": list(names)},
+        description=(
+            "열린 문자열이다 — 알려진 값은 `x-known-values` 가 들고 늘 수 있다."
+            " 모르는 값을 받을 자리를 둔다."
+        ),
+    )
 
 
 class MeasurementIn(BaseModel):
@@ -117,7 +135,7 @@ class InspectionOut(BaseModel):
     # **문서화되지 않은 채** 하드코딩해야 하고, 관문 2 가 값을 늘려도 그것이
     # 파괴적 변경으로 취급될 근거가 없다. 목록은 `codes.JUDGMENTS` 한 벌에서
     # 끌어온다 — 여기 다시 적으면 두 벌이 되고, 두 벌은 갈린다.
-    result: str = Field(json_schema_extra={"enum": list(codes.JUDGMENTS)})
+    result: str = known_names(codes.JUDGMENTS)
     nonconformity_code: str | None
     lot_id: int | None
     lot_number: str | None
@@ -188,12 +206,44 @@ class RetestOut(BaseModel):
 
     inspection_id: int
     # 재검사에는 특채가 없다 — 판정은 둘이다. 목록은 `codes` 에서 끌어온다.
-    result: str = Field(
-        json_schema_extra={"enum": [codes.JUDGMENT_PASSED, codes.JUDGMENT_FAILED]}
-    )
+    result: str = known_names([codes.JUDGMENT_PASSED, codes.JUDGMENT_FAILED])
     nonconformity_code: str | None
     renewed_expiry_date: date | None
     ledger_entry_id: int | None
+
+
+class LotOut(BaseModel):
+    """로트 하나의 지금 — **잔량과 지금 만료일은 저장된 값이 아니라 센 값이다.**
+
+    - `received_quantity` — 로트를 만든 입고 수량이다. 잔량이 아니다
+    - `balance` — 원장 줄의 합. 반품 · 폐기가 빠진 지금의 양이다
+    - `labelled_expiry_date` — 라벨에 찍혀 나간 만료일. 고쳐지지 않는다(원칙 ⑦)
+    - `current_expiry_date` — 가장 최근에 합격한 재검사의 갱신 만료일, 없으면 라벨의
+      만료일(ADR 0017). 「오늘」은 현장 시간대가 가른다(ADR 0019)
+    - `awaiting_retest` — 지금 만료일이 현장의 오늘보다 앞서고 잔량이 있는 원자재 로트다.
+      만료일 당일까지는 쓸 수 있다
+    """
+
+    lot_id: int
+    lot_number: str
+    item_code: str
+    received_quantity: float
+    balance: float
+    labelled_expiry_date: date | None
+    current_expiry_date: date | None
+    awaiting_retest: bool
+
+
+class LotPageOut(BaseModel):
+    """로트 목록의 한 쪽(ADR 0020).
+
+    **대리키 순서다.** `next_cursor` 가 비어 있으면 마지막 쪽이다. 약속하는 것은 「넘기는 동안
+    조건을 계속 채운 줄은 겹치지도 빠지지도 않는다」까지다 — 넘기는 사이 조건에 새로 든
+    줄은 처음부터 다시 넘기면 보이고, 조건을 벗어난 줄은 오지 않는다.
+    """
+
+    lots: list[LotOut]
+    next_cursor: str | None
 
 
 # ── 거절의 본문 — **스펙이 그 이름을 든다** ────────────────────────────────
@@ -202,13 +252,13 @@ class RetestOut(BaseModel):
 class RefusalDetail(BaseModel):
     """검사의 업무 규칙이 거절할 때 `detail[]` 에 실리는 줄.
 
-    `type` 이 **기계가 읽는 자리**다. 이름 목록은 `Refusal` 이 들고 여기 다시
-    적지 않는다 — 두 벌이면 갈린다.
+    `type` 이 **기계가 읽는 자리**다. 알려진 이름은 `Refusal` 열거에서 끌어오고
+    여기 다시 적지 않는다 — 두 벌이면 갈린다.
     """
 
     loc: list[str]
     msg: str
-    type: Refusal
+    type: str = known_names(Refusal)
 
 
 class ValidationDetail(BaseModel):
@@ -241,7 +291,7 @@ class ReturnRefusalDetail(BaseModel):
 
     loc: list[str]
     msg: str
-    type: ReturnRefusal
+    type: str = known_names(ReturnRefusal)
 
 
 class ReturnRefused(BaseModel):
@@ -256,7 +306,7 @@ class RetestRefusalDetail(BaseModel):
 
     loc: list[str]
     msg: str
-    type: RetestRefusal
+    type: str = known_names(RetestRefusal)
 
 
 class RetestRefused(BaseModel):
@@ -287,10 +337,32 @@ class TransportDetail(BaseModel):
 
     loc: list[str]
     msg: str
-    type: Transport
+    type: str = known_names(Transport)
 
 
 class TransportRefused(BaseModel):
     """400 · 404 · 405 · 500 의 본문 — 422 와 **같은 모양이고 이름 공간만 다르다**."""
 
     detail: list[TransportDetail]
+
+
+class LotRefusal(StrEnum):
+    """로트를 읽을 때 `detail[].type` 으로 나가는 이름 — **이 경로의 목록이 여기 한 벌이다.**"""
+
+    UNKNOWN_LOT = "unknown_lot"
+    CURSOR_IS_NOT_READABLE = "cursor_is_not_readable"
+    CURSOR_IS_FOR_ANOTHER_LIST = "cursor_is_for_another_list"
+
+
+class LotRefusalDetail(BaseModel):
+    """로트를 읽다 거절할 때 `detail[]` 에 실리는 줄 — 이름은 `LotRefusal` 이 든다."""
+
+    loc: list[str]
+    msg: str
+    type: str = known_names(LotRefusal)
+
+
+class LotRefused(BaseModel):
+    """로트를 읽다 거절한 404 · 422 의 본문 — `Refused` 와 **같은 모양이다.**"""
+
+    detail: list[LotRefusalDetail | ValidationDetail]

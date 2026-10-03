@@ -205,7 +205,9 @@ def test_the_spec_says_which_version_and_which_judgements(client: TestClient) ->
     # 여부가 밖에서 구별되지 않는다 — 이 줄이 없을 때 돌연변이가 통과했다.
     assert spec["info"]["version"] != FastAPI().version
     judged = spec["components"]["schemas"]["InspectionOut"]["properties"]["result"]
-    assert judged["enum"] == list(codes.JUDGMENTS)
+    assert judged["x-known-values"] == list(codes.JUDGMENTS)
+    # **열린 문자열이다**(ADR 0018) — 닫힌 `enum` 이면 값을 더하는 것이 깨는 변경이다.
+    assert "enum" not in judged
 
 
 @pytest.mark.parametrize(
@@ -374,9 +376,9 @@ def test_the_spec_lists_every_refusal_name(client: TestClient) -> None:
     refused = spec["paths"]["/inspections"]["post"]["responses"]["422"]
     assert refused["content"]["application/json"]["schema"]["$ref"].endswith("/Refused")
 
-    assert spec["components"]["schemas"]["Refusal"]["enum"] == [
-        name.value for name in incoming.Refusal
-    ]
+    named = spec["components"]["schemas"]["RefusalDetail"]["properties"]["type"]
+    assert named["x-known-values"] == [name.value for name in incoming.Refusal]
+    assert "enum" not in named
 
 
 @pytest.mark.parametrize("path", ["/inspections", "/purchase-returns", "/retests"])
@@ -444,9 +446,9 @@ def test_the_spec_lists_every_transport_name(client: TestClient) -> None:
     """
     spec = client.get("/openapi.json").json()
 
-    assert spec["components"]["schemas"]["Transport"]["enum"] == [
-        name.value for name in schemas.Transport
-    ]
+    named = spec["components"]["schemas"]["TransportDetail"]["properties"]["type"]
+    assert named["x-known-values"] == [name.value for name in schemas.Transport]
+    assert "enum" not in named
 
 
 def test_the_spec_matches_the_snapshot_in_the_repository() -> None:

@@ -17,7 +17,6 @@ from sqlalchemy import func, select
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session
 
-from app.api import schemas
 from app.api.app import app, session_scope
 from app.core import clock
 from app.db.inspection import Inspection
@@ -159,14 +158,12 @@ def test_the_spec_lists_every_retest_refusal_name(client: TestClient) -> None:
 
     refused = spec["paths"]["/retests"]["post"]["responses"]["422"]
     assert refused["content"]["application/json"]["schema"]["$ref"].endswith("/RetestRefused")
-    assert spec["components"]["schemas"]["RetestRefusal"]["enum"] == [
-        name.value for name in RetestRefusal
-    ]
-    assert schemas.RetestRefusalDetail.model_fields["type"].annotation is RetestRefusal
-    assert spec["components"]["schemas"]["RetestOut"]["properties"]["result"]["enum"] == [
-        "합격",
-        "불합격",
-    ]
+    named = spec["components"]["schemas"]["RetestRefusalDetail"]["properties"]["type"]
+    assert named["x-known-values"] == [name.value for name in RetestRefusal]
+    assert "enum" not in named
+    judged = spec["components"]["schemas"]["RetestOut"]["properties"]["result"]
+    assert judged["x-known-values"] == ["합격", "불합격"]
+    assert "enum" not in judged
 
 
 def test_a_201_means_the_commit_passed_the_deferred_check(engine: Engine) -> None:
