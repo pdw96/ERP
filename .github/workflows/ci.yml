@@ -148,6 +148,7 @@ jobs:
           docker run -d --name erp-boot --network host \
             -e ERP_DATABASE_URL=postgresql+psycopg://erp:erp@localhost:5432/erp_boot \
             -e ERP_SEED_ENABLED=true \
+            -e ERP_SITE_TIMEZONE=Asia/Seoul \
             erp-api:ci uvicorn app.api.app:app --host 127.0.0.1 --port 8000
           for _ in $(seq 60); do
             if curl -fsS http://127.0.0.1:8000/openapi.json >/dev/null 2>&1; then break; fi

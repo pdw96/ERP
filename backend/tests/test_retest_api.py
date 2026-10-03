@@ -9,7 +9,7 @@
 """
 
 from collections.abc import Iterator
-from datetime import date, timedelta
+from datetime import timedelta
 
 import pytest
 from fastapi.testclient import TestClient
@@ -19,6 +19,7 @@ from sqlalchemy.orm import Session
 
 from app.api import schemas
 from app.api.app import app, session_scope
+from app.core import clock
 from app.db.inspection import Inspection
 from app.db.inventory import StockLedgerEntry
 from app.services.retests import RetestRefusal
@@ -66,7 +67,7 @@ def test_a_pass_comes_back_with_its_new_expiry(
         "ledger_entry_id",
     }
     assert body["result"] == "합격"
-    assert body["renewed_expiry_date"] == str(date.today() + timedelta(days=SHELF_LIFE))
+    assert body["renewed_expiry_date"] == str(clock.today() + timedelta(days=SHELF_LIFE))
     assert body["ledger_entry_id"] is None
 
 
@@ -88,7 +89,7 @@ def test_a_business_refusal_names_itself_in_the_same_shape(
     planted: Session,  # noqa: F811
 ) -> None:
     """**업무 거절도 `detail[]` 한 모양이다** — `type` 이 `RetestRefusal` 의 이름이다."""
-    lot = an_expired_lot(planted, expires=date.today())
+    lot = an_expired_lot(planted, expires=clock.today())
     response = client.post("/retests", json=_payload(lot.id))
 
     assert response.status_code == 422, response.text

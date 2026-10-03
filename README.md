@@ -95,6 +95,7 @@ docker compose run --rm migrate
 | `ERP_DATABASE_URL` | 로컬 compose 의 postgres | 앱이 붙는 DB |
 | `ERP_TEST_DATABASE_URL` | `…/erp_test` | 테스트가 붙는 DB |
 | `ERP_SEED_ENABLED` | `false` | 시드 스위치. **운영에서 자동 시드는 사고다** |
+| `ERP_SITE_TIMEZONE` | **없다** | 「오늘」과 「지금」을 가르는 현장 시간대(IANA 이름, 로컬 compose 는 `Asia/Seoul`). 없거나 앞으로 벽시계가 거꾸로 가는 시간대면 앱이 뜨지 않는다(ADR 0019) |
 
 ## 구조
 

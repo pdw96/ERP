@@ -17,7 +17,7 @@ from sqlalchemy.engine import Connection, Engine
 from sqlalchemy.exc import IntegrityError, OperationalError
 from sqlalchemy.orm import Session
 
-from app.core import codes, locks
+from app.core import clock, codes, locks
 from app.db.code_attributes import NonconformityAttribute, NonconformityStageRule
 from app.db.common_codes import CommonCode
 from app.db.inspection import Inspection, InspectionMeasurement
@@ -755,14 +755,14 @@ def test_the_expiry_counts_from_the_day_it_arrived(prepared: Session) -> None:
     item = prepared.query(Item).filter_by(code="RM-01").one()
     item.shelf_life_days = 365
     prepared.flush()
-    arrived = date.today() - timedelta(days=3)
+    arrived = clock.today() - timedelta(days=3)
 
     receive(prepared, _request(received_date=arrived))
 
     lot = prepared.query(Lot).one()
     assert lot.expiry_date == arrived + timedelta(days=365)
     # 판정일에서 세었다면 사흘이 더 붙는다.
-    assert lot.expiry_date != date.today() + timedelta(days=365)
+    assert lot.expiry_date != clock.today() + timedelta(days=365)
 
 
 def test_material_that_already_expired_on_arrival_is_refused(prepared: Session) -> None:
@@ -775,7 +775,7 @@ def test_material_that_already_expired_on_arrival_is_refused(prepared: Session) 
     item = prepared.query(Item).filter_by(code="RM-01").one()
     item.shelf_life_days = 30
     prepared.flush()
-    long_ago = date.today() - timedelta(days=31)
+    long_ago = clock.today() - timedelta(days=31)
 
     with pytest.raises(RefusedInspection, match="이미 지난 날"):
         receive(prepared, _request(received_date=long_ago))
