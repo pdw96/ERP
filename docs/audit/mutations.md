@@ -1288,3 +1288,12 @@ PostgreSQL 16)도 초록이다(392 passed).
 | NC | 무엇을 어긋냈나 | 빨개진 검사 |
 |---|---|---|
 | — | `ValueError` 대신 `JSONDecodeError` · `UnicodeDecodeError` 만 잡았다 | `test_a_cursor_this_list_did_not_issue_is_named` 의 `not-ascii` |
+
+## 3단계 읽는 조각 B1 — 내준 그대로의 커서 (`2bc0f80`, PR #83 Codex 리뷰 2 라운드)
+
+`app/api/cursor.py` 의 두 거절을 하나씩 껐다. 어긋냄 없이 돌린 대조군과 같은 트리의 `pytest` 전체(실제 PostgreSQL 16)는 초록이다.
+
+| NC | 무엇을 어긋냈나 | 빨개진 검사 |
+|---|---|---|
+| — | 읽은 커서를 다시 내어 견주지 않았다 | `test_a_cursor_this_list_did_not_issue_is_named` 의 `a-stray-dollar` · `a-stray-dot` · `not-as-issued` — 끼운 글자가 하나일 때는 패딩이 어긋나 우연히 거절됐다. 넷을 끼워 디코더가 받는 모양으로 다시 쟀다 |
+| — | id 의 위 끝(`integer`)을 묻지 않았다 | `test_a_cursor_this_list_did_not_issue_is_named` 의 `beyond-integer` |
