@@ -23,28 +23,34 @@ DECLARATIONS = _REPO / "docs" / "openapi-declarations.json"
 
 # **기준을 고르는 것은 CI 다** — `ci.yml` 의 「계약의 기준」 스텝이 PR 에서는 들어갈 브랜치의
 # 지금 끝을, `main` 푸시에서는 그 푸시 앞의 끝(`github.event.before`)을 받아 이 변수에 싣는다.
-# 로컬에서는 `origin/main` 이 기본이다 — 오래 받지 않았으면 낡은 기준과 견준다.
+# 로컬에서 변수가 없으면 `origin/main`, 그것도 없으면(원격 이름이 다른 체크아웃) 로컬
+# `main` 을 쓴다 — 오래 받지 않았으면 낡은 기준과 견준다. git 저장소가 아닌 소스 묶음에서는
+# 기준이 없으므로 실패한다(PR #84 Codex 리뷰).
 _BASELINE = "ERP_CONTRACT_BASELINE"
+_LOCAL_BASELINES = ("origin/main", "main")
 
 
 def _baseline() -> dict[str, Any]:
     """**들어갈 자리의 계약** — 읽을 수 없으면 건너뛰지 않고 실패한다(ADR 0018)."""
-    revision = os.environ.get(_BASELINE, "origin/main")
+    given = os.environ.get(_BASELINE)
     snapshot = spec.SNAPSHOT.relative_to(_REPO).as_posix()
-    shown = subprocess.run(
-        ["git", "show", f"{revision}:{snapshot}"],
-        cwd=_REPO,
-        capture_output=True,
-        text=True,
-        check=False,
-    )
-    if shown.returncode != 0:
-        pytest.fail(
-            f"기준 계약({revision}:{snapshot})을 읽을 수 없다 — `{_BASELINE}` 에 git 리비전을"
-            f" 주거나 그 리비전을 받아 둔다: {shown.stderr.strip()}"
+    tried: list[str] = []
+    for revision in (given,) if given else _LOCAL_BASELINES:
+        shown = subprocess.run(
+            ["git", "show", f"{revision}:{snapshot}"],
+            cwd=_REPO,
+            capture_output=True,
+            text=True,
+            check=False,
         )
-    loaded: dict[str, Any] = json.loads(shown.stdout)
-    return loaded
+        if shown.returncode == 0:
+            loaded: dict[str, Any] = json.loads(shown.stdout)
+            return loaded
+        tried.append(f"{revision}: {shown.stderr.strip()}")
+    pytest.fail(
+        f"기준 계약({snapshot})을 읽을 수 없다 — `{_BASELINE}` 에 이 변경이 들어갈 자리의 git"
+        f" 리비전을 주거나 그 리비전을 받아 둔다:\n" + "\n".join(tried)
+    )
 
 
 def _declarations() -> dict[str, Any]:
@@ -86,9 +92,14 @@ def test_the_version_moves_as_far_as_the_contract_moved() -> None:
     - 상태 코드가 서거나 사라진다, 응답 본문의 미디어 타입이 서거나 사라진다
     - 그 밖의 키워드(`type` · `format` · `pattern` · `default` ·
       `additionalProperties` …)가 바뀐다, 스펙 형식의 판(`openapi`)이 바뀐다
+    - 위에서 가르지 않는 칸이 바뀐다 — `operationId`, 그 경로에 실제로 걸리는 `security`
+      (경로에 없으면 스펙 머리의 것), 인자의 `style`, 이름으로 불리는 컴포넌트
+      (`securitySchemes` 등) 같은 것이다. 이 칸들은 글만 걷고 통째로 견준다
 
     글(`description` · `title` · `summary` · 예시)이 바뀌는 것은 어느 쪽도 아니다.
-    `$ref` 는 풀어서 견주므로 컴포넌트의 이름만 바뀌는 것도 어느 쪽도 아니다.
+    `$ref` 는 풀어서 견주므로 컴포넌트의 이름만 바뀌는 것도 어느 쪽도 아니다 — `$ref`
+    옆에 둔 제약은 풀린 스키마에 합쳐 견준다. 경로 머리의 인자는 그 경로의 메서드마다
+    걸린 것으로 견준다.
 
     **기존 경로의 응답에 이름이 늘면 저자가 가른다** — 판을 올려도, 이름을 바꾸느라
     앞자리를 올려도 그렇다. `docs/openapi-declarations.json` 의 새 판 키 아래에 그 경로와
@@ -217,6 +228,30 @@ def _renamed(spec_: dict[str, Any]) -> None:
     detail["x-known-values"][0] = "cursor_cannot_be_read"
 
 
+def _security(spec_: dict[str, Any]) -> None:
+    spec_["components"]["securitySchemes"] = {"bearer": {"type": "http", "scheme": "bearer"}}
+    spec_["security"] = [{"bearer": []}]
+
+
+def _security_on_one_path(spec_: dict[str, Any]) -> None:
+    _lots(spec_)["security"] = [{"bearer": []}]
+
+
+def _renamed_operation(spec_: dict[str, Any]) -> None:
+    _lots(spec_)["operationId"] = "list_every_lot"
+
+
+def _bound_beside_a_ref(spec_: dict[str, Any]) -> None:
+    answer = _lots(spec_)["responses"]["200"]["content"]["application/json"]["schema"]
+    answer["maxProperties"] = 5
+
+
+def _required_on_the_path(spec_: dict[str, Any]) -> None:
+    spec_["paths"]["/lots"]["parameters"] = [
+        {"in": "query", "name": "site", "required": True, "schema": {"type": "string"}}
+    ]
+
+
 def _new_name_for_a_new_query(spec_: dict[str, Any]) -> None:
     _new_name(spec_)
     _lots(spec_)["parameters"].append(
@@ -238,6 +273,11 @@ def _new_name_for_a_new_query(spec_: dict[str, Any]) -> None:
         pytest.param(_new_path, "1.0", "1.1", id="a-new-path-widens"),
         pytest.param(_gone_path, "1.1", "2.0", id="a-gone-path-breaks"),
         pytest.param(_new_type, "1.1", "2.0", id="a-new-type-breaks"),
+        pytest.param(_security, "1.1", "2.0", id="security-for-every-path-breaks"),
+        pytest.param(_security_on_one_path, "1.1", "2.0", id="security-on-a-path-breaks"),
+        pytest.param(_renamed_operation, "1.1", "2.0", id="a-renamed-operation-breaks"),
+        pytest.param(_bound_beside_a_ref, "1.0", "1.1", id="a-bound-beside-a-ref-is-seen"),
+        pytest.param(_required_on_the_path, "1.1", "2.0", id="a-required-path-input-breaks"),
     ],
 )
 def test_the_judgment_asks_for_as_far_as_the_contract_moved(

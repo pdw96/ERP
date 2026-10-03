@@ -33,6 +33,10 @@ _UPPER = frozenset({"maximum", "exclusiveMaximum", "maxLength", "maxItems", "max
 _LOWER = frozenset({"minimum", "exclusiveMinimum", "minLength", "minItems", "minProperties"})
 
 _BRANCHES = ("anyOf", "oneOf")
+# `$ref` 로 풀려 경로 안에서 견주는 컴포넌트 — 쓰이지 않는 것은 계약이 아니다
+_RESOLVED_COMPONENTS = frozenset(
+    {"schemas", "parameters", "responses", "requestBodies", "headers", "examples"}
+)
 _METHODS = ("get", "put", "post", "delete", "options", "head", "patch", "trace")
 _VERSION = re.compile(r"\A(\d+)\.(\d+)\Z")
 _MISSING: Any = object()
@@ -71,6 +75,16 @@ def compare(old: Mapping[str, Any], new: Mapping[str, Any]) -> Diff:
     diff = Diff()
     if old.get("openapi") != new.get("openapi"):
         diff.changes.append(Change("breaking", "openapi", "스펙 형식의 판이 바뀌었다"))
+    # **아는 칸만 견주면 모르는 칸의 변화가 빠져나간다**(PR #84 Codex 리뷰 — `security` ·
+    # `operationId`). 따로 가르지 않는 칸은 글만 걷고 통째로 견주어, 바뀌면 깨는 변경으로 센다
+    before_rest, after_rest = _Plain(old).top(), _Plain(new).top()
+    if before_rest != after_rest:
+        moved = sorted(
+            k
+            for k in set(before_rest) | set(after_rest)
+            if before_rest.get(k) != after_rest.get(k)
+        )
+        diff.changes.append(Change("breaking", "스펙", f"{moved} 이 바뀌었다"))
     old_paths, new_paths = old.get("paths", {}), new.get("paths", {})
     for path in sorted(set(old_paths) | set(new_paths)):
         for method in _METHODS:
@@ -87,37 +101,46 @@ def compare(old: Mapping[str, Any], new: Mapping[str, Any]) -> Diff:
 
 
 def operation(spec: Mapping[str, Any], key: str) -> dict[str, Any] | None:
-    """`"GET /lots"` 의 요청과 응답을 `$ref` 를 풀고 글을 걷어 낸 모양으로 돌려준다."""
+    """`"GET /lots"` 의 요청과 응답을 `$ref` 를 풀고 글을 걷어 낸 모양으로 돌려준다.
+
+    요청 인자 · 본문 · 응답은 칸마다 가르고, **그 밖의 칸은 `rest` 에 통째로 담는다** —
+    `operationId` · 실제로 걸리는 `security`(경로에 없으면 스펙 머리의 것) · 인자의 `style`
+    같은 것이다. `rest` 가 바뀌면 깨는 변경이다.
+    """
     method, _, path = key.partition(" ")
-    raw = spec.get("paths", {}).get(path, {}).get(method.lower())
+    item = spec.get("paths", {}).get(path, {})
+    raw = item.get(method.lower())
     if raw is None:
         return None
     plain = _Plain(spec)
-    body = raw.get("requestBody")
+    # 경로 머리의 인자는 그 경로의 모든 메서드에 걸리고, 메서드의 같은 인자가 덮는다
+    parameters = {}
+    for p in [*item.get("parameters", []), *raw.get("parameters", [])]:
+        p = plain.node(p)
+        parameters[(p["in"], p["name"])] = {
+            "required": bool(p.get("required", False)),
+            "schema": plain.schema(p.get("schema", {})),
+            "rest": plain.rest(p, {"in", "name", "required", "schema"}),
+        }
+    body = None if raw.get("requestBody") is None else plain.node(raw["requestBody"])
+    rest = plain.rest(raw, {"parameters", "requestBody", "responses", "security"})
+    effective = {"security": raw.get("security", spec.get("security"))}
+    rest["security"] = plain.rest(effective, set())["security"]
+    rest["path"] = plain.rest(item, {*_METHODS, "parameters"})
     return {
-        "parameters": {
-            (p["in"], p["name"]): {
-                "required": bool(p.get("required", False)),
-                "schema": plain.schema(p.get("schema", {})),
-            }
-            for p in map(plain.node, raw.get("parameters", []))
-        },
+        "parameters": parameters,
         "body": None
         if body is None
         else {
-            "required": bool(plain.node(body).get("required", False)),
-            "content": plain.content(plain.node(body).get("content", {})),
+            "required": bool(body.get("required", False)),
+            "content": plain.content(body.get("content", {})),
+            "rest": plain.rest(body, {"required", "content"}),
         },
         "responses": {
-            status: {
-                "headers": {
-                    name: plain.schema(plain.node(header).get("schema", {}))
-                    for name, header in plain.node(answer).get("headers", {}).items()
-                },
-                "content": plain.content(plain.node(answer).get("content", {})),
-            }
+            status: plain.answer(plain.node(answer))
             for status, answer in raw.get("responses", {}).items()
         },
+        "rest": rest,
     }
 
 
@@ -134,16 +157,73 @@ class _Plain:
         return value
 
     def content(self, content: Mapping[str, Any]) -> dict[str, Any]:
+        """미디어 타입마다 그 스키마 — 스키마 밖의 칸(`encoding` 등)은 `rest` 의 몫이다."""
         return {
             media: self.schema(self.node(body).get("schema", {}))
             for media, body in content.items()
         }
 
+    def answer(self, answer: Mapping[str, Any]) -> dict[str, Any]:
+        headers = {
+            name: self.node(header) for name, header in answer.get("headers", {}).items()
+        }
+        return {
+            "headers": {name: self.schema(h.get("schema", {})) for name, h in headers.items()},
+            "content": self.content(answer.get("content", {})),
+            "rest": {
+                "answer": self.rest(answer, {"headers", "content"}),
+                "headers": {name: self.rest(h, {"schema"}) for name, h in headers.items()},
+                "content": {
+                    media: self.rest(self.node(body), {"schema"})
+                    for media, body in answer.get("content", {}).items()
+                },
+            },
+        }
+
+    def top(self) -> dict[str, Any]:
+        """경로 밖에서 계약에 닿는 칸 — 스펙 머리의 `security` 는 경로마다 `rest` 로 간다.
+
+        컴포넌트 가운데 `$ref` 로 풀려 경로 안에서 견주는 것은 뺀다. 남는 것은 `$ref` 가
+        아니라 이름으로 불리는 것들(`securitySchemes` 등)이다.
+        """
+        components = {
+            k: v
+            for k, v in self._spec.get("components", {}).items()
+            if k not in _RESOLVED_COMPONENTS
+        }
+        rest = self.rest(self._spec, {"openapi", "info", "paths", "components", "security"})
+        rest["components"] = self.rest(components, set())
+        return rest
+
+    def rest(self, value: Mapping[str, Any], handled: set[str]) -> dict[str, Any]:
+        """따로 가르지 않는 칸 — `$ref` 를 풀고 글을 걷어 통째로 견줄 모양으로."""
+        stripped: dict[str, Any] = self._strip(
+            {k: v for k, v in value.items() if k not in handled}, ()
+        )
+        return stripped
+
+    def _strip(self, value: Any, seen: tuple[str, ...]) -> Any:
+        if isinstance(value, dict):
+            if "$ref" in value and value["$ref"] not in seen:
+                return self._strip(self._look_up(value["$ref"]), (*seen, value["$ref"]))
+            return {k: self._strip(v, seen) for k, v in value.items() if k not in _PROSE}
+        if isinstance(value, list):
+            return [self._strip(v, seen) for v in value]
+        return value
+
     def schema(self, value: Any, seen: tuple[str, ...] = ()) -> Any:
         if isinstance(value, dict) and "$ref" in value:
             if value["$ref"] in seen:  # 제 자신을 가리키는 스키마 — 이름으로 남긴다
                 return {"$ref": value["$ref"]}
-            return self.schema(self._look_up(value["$ref"]), (*seen, value["$ref"]))
+            resolved = self.schema(self._look_up(value["$ref"]), (*seen, value["$ref"]))
+            # **3.1 은 `$ref` 옆에 제약을 둘 수 있다**(PR #84 Codex 리뷰) — 버리면 그 제약의
+            # 변화가 보이지 않는다. 겹치는 키가 없으면 합치고, 있으면 둘 다 걸리게 둔다
+            siblings = self.schema({k: v for k, v in value.items() if k != "$ref"}, seen)
+            if not siblings:
+                return resolved
+            if isinstance(resolved, dict) and not set(resolved) & set(siblings):
+                return {**resolved, **siblings}
+            return {"allOf": [resolved, siblings]}
         if not isinstance(value, dict):
             return value
         plain: dict[str, Any] = {}
@@ -188,7 +268,9 @@ class _Operation:
             else:
                 self._required(before["required"], after["required"], label)
                 self._schema(before["schema"], after["schema"], "request", label)
+                self._rest(before["rest"], after["rest"], label)
         self._body(old["body"], new["body"])
+        self._rest(old["rest"], new["rest"], "경로")
         old_answers, new_answers = old["responses"], new["responses"]
         for status in sorted(set(old_answers) | set(new_answers)):
             label = f"응답 {status}"
@@ -201,6 +283,11 @@ class _Operation:
             headers, content = f"{label} 헤더", f"{label} 본문"
             self._map(before["headers"], after["headers"], "response", headers, "widening")
             self._map(before["content"], after["content"], "response", content, "breaking")
+            self._rest(before["rest"]["answer"], after["rest"]["answer"], label)
+            for part in ("headers", "content"):
+                old_rest, new_rest = before["rest"][part], after["rest"][part]
+                for name in sorted(set(old_rest) & set(new_rest)):
+                    self._rest(old_rest[name], new_rest[name], f"{label} `{name}`")
 
     def _body(self, old: Any, new: Any) -> None:
         if old is None and new is None:
@@ -213,6 +300,14 @@ class _Operation:
             return
         self._required(old["required"], new["required"], "요청 본문")
         self._map(old["content"], new["content"], "request", "요청 본문", "widening")
+        self._rest(old["rest"], new["rest"], "요청 본문")
+
+    def _rest(self, old: Mapping[str, Any], new: Mapping[str, Any], where: str) -> None:
+        """따로 가르지 않는 칸 — 무엇이 바뀌든 깨는 변경으로 센다."""
+        for key in sorted(set(old) | set(new)):
+            before, after = old.get(key, _MISSING), new.get(key, _MISSING)
+            if before != after:
+                self._note("breaking", f"{where}.{key}", f"{_show(before)} → {_show(after)}")
 
     def _required(self, old: bool, new: bool, where: str) -> None:
         if old != new:
