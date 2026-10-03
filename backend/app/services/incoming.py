@@ -27,6 +27,7 @@ from sqlalchemy.orm import Session
 
 from app.core import codes, locks
 from app.db.code_attributes import NonconformityAttribute, NonconformityStageRule
+from app.db.common_codes import CommonCode
 from app.db.inspection import Inspection, InspectionMeasurement
 from app.db.inventory import Lot, StockLedgerEntry
 from app.db.master import Item, Partner
@@ -100,6 +101,7 @@ class Refusal(StrEnum):
     ITEM_IS_NOT_MEASURED = "item_is_not_measured"
     LOT_NUMBER_WOULD_NOT_FIT = "lot_number_would_not_fit"
     MATERIAL_IS_ALREADY_EXPIRED = "material_is_already_expired"
+    REASON_IS_NOT_ACTIVE = "reason_is_not_active"
 
 
 @dataclass(frozen=True)
@@ -249,7 +251,17 @@ def must_be_a_reason_a_person_inspects(
     **재검사도 이 길을 지난다** — `standards` 에 그 재검사가 보는 기준(경시변화)만 넘기고,
     `scope` 가 메시지에서 그 기준의 이름을 바꾼다. 거절의 이름은 두 경로에서 같은 값이다
     (ADR 0014).
+
+    **⓪ 꺼진 사유 코드는 새 판정에서 고르지 못한다**(이슈 #73). 공통코드는 지우는 대신 끄고,
+    끈 코드는 옛 기록에서만 읽힌다(`CommonCode` 독스트링) — 규칙 줄이 남아 있다는 것만 물으면
+    꺼진 사유로 새 불합격 · 특채가 선다. 반품 쪽과 같은 이름이다(ADR 0014). 측정값이 고르는
+    사유는 이 함수를 지나지 않는다 — 사람이 적은 사유만 묻는다.
     """
+    reason = session.get(CommonCode, (codes.NC_REASON, reason_code))
+    if reason is not None and not reason.is_active:
+        raise RefusedInspection(
+            Refusal.REASON_IS_NOT_ACTIVE, f"쓰지 않게 된 사유다: {reason_code}"
+        )
     attribute = session.get(NonconformityAttribute, (codes.NC_REASON, reason_code))
     if attribute is None or attribute.measure_kind != codes.COUNTED_KIND:
         raise RefusedInspection(

@@ -40,7 +40,7 @@ from app.services.incoming import Measurement, RefusedInspection
 from app.services.retests import IncomingRetest, Retested, RetestRefusal, retest
 from app.services.returns import RefusedReturn, ReturnRefusal, return_to_supplier
 from tests.factories import add_code, make_item
-from tests.test_return_path import _from_the_lot, plant_return_codes
+from tests.test_return_path import _from_the_lot, _retire, plant_return_codes
 from tests.test_write_path import (
     _FOREIGN_REASON,
     _GRAIN,
@@ -306,6 +306,17 @@ def test_a_counted_failure_a_person_saw_fails_the_lot(planted: Session) -> None:
     )
 
 
+def test_a_retired_reason_a_person_wrote_is_named(planted: Session) -> None:
+    """**꺼진 사유 코드는 새 판정에서 고르지 못한다**(이슈 #73) — 재검사 단계의 규칙 줄이 남아
+    있어도 그렇다. 검사와 같은 함수가 같은 이름으로 막는다."""
+    lot = an_expired_lot(planted)
+    _retire(planted, codes.NC_REASON, _PACKAGE_REASON)
+
+    assert _refused(planted, a_retest(lot.id, nonconformity_code=_PACKAGE_REASON)) == (
+        RetestRefusal.REASON_IS_NOT_ACTIVE
+    )
+
+
 def test_a_failure_stands_even_when_the_item_has_no_shelf_life(planted: Session) -> None:
     """불합격은 새 만료일이 필요 없다 — 설정기간이 없어도 받는다."""
     planted.execute(text("UPDATE items SET shelf_life_days = NULL"))
@@ -530,6 +541,7 @@ def test_the_names_shared_with_the_inspection_path_mean_the_same() -> None:
         incoming.Refusal.REASON_IS_DERIVED_BY_THE_SYSTEM,
         incoming.Refusal.REASON_IS_NOT_INSPECTED_FOR_THIS_MATERIAL,
         incoming.Refusal.REASON_POINTS_AT_A_MEASURED_ITEM,
+        incoming.Refusal.REASON_IS_NOT_ACTIVE,
     }
 
     assert {name.value for name in shared} <= {name.value for name in RetestRefusal}
