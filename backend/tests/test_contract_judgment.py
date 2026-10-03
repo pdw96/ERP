@@ -94,7 +94,8 @@ def test_the_version_moves_as_far_as_the_contract_moved() -> None:
       `additionalProperties` …)가 바뀐다, 스펙 형식의 판(`openapi`)이 바뀐다
     - `operationId` 가 바뀐다 — 부르는 쪽이 스펙에서 지은 메서드의 이름이다
 
-    글(`description` · `title` · `summary` · 예시)이 바뀌는 것은 어느 쪽도 아니다.
+    글(`description` · `title` · `summary`)이 바뀌는 것은 어느 쪽도 아니다. 예시
+    (`example` · `examples`)는 판정이 아는 모양이 아니다 — 쓰는 날 판정부터 넓힌다(ADR 0021).
     `$ref` 는 풀어서 견주므로 컴포넌트의 이름만 바뀌는 것도 어느 쪽도 아니다. 포함 · 배제
     경계(`maximum` · `exclusiveMaximum` 등)는 한 쌍을 실제로 걸리는 끝 하나로 견주고, 값은
     JSON 의 같음으로 견준다(`true` 는 `1` 이 아니다).
@@ -536,3 +537,69 @@ def test_a_boolean_is_not_a_number() -> None:
         assert compat.judge(old, new, {}) != [], version
     new["info"]["version"] = "2.0"
     assert compat.judge(old, new, {}) == []
+
+
+def _branches_on_the_limit(spec_: dict[str, Any]) -> None:
+    _limit(spec_)["schema"]["anyOf"] = [{"maximum": 1}]
+
+
+def test_an_any_of_that_was_not_there_was_no_constraint() -> None:
+    """**없던 `anyOf` 는 갈래 0 이 아니라 제약이 없던 것이다** — 요청에 처음 서면 받는 것이
+    준다(PR #84 Codex 리뷰 3 라운드). 응답에서 다 사라지면 오는 것이 는다."""
+    assert _judged(_branches_on_the_limit, "1.1") != []
+    assert _judged(_branches_on_the_limit, "2.0") == []
+
+    old = _closed()
+    _schema(old, "LotOut")["properties"]["balance"]["anyOf"] = [{"maximum": 1}]
+    new = _closed()
+    new["info"]["version"] = "1.1"
+    assert compat.judge(old, new, {}) != []
+    new["info"]["version"] = "2.0"
+    assert compat.judge(old, new, {}) == []
+
+
+def test_a_header_name_is_the_same_in_any_case() -> None:
+    """**HTTP 의 헤더 이름은 대소문자를 가리지 않는다** — 철자만 바꾸는 것은 계약의 변화가
+    아니다(PR #84 Codex 리뷰 3 라운드)."""
+
+    def lower(spec_: dict[str, Any]) -> None:
+        answer = _lots(spec_)["responses"]["200"]
+        answer["headers"] = {"x-request-id": answer["headers"].pop("X-Request-Id")}
+
+    assert _judged(lower, "1.0") == []
+
+
+def test_a_reason_must_be_a_value_the_new_schema_takes_whole() -> None:
+    """**근거의 값은 새 스키마의 제약을 모두 지나야 한다** — 열거에 들었어도 길이에 걸리면 받지
+    않는 값이라 근거가 못 된다(PR #84 Codex 리뷰 3 라운드)."""
+
+    def a_mode(spec_: dict[str, Any], values: list[str]) -> None:
+        _lots(spec_)["parameters"].append(
+            {
+                "in": "query",
+                "name": "mode",
+                "schema": {"type": "string", "enum": values, "maxLength": 5},
+            }
+        )
+
+    old = _closed()
+    a_mode(old, ["plain"])
+    new = copy.deepcopy(old)
+    _lots(new)["parameters"][-1]["schema"]["enum"] = ["plain", "strict", "fast"]
+    _new_name(new)
+    new["info"]["version"] = "1.1"
+
+    def declared(value: str) -> dict[str, Any]:
+        return {
+            "1.1": [
+                {
+                    "operation": "GET /lots",
+                    "name": "limit_is_for_another_list",
+                    "change": "widening",
+                    "because": [{"loc": ["query", "mode"], "value": value}],
+                }
+            ]
+        }
+
+    assert compat.judge(old, new, declared("fast")) == []
+    assert compat.judge(old, new, declared("strict")) != [], "여섯 글자 — 길이에 걸린다"

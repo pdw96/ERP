@@ -267,8 +267,9 @@ def operation(spec: Mapping[str, Any], key: str) -> dict[str, Any] | None:
         },
         "responses": {
             status: {
+                # HTTP 의 헤더 이름은 대소문자를 가리지 않는다 — 철자만 바뀐 것은 같은 헤더다
                 "headers": {
-                    name: plain.schema(header.get("schema", {}))
+                    name.lower(): plain.schema(header.get("schema", {}))
                     for name, header in answer.get("headers", {}).items()
                 },
                 "content": plain.content(answer.get("content", {})),
@@ -435,8 +436,15 @@ class _Operation:
 
     def _branches(self, old: Any, new: Any, side: Side, where: str) -> None:
         """`anyOf` 의 갈래 — 하나라도 맞으면 되므로 갈래가 늘면 받는 것이 는다."""
-        old = list(old if old is not _MISSING else [])
-        new = list(new if new is not _MISSING else [])
+        if old is _MISSING or new is _MISSING:
+            # **없던 `anyOf` 는 갈래가 0 이 아니라 제약이 없던 것이다**(PR #84 Codex 리뷰
+            # 3 라운드) — 처음 서면 받는 것이 줄고, 다 사라지면 받는 것이 는다
+            added = old is _MISSING
+            narrower: Kind = "breaking" if side == "request" else "widening"
+            wider: Kind = "widening" if side == "request" else "breaking"
+            self._note(narrower if added else wider, where, "섰다" if added else "사라졌다")
+            return
+        old, new = list(old), list(new)
         gone = [branch for branch in old if not _among(branch, new)]
         came = [branch for branch in new if not _among(branch, old)]
         if len(gone) == len(came) == 1:  # 갈래 하나가 고쳐졌다 — 그 안으로 들어간다
@@ -672,18 +680,47 @@ def _step(schema: Any, part: str | int) -> Any:
 
 
 def _accepts(schema: Any, value: Any) -> bool:
+    """그 값이 이 스키마를 지나는가 — 판정이 아는 제약을 **모두** 묻는다.
+
+    열거에 들었어도 길이 · 경계 · 형에 걸리면 받지 않는 값이다 — 그런 값은 선언의 근거가 될
+    수 없다(PR #84 Codex 리뷰 3 라운드). 형식(`format`)은 묻지 않는다 — 판정이 그 뜻을 모른다.
+    """
     if not isinstance(schema, dict):
         return False
-    if any(key in schema for key in _BRANCHES):
-        return any(
-            _accepts(branch, value) for key in _BRANCHES for branch in schema.get(key, [])
-        )
-    if "enum" in schema:
-        return _among(value, schema["enum"])
+    branches = schema.get("anyOf")
+    if branches is not None and not any(_accepts(branch, value) for branch in branches):
+        return False
+    if "enum" in schema and not _among(value, schema["enum"]):
+        return False
+    if "type" in schema and not _is_type(value, schema["type"]):
+        return False
+    if isinstance(value, str):
+        if len(value) > schema.get("maxLength", len(value)):
+            return False
+        if len(value) < schema.get("minLength", 0):
+            return False
+    if isinstance(value, int | float) and not isinstance(value, bool):
+        if "maximum" in schema and value > schema["maximum"]:
+            return False
+        if "exclusiveMaximum" in schema and value >= schema["exclusiveMaximum"]:
+            return False
+        if "minimum" in schema and value < schema["minimum"]:
+            return False
+        if "exclusiveMinimum" in schema and value <= schema["exclusiveMinimum"]:
+            return False
+    return True
+
+
+def _is_type(value: Any, wanted: Any) -> bool:
     if isinstance(value, bool):  # `bool` 은 `int` 의 하위형이다 — 수로 읽히지 않게 먼저 가른다
-        return schema.get("type") in (None, "boolean")
-    kinds = {"string": str, "integer": int, "number": int | float, "boolean": bool}
-    wanted = schema.get("type")
-    if wanted == "null":
-        return value is None
-    return wanted not in kinds or isinstance(value, kinds[wanted])
+        return bool(wanted == "boolean")
+    if wanted == "integer":
+        return isinstance(value, int) or (isinstance(value, float) and value.is_integer())
+    kinds: dict[str, Any] = {
+        "string": str,
+        "number": int | float,
+        "null": type(None),
+        "object": dict,
+        "array": list,
+    }
+    return wanted in kinds and isinstance(value, kinds[wanted])
