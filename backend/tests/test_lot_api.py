@@ -12,6 +12,7 @@
 import base64
 from collections.abc import Iterator
 from datetime import timedelta
+from typing import Any
 
 import pytest
 from fastapi.testclient import TestClient
@@ -305,17 +306,37 @@ def test_a_cursor_reads_back_what_it_was_issued_for() -> None:
 
 def test_the_spec_declares_what_the_read_paths_answer(client: TestClient) -> None:
     """**읽는 경로의 선언도 실제와 같다** — 없는 로트는 404 의 업무 이름이고, 이름은
-    열린 문자열이다."""
+    열린 문자열이며, **경로마다 자기가 내는 이름만 든다**(ADR 0014, PR #83 Codex 리뷰 3
+    라운드)."""
     spec = client.get("/openapi.json").json()
+    schemas = spec["components"]["schemas"]
     one = spec["paths"]["/lots/{lot_id}"]["get"]["responses"]
+    many = spec["paths"]["/lots"]["get"]["responses"]
 
-    assert one["404"]["content"]["application/json"]["schema"]["$ref"].endswith("/LotRefused")
-    named = spec["components"]["schemas"]["LotRefusalDetail"]["properties"]["type"]
-    assert named["x-known-values"] == [
-        "unknown_lot",
+    def body(answer: dict[str, Any]) -> str:
+        ref: str = answer["content"]["application/json"]["schema"]["$ref"]
+        return ref.rsplit("/", 1)[-1]
+
+    def named(detail: str) -> list[str]:
+        known: list[str] = schemas[detail]["properties"]["type"]["x-known-values"]
+        assert "enum" not in schemas[detail]["properties"]["type"]
+        return known
+
+    def details(model: str) -> set[str]:
+        items = schemas[model]["properties"]["detail"]["items"]
+        refs = items.get("anyOf", [items])
+        return {ref["$ref"].rsplit("/", 1)[-1] for ref in refs}
+
+    assert details(body(one["404"])) == {"LotRefusalDetail"}
+    assert named("LotRefusalDetail") == ["unknown_lot"]
+    assert details(body(one["422"])) == {"ValidationDetail"}
+    assert details(body(many["422"])) == {"LotListRefusalDetail", "ValidationDetail"}
+    assert named("LotListRefusalDetail") == [
         "cursor_is_not_readable",
         "cursor_is_for_another_list",
     ]
-    assert "enum" not in named
-    assert "404" not in spec["paths"]["/lots"]["get"]["responses"]
+    assert "404" not in many
+    description = spec["info"]["description"]
+    assert "400 · 405 · 500 은 라우트 밖의 일이다" in description
+    assert "`GET /lots/{lot_id}`" in description
     assert client.post("/lots/1").status_code == 405

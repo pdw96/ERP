@@ -23,6 +23,7 @@ from fastapi import Depends, FastAPI, Path, Query, Request, status
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse, Response
 from fastapi.utils import is_body_allowed_for_status_code
+from pydantic import BaseModel
 from sqlalchemy.exc import DBAPIError
 from sqlalchemy.orm import Session, sessionmaker
 from starlette.exceptions import HTTPException as StarletteHTTPException
@@ -32,10 +33,13 @@ from app.api.schemas import (
     _INT4_MAX,
     InspectionIn,
     InspectionOut,
+    Invalid,
+    LotListRefusal,
+    LotListRefused,
+    LotMissing,
     LotOut,
     LotPageOut,
     LotRefusal,
-    LotRefused,
     PurchaseReturnIn,
     PurchaseReturnOut,
     Refused,
@@ -127,7 +131,9 @@ app = FastAPI(
         " 이름, 판정(`result`) 같은 자리다. 알려진 값은 그 칸의 `x-known-values` 가"
         " 들고 **늘 수 있다** — 늘어나는 것은 넓히는 변경이다. 모르는 이름을 받으면"
         " 그 상태 코드의 거절로 읽는다 — 이름을 몰라도 422 는 「업무 규칙이나 검증이"
-        " 받지 않았다」이고, 400 · 404 · 405 · 500 은 라우트 밖의 일이다."
+        " 받지 않았다」이고, 400 · 405 · 500 은 라우트 밖의 일이다. 404 는 그 경로가"
+        " 업무의 404 를 선언했으면(`GET /lots/{lot_id}` — 그 로트가 없다) 업무의 답이고,"
+        " 아니면 라우트 밖의 일이다."
     ),
     version=API_VERSION,
     lifespan=the_site_clock_must_hold,
@@ -669,11 +675,14 @@ def post_retest(
     )
 
 
-def _read_answers(*, may_miss: bool) -> dict[int | str, dict[str, Any]]:
+def _read_answers(
+    refused: type[BaseModel], *, missing: type[BaseModel] | None = None
+) -> dict[int | str, dict[str, Any]]:
     """읽는 라우트가 **실제로 내는 응답**의 선언 — `_answers` 와 같은 까닭으로 한 벌이다.
 
     쓰는 라우트와 다른 것은 셋이다 — 성공이 200 이고, 본문이 없어 400 이 없으며, 404 가
-    라우트 밖의 일이 아니라 **그 로트가 없다**는 업무의 답일 수 있다(`may_miss`).
+    라우트 밖의 일이 아니라 **그 로트가 없다**는 업무의 답일 수 있다(`missing`). 422 의
+    본문은 경로마다 받는다 — 업무 이름은 경로마다 자기 목록을 든다(ADR 0014).
     """
     answers: dict[int | str, dict[str, Any]] = {
         status.HTTP_200_OK: {"headers": _REQUEST_ID_SPEC},
@@ -681,17 +690,14 @@ def _read_answers(*, may_miss: bool) -> dict[int | str, dict[str, Any]]:
             "model": TransportRefused,
             "headers": _REQUEST_ID_SPEC | _ALLOW_SPEC,
         },
-        status.HTTP_422_UNPROCESSABLE_CONTENT: {
-            "model": LotRefused,
-            "headers": _REQUEST_ID_SPEC,
-        },
+        status.HTTP_422_UNPROCESSABLE_CONTENT: {"model": refused, "headers": _REQUEST_ID_SPEC},
         status.HTTP_500_INTERNAL_SERVER_ERROR: {
             "model": TransportRefused,
             "headers": _REQUEST_ID_SPEC,
         },
     }
-    if may_miss:
-        answers[status.HTTP_404_NOT_FOUND] = {"model": LotRefused, "headers": _REQUEST_ID_SPEC}
+    if missing is not None:
+        answers[status.HTTP_404_NOT_FOUND] = {"model": missing, "headers": _REQUEST_ID_SPEC}
     return answers
 
 
@@ -708,7 +714,11 @@ def _lot_out(view: LotView) -> LotOut:
     )
 
 
-@app.get("/lots/{lot_id}", response_model=LotOut, responses=_read_answers(may_miss=True))
+@app.get(
+    "/lots/{lot_id}",
+    response_model=LotOut,
+    responses=_read_answers(Invalid, missing=LotMissing),
+)
 def get_lot(
     lot_id: Annotated[int, Path(gt=0, le=_INT4_MAX)],
     session: Annotated[Session, Depends(session_scope)],
@@ -732,7 +742,7 @@ def get_lot(
     return _lot_out(found)
 
 
-@app.get("/lots", response_model=LotPageOut, responses=_read_answers(may_miss=False))
+@app.get("/lots", response_model=LotPageOut, responses=_read_answers(LotListRefused))
 def get_lots(
     session: Annotated[Session, Depends(session_scope)],
     awaiting_retest: bool = False,
@@ -757,7 +767,7 @@ def get_lots(
                     {
                         "loc": ["query", "cursor"],
                         "msg": "이 목록이 내준 커서가 아니다",
-                        "type": LotRefusal.CURSOR_IS_NOT_READABLE,
+                        "type": LotListRefusal.CURSOR_IS_NOT_READABLE,
                     }
                 ],
             )
@@ -771,7 +781,7 @@ def get_lots(
                             "다른 거름으로 넘기던 커서다 —"
                             " 처음 요청과 같은 거름으로 이어 읽는다"
                         ),
-                        "type": LotRefusal.CURSOR_IS_FOR_ANOTHER_LIST,
+                        "type": LotListRefusal.CURSOR_IS_FOR_ANOTHER_LIST,
                     }
                 ],
             )

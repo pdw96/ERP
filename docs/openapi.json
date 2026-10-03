@@ -148,6 +148,96 @@
         "title": "InspectionOut",
         "type": "object"
       },
+      "Invalid": {
+        "description": "업무 이름 없이 pydantic 만 거절하는 경로의 422 본문.",
+        "properties": {
+          "detail": {
+            "items": {
+              "$ref": "#/components/schemas/ValidationDetail"
+            },
+            "title": "Detail",
+            "type": "array"
+          }
+        },
+        "required": [
+          "detail"
+        ],
+        "title": "Invalid",
+        "type": "object"
+      },
+      "LotListRefusalDetail": {
+        "description": "로트 목록이 커서를 거절할 때 `detail[]` 에 실리는 줄 — 이름은 `LotListRefusal` 이\n든다.",
+        "properties": {
+          "loc": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Loc",
+            "type": "array"
+          },
+          "msg": {
+            "title": "Msg",
+            "type": "string"
+          },
+          "type": {
+            "description": "열린 문자열이다 — 알려진 값은 `x-known-values` 가 들고 늘 수 있다. 모르는 값을 받을 자리를 둔다.",
+            "title": "Type",
+            "type": "string",
+            "x-known-values": [
+              "cursor_is_not_readable",
+              "cursor_is_for_another_list"
+            ]
+          }
+        },
+        "required": [
+          "loc",
+          "msg",
+          "type"
+        ],
+        "title": "LotListRefusalDetail",
+        "type": "object"
+      },
+      "LotListRefused": {
+        "description": "`GET /lots` 의 422 본문 — `Refused` 와 **같은 모양이고 업무 이름의 열거만 다르다.**",
+        "properties": {
+          "detail": {
+            "items": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/LotListRefusalDetail"
+                },
+                {
+                  "$ref": "#/components/schemas/ValidationDetail"
+                }
+              ]
+            },
+            "title": "Detail",
+            "type": "array"
+          }
+        },
+        "required": [
+          "detail"
+        ],
+        "title": "LotListRefused",
+        "type": "object"
+      },
+      "LotMissing": {
+        "description": "`GET /lots/{lot_id}` 의 404 본문 — **라우트 밖의 404 와 같은 모양이고 이름 공간만\n다르다.**",
+        "properties": {
+          "detail": {
+            "items": {
+              "$ref": "#/components/schemas/LotRefusalDetail"
+            },
+            "title": "Detail",
+            "type": "array"
+          }
+        },
+        "required": [
+          "detail"
+        ],
+        "title": "LotMissing",
+        "type": "object"
+      },
       "LotOut": {
         "description": "로트 하나의 지금 — **잔량과 지금 만료일은 저장된 값이 아니라 센 값이다.**\n\n- `received_quantity` — 로트를 만든 입고 수량이다. 잔량이 아니다\n- `balance` — 원장 줄의 합. 반품 · 폐기가 빠진 지금의 양이다\n- `labelled_expiry_date` — 라벨에 찍혀 나간 만료일. 고쳐지지 않는다(원칙 ⑦)\n- `current_expiry_date` — 가장 최근에 합격한 재검사의 갱신 만료일, 없으면 라벨의\n  만료일(ADR 0017). 「오늘」은 현장 시간대가 가른다(ADR 0019)\n- `awaiting_retest` — 지금 만료일이 현장의 오늘보다 앞서고 잔량이 있는 원자재 로트다.\n  만료일 당일까지는 쓸 수 있다",
         "properties": {
@@ -243,7 +333,7 @@
         "type": "object"
       },
       "LotRefusalDetail": {
-        "description": "로트를 읽다 거절할 때 `detail[]` 에 실리는 줄 — 이름은 `LotRefusal` 이 든다.",
+        "description": "로트 하나를 찾지 못할 때 `detail[]` 에 실리는 줄 — 이름은 `LotRefusal` 이 든다.",
         "properties": {
           "loc": {
             "items": {
@@ -261,9 +351,7 @@
             "title": "Type",
             "type": "string",
             "x-known-values": [
-              "unknown_lot",
-              "cursor_is_not_readable",
-              "cursor_is_for_another_list"
+              "unknown_lot"
             ]
           }
         },
@@ -273,30 +361,6 @@
           "type"
         ],
         "title": "LotRefusalDetail",
-        "type": "object"
-      },
-      "LotRefused": {
-        "description": "로트를 읽다 거절한 404 · 422 의 본문 — `Refused` 와 **같은 모양이다.**",
-        "properties": {
-          "detail": {
-            "items": {
-              "anyOf": [
-                {
-                  "$ref": "#/components/schemas/LotRefusalDetail"
-                },
-                {
-                  "$ref": "#/components/schemas/ValidationDetail"
-                }
-              ]
-            },
-            "title": "Detail",
-            "type": "array"
-          }
-        },
-        "required": [
-          "detail"
-        ],
-        "title": "LotRefused",
         "type": "object"
       },
       "MeasurementIn": {
@@ -802,7 +866,7 @@
     }
   },
   "info": {
-    "description": "읽는 엔드포인트가 서기 전까지 이 계약은 **좁혀질 수 있고 판은 움직이지 않는다.** 그 조각이 서는 날부터 이동 규칙이 선다 — 깨지면 앞자리, 호환되게 넓어지면 뒷자리.\n\n거절의 본문은 어느 경로에서나 `detail[]` 한 모양이다. `detail[].type` 이 기계가 읽는 자리이고 이름 공간이 셋이다 — 업무 규칙의 이름(경로마다 자기 목록을 든다), 라우트 밖의 이름, 그리고 pydantic 이 정한 이름(`missing` · `extra_forbidden` 등).\n\n**응답이 내는 이름은 열린 문자열이다** — 업무 거절과 라우트 밖 거절의 이름, 판정(`result`) 같은 자리다. 알려진 값은 그 칸의 `x-known-values` 가 들고 **늘 수 있다** — 늘어나는 것은 넓히는 변경이다. 모르는 이름을 받으면 그 상태 코드의 거절로 읽는다 — 이름을 몰라도 422 는 「업무 규칙이나 검증이 받지 않았다」이고, 400 · 404 · 405 · 500 은 라우트 밖의 일이다.",
+    "description": "읽는 엔드포인트가 서기 전까지 이 계약은 **좁혀질 수 있고 판은 움직이지 않는다.** 그 조각이 서는 날부터 이동 규칙이 선다 — 깨지면 앞자리, 호환되게 넓어지면 뒷자리.\n\n거절의 본문은 어느 경로에서나 `detail[]` 한 모양이다. `detail[].type` 이 기계가 읽는 자리이고 이름 공간이 셋이다 — 업무 규칙의 이름(경로마다 자기 목록을 든다), 라우트 밖의 이름, 그리고 pydantic 이 정한 이름(`missing` · `extra_forbidden` 등).\n\n**응답이 내는 이름은 열린 문자열이다** — 업무 거절과 라우트 밖 거절의 이름, 판정(`result`) 같은 자리다. 알려진 값은 그 칸의 `x-known-values` 가 들고 **늘 수 있다** — 늘어나는 것은 넓히는 변경이다. 모르는 이름을 받으면 그 상태 코드의 거절로 읽는다 — 이름을 몰라도 422 는 「업무 규칙이나 검증이 받지 않았다」이고, 400 · 405 · 500 은 라우트 밖의 일이다. 404 는 그 경로가 업무의 404 를 선언했으면(`GET /lots/{lot_id}` — 그 로트가 없다) 업무의 답이고, 아니면 라우트 밖의 일이다.",
     "summary": "수입검사 한 건을 받아 판정하고, 합격이면 로트를 만든다. 공급사에 돌려보낸 것을 적고, 재고 로트였으면 원장에서 뺀다. 만료된 로트를 다시 검사해, 합격이면 새 만료일을 내고 불합격이면 잔량을 버린다.",
     "title": "조기경보 ERP — 관문 1 · 구매반품 · 재검사",
     "version": "0.1"
@@ -1034,7 +1098,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/LotRefused"
+                  "$ref": "#/components/schemas/LotListRefused"
                 }
               }
             },
@@ -1110,7 +1174,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/LotRefused"
+                  "$ref": "#/components/schemas/LotMissing"
                 }
               }
             },
@@ -1152,7 +1216,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/LotRefused"
+                  "$ref": "#/components/schemas/Invalid"
                 }
               }
             },

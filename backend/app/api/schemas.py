@@ -347,22 +347,55 @@ class TransportRefused(BaseModel):
 
 
 class LotRefusal(StrEnum):
-    """로트를 읽을 때 `detail[].type` 으로 나가는 이름 — **이 경로의 목록이 여기 한 벌이다.**"""
+    """로트 하나를 읽을 때 `detail[].type` 으로 나가는 이름 — **이 경로의 목록이 여기
+    한 벌이다.**
+
+    목록 경로의 이름(`LotListRefusal`)과 한 열거로 합치지 않는다 — 합치면 스펙이 이
+    경로가 커서 거절을 낼 수 있다고 말하게 된다(ADR 0014, PR #83 Codex 리뷰 3 라운드).
+    """
 
     UNKNOWN_LOT = "unknown_lot"
-    CURSOR_IS_NOT_READABLE = "cursor_is_not_readable"
-    CURSOR_IS_FOR_ANOTHER_LIST = "cursor_is_for_another_list"
 
 
 class LotRefusalDetail(BaseModel):
-    """로트를 읽다 거절할 때 `detail[]` 에 실리는 줄 — 이름은 `LotRefusal` 이 든다."""
+    """로트 하나를 찾지 못할 때 `detail[]` 에 실리는 줄 — 이름은 `LotRefusal` 이 든다."""
 
     loc: list[str]
     msg: str
     type: str = known_names(LotRefusal)
 
 
-class LotRefused(BaseModel):
-    """로트를 읽다 거절한 404 · 422 의 본문 — `Refused` 와 **같은 모양이다.**"""
+class LotMissing(BaseModel):
+    """`GET /lots/{lot_id}` 의 404 본문 — **라우트 밖의 404 와 같은 모양이고 이름 공간만
+    다르다.**"""
 
-    detail: list[LotRefusalDetail | ValidationDetail]
+    detail: list[LotRefusalDetail]
+
+
+class Invalid(BaseModel):
+    """업무 이름 없이 pydantic 만 거절하는 경로의 422 본문."""
+
+    detail: list[ValidationDetail]
+
+
+class LotListRefusal(StrEnum):
+    """로트 목록을 넘길 때 `detail[].type` 으로 나가는 이름 — **이 경로의 목록이 여기
+    한 벌이다.**"""
+
+    CURSOR_IS_NOT_READABLE = "cursor_is_not_readable"
+    CURSOR_IS_FOR_ANOTHER_LIST = "cursor_is_for_another_list"
+
+
+class LotListRefusalDetail(BaseModel):
+    """로트 목록이 커서를 거절할 때 `detail[]` 에 실리는 줄 — 이름은 `LotListRefusal` 이
+    든다."""
+
+    loc: list[str]
+    msg: str
+    type: str = known_names(LotListRefusal)
+
+
+class LotListRefused(BaseModel):
+    """`GET /lots` 의 422 본문 — `Refused` 와 **같은 모양이고 업무 이름의 열거만 다르다.**"""
+
+    detail: list[LotListRefusalDetail | ValidationDetail]
