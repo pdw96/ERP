@@ -1216,3 +1216,12 @@ PostgreSQL 16)도 초록이다(392 passed).
 | — | 기준을 경시변화로 거르지 않았다 | `test_retest_path.py` · `test_retest_api.py` 의 검사 스물넷 |
 | — | 잔량 0 의 거절을 껐다 | `test_a_lot_with_nothing_left_is_named` |
 | — | 만료일 없음의 거절을 껐다 | `test_a_lot_without_an_expiry_is_named` |
+
+## 3단계 조각 4 — 반품이 재검사를 가리킬 때의 이름 (`5f0a50e`, 감사 ㊴)
+
+반품 쓰기 경로(`app/services/returns.py`)가 재검사의 id 를 `inspection_is_not_incoming` 으로 거절하는 분기를
+어긋낸 뒤 `tests/test_retest_path.py` 를 돌렸다. 어긋냄 없이 돌린 대조군은 초록이다.
+
+| NC | 무엇을 어긋냈나 | 빨개진 검사 |
+|---|---|---|
+| — | 단계를 묻는 분기를 껐다(`if False:`) | `test_the_return_path_names_a_retest_it_cannot_take` — 문서의 외래키(`fk_purchase_return_inspection_stage`)가 이름 대신 막는다 |
