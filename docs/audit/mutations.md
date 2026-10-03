@@ -1280,3 +1280,11 @@ PostgreSQL 16)도 초록이다(392 passed).
 | — | 다음 쪽이 있는지를 `>=` 로 셌다 | `test_the_waiting_list_holds_only_the_lots_that_wait` — 처음 쓴 검사로는 빨개지지 않아 상한과 꼭 맞는 쪽의 커서를 보는 줄을 더한 뒤 다시 쟀다 |
 | — | 커서의 거름과 요청의 거름을 견주지 않았다 | `test_a_cursor_this_list_did_not_issue_is_named` 의 `another-list` |
 | — | 현장의 오늘을 하루 밀었다 | `test_a_passed_retest_renews_the_current_expiry_but_not_the_label` |
+
+## 3단계 읽는 조각 B1 — ASCII 밖의 커서 (`d54ee4a`, PR #83 Codex 리뷰)
+
+`app/api/cursor.py` 가 잡는 예외를 좁힌 뒤 `tests/test_lot_api.py` 를 돌렸다. 어긋냄 없이 돌린 대조군은 초록이다.
+
+| NC | 무엇을 어긋냈나 | 빨개진 검사 |
+|---|---|---|
+| — | `ValueError` 대신 `JSONDecodeError` · `UnicodeDecodeError` 만 잡았다 | `test_a_cursor_this_list_did_not_issue_is_named` 의 `not-ascii` |
