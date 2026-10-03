@@ -1329,3 +1329,16 @@ PostgreSQL 16)도 초록이다(392 passed).
 | — | 계약을 그대로 두고 `API_VERSION` 만 `1.1` 로 올렸다 | `test_the_version_moves_as_far_as_the_contract_moved` |
 | — | `unknown_lot` 을 `lot_is_unknown` 으로 바꿨다 | `test_the_version_moves_as_far_as_the_contract_moved` — 선언이 없다는 것과 깨는 변경에 앞자리가 오르지 않았다는 것 둘을 낸다 |
 | — | 기준을 없는 리비전으로 주었다 | `test_the_version_moves_as_far_as_the_contract_moved` — 건너뛰지 않고 실패한다 |
+
+## 3단계 읽는 조각 B2 — 가르지 않는 칸 · `$ref` 옆 제약 · 로컬 기준 (`a5232ec`, PR #84 Codex 리뷰 1 라운드)
+
+`app/api/compat.py` 의 고침을 하나씩 되돌린 뒤 `tests/test_contract_judgment.py` 를 돌렸다. 마지막 줄은 원격이 `up` 이라는 이름인 클론(로컬 `main` 은 `0947f09`)에서 `ERP_CONTRACT_BASELINE` 없이 판정 테스트를 돌린 것이다. 어긋냄 없이 돌린 대조군과 같은 트리의 `pytest` 전체(실제 PostgreSQL 16)는 초록이다.
+
+| NC | 무엇을 어긋냈나 | 빨개진 검사 |
+|---|---|---|
+| — | 경로의 나머지 칸(`operationId` · `security` …)을 견주지 않았다 | `test_the_judgment_asks_for_as_far_as_the_contract_moved` 의 `security-on-a-path-breaks` · `a-renamed-operation-breaks` · `test_security_for_every_path_and_its_schemes_are_each_seen` |
+| — | 경로 밖의 칸(`securitySchemes` 등)을 견주지 않았다 | `test_security_for_every_path_and_its_schemes_are_each_seen` — 처음 쓴 검사로는 빨개지지 않아(머리의 `security` 와 함께 바꿔 하나만 보아도 빨갰다) 둘을 따로 어긋내는 검사를 더한 뒤 다시 쟀다 |
+| — | 스펙 머리의 `security` 를 경로에 물려주지 않았다 | `test_security_for_every_path_and_its_schemes_are_each_seen` — 같은 까닭으로 같은 검사를 더한 뒤 다시 쟀다 |
+| — | `$ref` 옆의 제약을 버렸다 | `test_the_judgment_asks_for_as_far_as_the_contract_moved` 의 `a-bound-beside-a-ref-is-seen` |
+| — | 경로 머리의 인자를 견주지 않았다 | `test_the_judgment_asks_for_as_far_as_the_contract_moved` 의 `a-required-path-input-breaks` |
+| — | 로컬 기준을 `origin/main` 하나로 되돌렸다 | `test_the_version_moves_as_far_as_the_contract_moved` — 원격 이름이 다른 클론에서 기준을 읽지 못한다 |
