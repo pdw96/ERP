@@ -1470,7 +1470,7 @@ PostgreSQL 16)도 초록이다(392 passed).
 
 ## 감사 ㊶ 의 고침 — 갈래 수 · 선다 · 풀린다 줄 · 불리언 가지 (`9e2358d`, 감사 NC-229 · 228)
 
-`app/api/compat.py` 의 분기를 하나씩 어긋낸 뒤 `tests/test_contract_judgment.py` 를 돌렸다. 어긋냄 없이 돌린 대조군과 같은 트리의 `pytest` 전체(실제 PostgreSQL 16)는 초록이다. NC-229 는 「갈래 추가」로 고쳤다 — 더한 것은 `test_each_line_of_the_list_moves_the_version` 의 매개변수 줄이고, 단언 · 픽스처 · `compat.py` 는 그대로다. 어긋냄마다 빨개진 줄은 그 어긋냄이 겨눈 매개변수 하나뿐이었다.
+`app/api/compat.py` 의 분기를 하나씩 어긋낸 뒤 `tests/test_contract_judgment.py` 를 돌렸다. 어긋냄 없이 돌린 대조군과 같은 트리의 `pytest` 전체(실제 PostgreSQL 16)는 초록이다. NC-229 는 `test_each_line_of_the_list_moves_the_version` 에 매개변수 줄을 더해 고쳤다 — 단언과 `compat.py` 는 그대로이고, 줄을 짓는 준비 코드를 새로 더했다. 어긋냄마다 빨개진 줄은 그 어긋냄이 겨눈 매개변수 하나뿐이었다.
 
 | NC | 무엇을 어긋냈나 | 빨개진 검사 |
 |---|---|---|
@@ -1484,3 +1484,12 @@ PostgreSQL 16)도 초록이다(392 passed).
 | 229 | 요청 칸의 필수가 풀리는 것을 깨는 변경으로 셌다 | `test_each_line_of_the_list_moves_the_version` 의 `a-request-field-is-let-go` |
 | 229 | 필수 아닌 인자가 서는 것을 깨는 변경으로 셌다 | `test_each_line_of_the_list_moves_the_version` 의 `an-optional-input-comes` |
 | 228 | `_is_type` 이 불리언을 정수로 받았다(「감사 ㊵ 의 고침」 묶음의 초록 줄과 같은 어긋냄) | `test_a_boolean_is_not_a_reason_where_an_integer_branch_comes` |
+
+## 감사 ㊶ 의 고침 — 불리언 근거를 본문에서 잰다 (`a9df507`, PR #92 Codex 리뷰)
+
+위 묶음의 불리언 검사는 쿼리 인자에서 쟀는데, 쿼리 값은 언제나 문자열로 와 옛 `str` 인자가 `?mode=1` 도 받는다 — 검사가
+거짓 근거(`1`)를 맞는 예로 못박았다. 같은 검사를 본문 칸으로 옮겨 다시 쟀다. 어긋냄 없이 돌린 대조군은 초록이다.
+
+| NC | 무엇을 어긋냈나 | 빨개진 검사 |
+|---|---|---|
+| 228 | `_is_type` 이 불리언을 정수로 받았다 | `test_a_boolean_is_not_a_reason_where_an_integer_branch_comes` |
