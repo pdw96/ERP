@@ -1417,3 +1417,13 @@ PostgreSQL 16)도 초록이다(392 passed).
 |---|---|---|
 | — | 기존 경로의 틀과 겹치는 새 경로를 넓히는 변경으로 셌다 | `test_a_new_path_over_an_old_template_breaks` 의 둘 |
 | — | 값 없이 칸만 든 근거를 받았다 | `test_a_reason_names_a_value` |
+
+## 3단계 읽는 조각 B2 — 겹치는 경로 틀 · 같은 operationId · 이름 목록의 모양 (`89e357e`, PR #84 Codex 리뷰 10 라운드)
+
+`app/api/compat.py` 의 거절을 하나씩 껐다. 껐을 때 `tests/test_contract_judgment.py` 에서 빨개진 검사를 적었다. 어긋냄 없이 돌린 대조군과 같은 트리의 `pytest` 전체(실제 PostgreSQL 16)는 초록이다.
+
+| NC | 무엇을 어긋냈나 | 빨개진 검사 |
+|---|---|---|
+| — | 같은 메서드에 겹치는 경로 틀을 받았다 | `test_overlapping_path_templates_are_refused` 의 둘 |
+| — | 같은 `operationId` 둘을 받았다 | `test_an_operation_id_is_used_once` |
+| — | 문자열인 `x-known-values` 를 받았다 | `test_known_values_are_a_list_of_strings` |
