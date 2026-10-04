@@ -80,7 +80,7 @@ def test_the_version_moves_as_far_as_the_contract_moved() -> None:
     - 응답의 열린 이름(`x-known-values`)에 값이 선다 — **기존 경로면 저자의 선언이
       든다**(아래). 목록이 처음 서는 것도 같다. 다만 **새로 선 칸 · 상태 코드 · 갈래 안에
       실린 이름은 따로 세지 않는다** — 그 칸 · 상태 코드 · 갈래가 서는 것이 위아래 줄대로
-      세어진다(감사 ㊵ 낮음-1)
+      세어진다(감사 ㊵ 낮음-1). 새로 선 응답 헤더 · 미디어 타입 안의 이름도 같다(감사 ㊶ 낮음-1)
 
     **깨는 변경**(그 밖의 모든 것 — 넓히는 것을 놓쳐 앞자리를 올리는 쪽이 깨는 것을
     놓치는 쪽보다 싸다):
@@ -924,7 +924,26 @@ def _openapi(spec_: dict[str, Any]) -> None:
     spec_["openapi"] = "3.1.1"
 
 
+def _answer_back(key: str) -> Callable[[dict[str, Any]], None]:
+    """`_gone_header` · `_gone_media` 가 걷은 자리를 지금 스펙의 것으로 되돌린다."""
+
+    def change(spec_: dict[str, Any]) -> None:
+        _lots(spec_)["responses"]["200"][key] = _lots(_closed())["responses"]["200"][key]
+
+    return change
+
+
+def _balance_required(spec_: dict[str, Any]) -> None:
+    _schema(spec_, "LotOut")["required"].append("balance")
+
+
+def _judged_by_not_required(spec_: dict[str, Any]) -> None:
+    _schema(spec_, "RetestIn")["required"].remove("judged_by")
+
+
 _STRING = {"type": "string"}
+_INTEGER = {"type": "integer"}
+_NULL = {"type": "null"}
 
 
 @pytest.mark.parametrize(
@@ -1000,6 +1019,53 @@ _STRING = {"type": "string"}
         pytest.param(_nothing, _gone_header, "1.1", "2.0", id="an-answer-header-goes"),
         pytest.param(_nothing, _gone_media, "1.1", "2.0", id="an-answer-media-goes"),
         pytest.param(_nothing, _openapi, "1.1", "2.0", id="the-spec-format-moves"),
+        # 감사 NC-229 — 옛 · 새 둘 다 `anyOf` 가 있으면서 갈래 수가 달라지는 줄과,
+        # 「선다 · 풀린다」 가운데 위에서 돌지 않던 줄
+        pytest.param(
+            _note({"anyOf": [_STRING, _NULL]}),
+            _note({"anyOf": [_STRING, _INTEGER, _NULL]}),
+            "1.1",
+            "2.0",
+            id="an-answer-branch-comes",
+        ),
+        pytest.param(
+            _note({"anyOf": [_STRING, _INTEGER, _NULL]}),
+            _note({"anyOf": [_STRING, _NULL]}),
+            "1.0",
+            "1.1",
+            id="an-answer-branch-goes",
+        ),
+        pytest.param(
+            _mode({"anyOf": [_STRING, _INTEGER]}),
+            _mode({"anyOf": [_STRING]}),
+            "1.1",
+            "2.0",
+            id="a-request-branch-goes",
+        ),
+        pytest.param(
+            _mode({"anyOf": [_STRING]}),
+            _mode({"anyOf": [_STRING, _INTEGER]}),
+            "1.0",
+            "1.1",
+            id="a-request-branch-comes",
+        ),
+        pytest.param(
+            _gone_media, _answer_back("content"), "1.1", "2.0", id="an-answer-media-comes"
+        ),
+        pytest.param(
+            _gone_header, _answer_back("headers"), "1.0", "1.1", id="an-answer-header-comes"
+        ),
+        pytest.param(
+            _balance_not_required,
+            _balance_required,
+            "1.0",
+            "1.1",
+            id="an-answer-field-is-required",
+        ),
+        pytest.param(
+            _nothing, _judged_by_not_required, "1.0", "1.1", id="a-request-field-is-let-go"
+        ),
+        pytest.param(_nothing, _mode(_STRING), "1.0", "1.1", id="an-optional-input-comes"),
     ],
 )
 def test_each_line_of_the_list_moves_the_version(
@@ -1060,15 +1126,31 @@ def test_a_boolean_is_not_a_reason_for_an_integer() -> None:
     보인다. `1` 은 옛 경계 밖이라 근거가 되고 `True` 는 되지 않는다(감사 NC-228).
 
     `_is_type` 의 불리언 가지만 어긋내면 이 검사는 빨개지지 않는다 — 불리언은 수 경계를
-    건너뛰므로 옛 정수 칸도 `True` 를 받아 「받던 요청」으로 같은 답이 난다. 옛 형이 달라야
-    갈리는데 그때는 형의 변화가 이미 깨는 변경이다. 판정 결과를 바꾸지 않는 어긋냄이다
-    (`mutations.md`)."""
+    건너뛰므로 옛 정수 칸도 `True` 를 받아 「받던 요청」으로 같은 답이 난다. 그 가지는 옛
+    형이 달라 넓어지는 자리가 문다(아래 검사)."""
     old = _closed()
     _limit(old)["schema"]["minimum"] = 2
     new = _closed()
     _new_name(new)
     new["info"]["version"] = "1.1"
     reason = {"loc": ["query", "limit"], "value": True}
+    assert compat.judge(old, new, {"1.1": [_widening(reason)]}) != []
+    reason["value"] = 1
+    assert compat.judge(old, new, {"1.1": [_widening(reason)]}) == []
+
+
+def test_a_boolean_is_not_a_reason_where_an_integer_branch_comes() -> None:
+    """**정수 갈래가 새로 선 자리에서도 불리언은 근거가 못 된다**(감사 ㊶ 낮음-2) — 요청
+    `anyOf` 에 정수 갈래가 서는 것은 넓히는 변경이라, 옛 형이 달라도 판정이 근거를
+    견준다. `_is_type` 이 불리언을 수로 읽으면 새 정수 갈래가 `True` 를 받아 거짓 근거가
+    지나간다."""
+    old = _closed()
+    _mode({"anyOf": [_STRING]})(old)
+    new = _closed()
+    _mode({"anyOf": [_STRING, _INTEGER]})(new)
+    _new_name(new)
+    new["info"]["version"] = "1.1"
+    reason = {"loc": ["query", "mode"], "value": True}
     assert compat.judge(old, new, {"1.1": [_widening(reason)]}) != []
     reason["value"] = 1
     assert compat.judge(old, new, {"1.1": [_widening(reason)]}) == []
