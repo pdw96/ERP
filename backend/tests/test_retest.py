@@ -535,7 +535,7 @@ def test_a_standard_a_retest_relied_on_stays_time_variant(prepared: Session) -> 
 
 
 def test_a_failed_retest_empties_the_lot_in_one_line(prepared: Session) -> None:
-    """**불합격하면 잔량 전부가 폐기출고 한 줄로 나간다**(`PRD.md` 성공 기준 6)."""
+    """**불합격하면 잔량 전부가 폐기출고 한 줄로 나간다**(`docs/PRD-3단계.md` 성공 기준 6)."""
     _fail_and_dispose(prepared)
 
     assert _balance(prepared, _the_lot(prepared).id) == 0.0

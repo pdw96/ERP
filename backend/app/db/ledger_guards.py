@@ -521,8 +521,9 @@ FOR EACH ROW EXECUTE FUNCTION inspection_keeps_its_stage()
 
 # ── 로트 — 기준 만료일은 고치지 않는다 ─────────────────────────────────────
 #
-# **라벨에 찍혀 나간 값이다**(`PRD.md` 성공 기준 5). 재검사가 이 값을 읽으므로, 잠깐 과거로
-# 돌려 재검사를 넣고 되돌리거나 앞으로 밀어 이미 선 재검사를 소급해 무효로 만들 수 있다.
+# **라벨에 찍혀 나간 값이다**(`docs/PRD-3단계.md` 성공 기준 5). 재검사가 이 값을 읽으므로,
+# 잠깐 과거로 돌려 재검사를 넣고 되돌리거나 앞으로 밀어 이미 선 재검사를 소급해 무효로 만들 수
+# 있다.
 # 원장에 줄이 있든 없든 막는다 — 고칠 까닭이 없다.
 LOT_EXPIRY_FUNCTION = """
 CREATE OR REPLACE FUNCTION lot_expiry_stays_as_labelled() RETURNS trigger
