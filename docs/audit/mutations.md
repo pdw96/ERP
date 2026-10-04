@@ -1309,3 +1309,121 @@ PostgreSQL 16)도 초록이다(392 passed).
 | — | 목록의 이름에 `unknown_lot` 을 더했다 | `test_the_spec_declares_what_the_read_paths_answer` |
 | — | 로트 하나의 이름에 `cursor_is_not_readable` 을 더했다 | `test_the_spec_declares_what_the_read_paths_answer` |
 | — | 스펙 산문을 「400 · 404 · 405 · 500 은 라우트 밖의 일이다」로 되돌렸다 | `test_the_spec_declares_what_the_read_paths_answer` |
+
+## 3단계 읽는 조각 B2 — 계약의 호환 판정 (`c23b31d`, ADR 0018)
+
+`app/api/compat.py` 의 가름을 하나씩 어긋낸 뒤 `tests/test_contract_judgment.py` 를 돌렸다. 마지막 넷은 판정 테스트 자체를 실제 스펙으로 돌린 것이다 — 기준을 이 PR 의 첫 커밋(`c23cdb1`, 판 `1.0`)으로 주고 코드를 어긋냈다. 어긋냄 없이 돌린 대조군과 같은 트리의 `pytest` 전체(실제 PostgreSQL 16)는 초록이다.
+
+| NC | 무엇을 어긋냈나 | 빨개진 검사 |
+|---|---|---|
+| — | 옛 판의 앞자리가 0 이어도 창이 열려 있던 것으로 보지 않았다 | `test_a_window_that_was_open_takes_anything` · `test_the_version_moves_as_far_as_the_contract_moved`(기준 `origin/main` 이 `0.1` 이다) |
+| — | 깨는 변경에도 판이 (앞자리, 뒷자리) 순서로 오르기만 하면 받았다 | `test_the_judgment_asks_for_as_far_as_the_contract_moved` 의 `*-breaks` 여섯 · `test_a_renamed_name_breaks` · `test_a_name_declared_breaking_moves_the_first_place` · `test_an_answer_bound_moves_the_other_way` |
+| — | 계약이 그대로인데 판이 움직인 것을 받았다 | `test_the_judgment_asks_for_as_far_as_the_contract_moved` 의 `prose-is-not-the-contract` |
+| — | 기존 경로에 새로 나가는 이름을 선언 없이 넓히는 변경으로 셌다 | `test_a_new_name_on_an_old_path_needs_the_authors_word` 외 넷 |
+| — | 넓히는 변경이라는 선언의 근거를 옛 사진과 견주지 않았다 | `test_a_name_declared_widening_must_point_at_an_input_the_old_schema_did_not_take` · `test_a_new_enum_value_in_the_request_is_a_reason_for_a_new_name` |
+| — | 경계의 변화를 요청 · 응답 가리지 않고 요청처럼 셌다 | `test_an_answer_bound_moves_the_other_way` — 처음 쓴 검사로는 빨개지지 않아(응답의 경계를 움직이는 경우가 없었다) 그 검사를 더한 뒤 다시 쟀다 |
+| — | 요청의 칸이 필수가 되는 것을 넓히는 변경으로 셌다 | `test_the_judgment_asks_for_as_far_as_the_contract_moved` 의 `a-required-request-field-breaks` |
+| — | 새 상태 코드를 넓히는 변경으로 셌다 | `test_the_judgment_asks_for_as_far_as_the_contract_moved` 의 `a-new-status-breaks` |
+| — | 선언을 지금 판의 키만이 아니라 모든 판의 키에서 읽었다 | `test_a_declaration_of_another_version_is_not_read` |
+| — | 글(`description` 등)을 계약으로 셌다 | `test_the_judgment_asks_for_as_far_as_the_contract_moved` 의 `prose-is-not-the-contract` |
+| — | 계약을 그대로 두고 `API_VERSION` 만 `1.1` 로 올렸다 | `test_the_version_moves_as_far_as_the_contract_moved` |
+| — | `unknown_lot` 을 `lot_is_unknown` 으로 바꿨다 | `test_the_version_moves_as_far_as_the_contract_moved` — 선언이 없다는 것과 깨는 변경에 앞자리가 오르지 않았다는 것 둘을 낸다 |
+| — | 기준을 없는 리비전으로 주었다 | `test_the_version_moves_as_far_as_the_contract_moved` — 건너뛰지 않고 실패한다 |
+
+## 3단계 읽는 조각 B2 — 가르지 않는 칸 · `$ref` 옆 제약 · 로컬 기준 (`a5232ec`, PR #84 Codex 리뷰 1 라운드)
+
+`app/api/compat.py` 의 고침을 하나씩 되돌린 뒤 `tests/test_contract_judgment.py` 를 돌렸다. 마지막 줄은 원격이 `up` 이라는 이름인 클론(로컬 `main` 은 `0947f09`)에서 `ERP_CONTRACT_BASELINE` 없이 판정 테스트를 돌린 것이다. 어긋냄 없이 돌린 대조군과 같은 트리의 `pytest` 전체(실제 PostgreSQL 16)는 초록이다.
+
+| NC | 무엇을 어긋냈나 | 빨개진 검사 |
+|---|---|---|
+| — | 경로의 나머지 칸(`operationId` · `security` …)을 견주지 않았다 | `test_the_judgment_asks_for_as_far_as_the_contract_moved` 의 `security-on-a-path-breaks` · `a-renamed-operation-breaks` · `test_security_for_every_path_and_its_schemes_are_each_seen` |
+| — | 경로 밖의 칸(`securitySchemes` 등)을 견주지 않았다 | `test_security_for_every_path_and_its_schemes_are_each_seen` — 처음 쓴 검사로는 빨개지지 않아(머리의 `security` 와 함께 바꿔 하나만 보아도 빨갰다) 둘을 따로 어긋내는 검사를 더한 뒤 다시 쟀다 |
+| — | 스펙 머리의 `security` 를 경로에 물려주지 않았다 | `test_security_for_every_path_and_its_schemes_are_each_seen` — 같은 까닭으로 같은 검사를 더한 뒤 다시 쟀다 |
+| — | `$ref` 옆의 제약을 버렸다 | `test_the_judgment_asks_for_as_far_as_the_contract_moved` 의 `a-bound-beside-a-ref-is-seen` |
+| — | 경로 머리의 인자를 견주지 않았다 | `test_the_judgment_asks_for_as_far_as_the_contract_moved` 의 `a-required-path-input-breaks` |
+| — | 로컬 기준을 `origin/main` 하나로 되돌렸다 | `test_the_version_moves_as_far_as_the_contract_moved` — 원격 이름이 다른 클론에서 기준을 읽지 못한다 |
+
+## 3단계 읽는 조각 B2 — 판정이 아는 모양 (`0e8c991`, PR #84 Codex 리뷰 2 라운드 · ADR 0021)
+
+`app/api/compat.py` 의 거절과 고침을 하나씩 껐다. 껐을 때 `tests/test_contract_judgment.py` 에서 빨개진 검사를 적었다. 어긋냄 없이 돌린 대조군과 같은 트리의 `pytest` 전체(실제 PostgreSQL 16)는 초록이다.
+
+| NC | 무엇을 어긋냈나 | 빨개진 검사 |
+|---|---|---|
+| — | 판정이 모양을 묻지 않고 견줬다 | `test_a_shape_the_judgment_does_not_know_is_refused` 의 `a-schema-that-holds-itself` |
+| — | 모르는 칸을 거절하지 않았다 | `test_a_shape_the_judgment_does_not_know_is_refused` 의 여덟(`security-*` · `an-input-on-the-path-item` · `one-of` · `const` · `a-path-item-ref` · `encoding`) |
+| — | `$ref` 옆의 칸을 거절하지 않았다 | `test_a_shape_the_judgment_does_not_know_is_refused` 의 `a-bound-beside-a-ref` — 처음 쓴 검사로는 빨개지지 않아(옆에 둔 `maxProperties` 가 모르는 키라 따로 걸렸다) 아는 키(`maxLength`)로 바꾼 뒤 다시 쟀다 |
+| — | 제 자신을 가리키는 `$ref` 를 거절하지 않았다 | `test_a_shape_the_judgment_does_not_know_is_refused` 의 `a-schema-that-holds-itself` |
+| — | 모르는 칸을 받는 요청 객체를 거절하지 않았다 | `test_a_shape_the_judgment_does_not_know_is_refused` 의 `a-request-object-that-takes-any-field` |
+| — | 모르는 미디어 타입을 거절하지 않았다 | `test_a_shape_the_judgment_does_not_know_is_refused` 의 `a-form-body` |
+| — | 포함 · 배제 경계의 쌍을 견주지 않았다 | `test_an_inclusive_and_an_exclusive_bound_are_one_constraint` · `test_the_judgment_asks_for_as_far_as_the_contract_moved` 의 `a-looser-request-bound-widens` · `a-tighter-request-bound-breaks` |
+| — | 값을 파이썬의 `==` 로 견줬다 | `test_a_boolean_is_not_a_number` |
+| — | `operationId` 를 견주지 않았다 | `test_the_judgment_asks_for_as_far_as_the_contract_moved` 의 `a-renamed-operation-breaks` |
+
+## 3단계 읽는 조각 B2 — 없던 anyOf · 근거 값의 제약 · 헤더 대소문자 (`ad7ff81`, PR #84 Codex 리뷰 3 라운드)
+
+`app/api/compat.py` 의 고침을 하나씩 되돌린 뒤 `tests/test_contract_judgment.py` 를 돌렸다. 어긋냄 없이 돌린 대조군과 같은 트리의 `pytest` 전체(실제 PostgreSQL 16)는 초록이다. 같은 커밋이 고친 CI 의 기준(머지 커밋의 첫 부모)은 로컬에서 어긋낼 수 없다 — CI 실행 로그의 「계약의 기준」 스텝이 받은 커밋이 그것을 보인다.
+
+| NC | 무엇을 어긋냈나 | 빨개진 검사 |
+|---|---|---|
+| — | 없던 `anyOf` 를 갈래 0 으로 읽었다 | `test_an_any_of_that_was_not_there_was_no_constraint` |
+| — | 응답 헤더 이름을 철자대로 견줬다 | `test_a_header_name_is_the_same_in_any_case` |
+| — | 근거 값의 길이를 묻지 않았다 | `test_a_reason_must_be_a_value_the_new_schema_takes_whole` |
+
+## 3단계 읽는 조각 B2 — 한 칸 더 좁힌 모양 (`d58c9f3`, PR #84 Codex 리뷰 4 라운드)
+
+`app/api/compat.py` 의 거절을 하나씩 껐다. 껐을 때 `tests/test_contract_judgment.py` 에서 빨개진 검사를 적었다. 어긋냄 없이 돌린 대조군과 같은 트리의 `pytest` 전체(실제 PostgreSQL 16)는 초록이다.
+
+| NC | 무엇을 어긋냈나 | 빨개진 검사 |
+|---|---|---|
+| — | 문자열이 아닌 열거 값을 받았다 | `test_a_shape_the_judgment_does_not_know_is_refused` 의 `an-enum-of-numbers` |
+| — | 헤더 인자를 받았다 | `test_a_shape_the_judgment_does_not_know_is_refused` 의 `a-header-input` |
+| — | 같은 경로 · 이름의 선언 둘을 받았다 | `test_two_declarations_of_one_name_are_refused` |
+| — | 배열을 근거의 값으로 받았다 | `test_a_reason_value_is_a_scalar` |
+
+## 3단계 읽는 조각 B2 — 처음 서는 이름 목록 · anyOf 옆 제약 (`f6dde51`, PR #84 Codex 리뷰 5 라운드)
+
+`app/api/compat.py` 의 고침을 하나씩 되돌린 뒤 `tests/test_contract_judgment.py` 를 돌렸다. 어긋냄 없이 돌린 대조군과 같은 트리의 `pytest` 전체(실제 PostgreSQL 16)는 초록이다. 3 라운드의 「없던 `anyOf`」 검사는 `anyOf` 옆 제약을 거절하게 되며 제약이 없던 스키마 위로 옮겼고, 같은 어긋냄으로 다시 쟀다.
+
+| NC | 무엇을 어긋냈나 | 빨개진 검사 |
+|---|---|---|
+| — | 처음 서는 `x-known-values` 를 통째로 깨는 변경으로 셌다 | `test_the_first_known_name_is_an_addition_like_any_other` |
+| — | `anyOf` 옆의 제약을 받았다 | `test_a_shape_the_judgment_does_not_know_is_refused` 의 `a-constraint-beside-any-of` |
+| — | 없던 `anyOf` 를 갈래 0 으로 읽었다 | `test_an_any_of_that_was_not_there_was_no_constraint` |
+
+## 3단계 읽는 조각 B2 — 닫힌 응답 객체 · 형식이 붙은 근거 (`249e57b`, PR #84 Codex 리뷰 7 라운드)
+
+`app/api/compat.py` 의 거절을 하나씩 껐다. 껐을 때 `tests/test_contract_judgment.py` 에서 빨개진 검사를 적었다. 어긋냄 없이 돌린 대조군과 같은 트리의 `pytest` 전체(실제 PostgreSQL 16)는 초록이다.
+
+| NC | 무엇을 어긋냈나 | 빨개진 검사 |
+|---|---|---|
+| — | 응답 객체의 `additionalProperties` 를 받았다 | `test_a_shape_the_judgment_does_not_know_is_refused` 의 `a-closed-answer-object` |
+| — | 형식이 붙은 칸의 값을 근거로 받았다 | `test_a_formatted_value_is_not_a_reason` |
+
+## 3단계 읽는 조각 B2 — 갈래를 지나는 근거 · 요청의 열린 이름 (`6e71697`, PR #84 Codex 리뷰 8 라운드)
+
+`app/api/compat.py` 의 고침을 하나씩 되돌린 뒤 `tests/test_contract_judgment.py` 를 돌렸다. 어긋냄 없이 돌린 대조군과 같은 트리의 `pytest` 전체(실제 PostgreSQL 16)는 초록이다.
+
+| NC | 무엇을 어긋냈나 | 빨개진 검사 |
+|---|---|---|
+| — | 요청의 `x-known-values` 를 받았다 | `test_a_request_with_known_values_is_refused` |
+| — | 근거의 자리가 갈래를 지나도 그 까닭을 내지 않았다 | `test_a_reason_that_crosses_branches_is_refused` — 처음 쓴 검사로는 빨개지지 않아(다른 까닭으로 빨갰고, 확인한 낱말이 경로 이름에도 들어 있었다) 그 까닭의 문구를 보게 고친 뒤 다시 쟀다 |
+| — | 근거의 자리를 첫 갈래로 내려가 찾았다 | `test_a_reason_that_crosses_branches_is_refused` |
+
+## 3단계 읽는 조각 B2 — 겹치는 경로 · 값 없는 근거 (`979930d`, PR #84 Codex 리뷰 9 라운드)
+
+`app/api/compat.py` 의 고침을 하나씩 되돌린 뒤 `tests/test_contract_judgment.py` 를 돌렸다. 어긋냄 없이 돌린 대조군과 같은 트리의 `pytest` 전체(실제 PostgreSQL 16)는 초록이다. 같은 커밋이 고친 CI 의 취소 규칙(`main` 은 취소하지 않는다)은 로컬에서 어긋낼 수 없다.
+
+| NC | 무엇을 어긋냈나 | 빨개진 검사 |
+|---|---|---|
+| — | 기존 경로의 틀과 겹치는 새 경로를 넓히는 변경으로 셌다 | `test_a_new_path_over_an_old_template_breaks` 의 둘 |
+| — | 값 없이 칸만 든 근거를 받았다 | `test_a_reason_names_a_value` |
+
+## 3단계 읽는 조각 B2 — 겹치는 경로 틀 · 같은 operationId · 이름 목록의 모양 (`89e357e`, PR #84 Codex 리뷰 10 라운드)
+
+`app/api/compat.py` 의 거절을 하나씩 껐다. 껐을 때 `tests/test_contract_judgment.py` 에서 빨개진 검사를 적었다. 어긋냄 없이 돌린 대조군과 같은 트리의 `pytest` 전체(실제 PostgreSQL 16)는 초록이다.
+
+| NC | 무엇을 어긋냈나 | 빨개진 검사 |
+|---|---|---|
+| — | 같은 메서드에 겹치는 경로 틀을 받았다 | `test_overlapping_path_templates_are_refused` 의 둘 |
+| — | 같은 `operationId` 둘을 받았다 | `test_an_operation_id_is_used_once` |
+| — | 문자열인 `x-known-values` 를 받았다 | `test_known_values_are_a_list_of_strings` |

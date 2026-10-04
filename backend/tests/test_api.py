@@ -462,7 +462,7 @@ def test_the_spec_matches_the_snapshot_in_the_repository() -> None:
     **이 검사가 못 보는 부류**(W-6 ③): 선언 밖으로 나가는 응답(NC-220 의 400 같은 것 —
     선언이 없으니 사진에도 없다. 위의 「실제로 일으켜 견주는」 검사가 문다), 그리고
     **생각 없이 다시 지은 사진** — 이 검사는 막지 않고 보이게 할 뿐이다. 깨는 변경인지
-    가르는 것은 읽는 엔드포인트가 서는 조각의 몫이다.
+    가르는 것은 `tests/test_contract_judgment.py` 의 판정이다(ADR 0018).
     """
     assert spec.SNAPSHOT.exists(), f"{spec.SNAPSHOT} 가 없다 — `python -m app.api.spec`"
     assert spec.render() == spec.SNAPSHOT.read_text(encoding="utf-8"), (

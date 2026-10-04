@@ -57,6 +57,7 @@ _CI_STEPS = {
     "린트": r"ruff check \.",
     "포맷": r"ruff format --check \.",
     "타입체크": r"mypy$",
+    "계약의 기준": r"git fetch --no-tags --depth=1 origin",
     "테스트": r"pytest",
     "셸": r"git ls-files .*\| xargs .*shellcheck",
     "이미지": r"docker build ",
