@@ -128,11 +128,33 @@ def admit(spec: Mapping[str, Any]) -> list[str]:
     found: list[str] = []
     _only(spec, _TOP, "스펙", found)
     _only(spec.get("components", {}), _COMPONENTS, "components", found)
-    for path, item in spec.get("paths", {}).items():
+    paths = spec.get("paths", {})
+    for path, item in paths.items():
         _only(item, frozenset(_METHODS), f"경로 {path}", found)
         for method in _METHODS:
             if method in item:
                 _Admit(spec, f"{method.upper()} {path}", found).operation(item[method])
+    # **같은 메서드에 겹치는 경로 틀은 모르는 모양이다**(PR #84 Codex 리뷰 9 · 10 라운드) —
+    # `/lots/1` 과 `/lots/{lot_id}` 는 같은 요청을 두고 다투고, 누가 받는지는 등록 순서가
+    # 정하는데 스펙에는 순서가 없다
+    for method in _METHODS:
+        mine = sorted(p for p, item in paths.items() if method in item)
+        found += [
+            f"{method.upper()} {one} 와 {other} 의 경로 틀이 겹친다"
+            for i, one in enumerate(mine)
+            for other in mine[i + 1 :]
+            if _overlap(one, other)
+        ]
+    # **`operationId` 는 하나씩이다** — 겹치면 스펙에서 지은 코드의 메서드가 부딪친다(10 라운드)
+    ids = [
+        item[method].get("operationId")
+        for item in paths.values()
+        for method in _METHODS
+        if method in item and item[method].get("operationId") is not None
+    ]
+    found += [
+        f"`operationId` {i!r} 가 둘 이상이다" for i in sorted(set(ids)) if ids.count(i) > 1
+    ]
     return found
 
 
@@ -214,6 +236,10 @@ class _Admit:
             self._found.append(f"{where} 의 요청 객체가 모르는 칸을 받는다")
         # **요청의 열린 이름 목록은 판정이 모르는 모양이다** — 받는 값을 바꾸지 않는 글인데
         # 열거처럼 셀 수 있다(PR #84 Codex 리뷰 8 라운드). 이 저장소는 응답의 이름에만 쓴다
+        known = value.get("x-known-values", [])
+        if not isinstance(known, list) or not all(isinstance(name, str) for name in known):
+            # 문자열을 목록으로 읽으면 글자를 하나씩 돈다(PR #84 Codex 리뷰 10 라운드)
+            self._found.append(f"{where} 의 `x-known-values` 가 문자열의 목록이 아니다")
         if side == "request" and "x-known-values" in value:
             self._found.append(f"{where} 의 요청에 `x-known-values` 가 있다")
         # **응답 객체는 칸을 닫지 않는다** — 닫으면 칸을 더하는 것이 넓히는 변경이 아니게 된다
@@ -250,19 +276,8 @@ def compare(old: Mapping[str, Any], new: Mapping[str, Any]) -> Diff:
             after = new_paths.get(path, {}).get(method)
             key = f"{method.upper()} {path}"
             if before is None and after is not None:
-                # **겹치는 경로는 넓히는 것이 아니다**(9 라운드) — `/lots/1` 은
-                # `/lots/{lot_id}` 가 받던 요청을 가로챌 수 있고, 거꾸로도 그렇다
-                overlaps = [
-                    p
-                    for p in old_paths
-                    if p != path and method in old_paths[p] and _overlap(p, path)
-                ]
-                if overlaps:
-                    diff.changes.append(
-                        Change("breaking", key, f"기존 경로 {overlaps} 와 겹친다")
-                    )
-                else:
-                    diff.changes.append(Change("widening", key, "경로가 섰다"))
+                # 겹치는 경로는 `admit` 이 거절했다 — 새 경로는 받던 요청을 가로채지 않는다
+                diff.changes.append(Change("widening", key, "경로가 섰다"))
             elif before is not None and after is None:
                 diff.changes.append(Change("breaking", key, "경로가 사라졌다"))
             elif before is not None and after is not None:

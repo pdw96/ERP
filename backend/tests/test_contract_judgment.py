@@ -210,6 +210,7 @@ def _new_status(spec_: dict[str, Any]) -> None:
 
 def _new_path(spec_: dict[str, Any]) -> None:
     spec_["paths"]["/suppliers"] = {"get": copy.deepcopy(_lots(spec_))}
+    spec_["paths"]["/suppliers"]["get"]["operationId"] = "list_suppliers"
 
 
 def _gone_path(spec_: dict[str, Any]) -> None:
@@ -768,12 +769,36 @@ def test_a_reason_names_a_value() -> None:
 
 
 @pytest.mark.parametrize("path", ["/lots/1", "/lots/{lot_number}"])
-def test_a_new_path_over_an_old_template_breaks(path: str) -> None:
-    """**새 경로가 기존 경로의 틀과 겹치면 깨는 변경이다** — 받던 요청을 가로챌 수 있다(PR #84
-    Codex 리뷰 9 라운드)."""
+def test_overlapping_path_templates_are_refused(path: str) -> None:
+    """**같은 메서드에 겹치는 경로 틀은 판정이 모르는 모양이다** — 누가 요청을 받는지는 등록
+    순서가 정하는데 스펙에는 순서가 없다(PR #84 Codex 리뷰 9 · 10 라운드)."""
 
     def overlap(spec_: dict[str, Any]) -> None:
         spec_["paths"][path] = copy.deepcopy(spec_["paths"]["/lots/{lot_id}"])
+        spec_["paths"][path]["get"]["operationId"] = "another_lot"
 
-    assert _judged(overlap, "1.1") != []
-    assert _judged(overlap, "2.0") == []
+    new = _closed()
+    overlap(new)
+    assert compat.admit(new) != []
+    for version in ("1.1", "2.0"):
+        assert _judged(overlap, version) != [], version
+
+
+def test_an_operation_id_is_used_once() -> None:
+    """**`operationId` 는 하나씩이다** — 새 경로가 있는 이름을 다시 쓰면 지은 코드의 메서드가
+    부딪친다(PR #84 Codex 리뷰 10 라운드)."""
+
+    def twice(spec_: dict[str, Any]) -> None:
+        spec_["paths"]["/suppliers"] = {"get": copy.deepcopy(_lots(spec_))}
+
+    new = _closed()
+    twice(new)
+    assert compat.admit(new) != []
+
+
+def test_known_values_are_a_list_of_strings() -> None:
+    """**`x-known-values` 는 문자열의 목록이다** — 문자열을 목록으로 읽으면 글자를 하나씩 돈다
+    (PR #84 Codex 리뷰 10 라운드)."""
+    new = _closed()
+    _schema(new, "LotListRefusalDetail")["properties"]["type"]["x-known-values"] = "ab"
+    assert compat.admit(new) != []
