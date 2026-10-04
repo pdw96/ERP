@@ -1398,3 +1398,13 @@ PostgreSQL 16)도 초록이다(392 passed).
 |---|---|---|
 | — | 응답 객체의 `additionalProperties` 를 받았다 | `test_a_shape_the_judgment_does_not_know_is_refused` 의 `a-closed-answer-object` |
 | — | 형식이 붙은 칸의 값을 근거로 받았다 | `test_a_formatted_value_is_not_a_reason` |
+
+## 3단계 읽는 조각 B2 — 갈래를 지나는 근거 · 요청의 열린 이름 (`6e71697`, PR #84 Codex 리뷰 8 라운드)
+
+`app/api/compat.py` 의 고침을 하나씩 되돌린 뒤 `tests/test_contract_judgment.py` 를 돌렸다. 어긋냄 없이 돌린 대조군과 같은 트리의 `pytest` 전체(실제 PostgreSQL 16)는 초록이다.
+
+| NC | 무엇을 어긋냈나 | 빨개진 검사 |
+|---|---|---|
+| — | 요청의 `x-known-values` 를 받았다 | `test_a_request_with_known_values_is_refused` |
+| — | 근거의 자리가 갈래를 지나도 그 까닭을 내지 않았다 | `test_a_reason_that_crosses_branches_is_refused` — 처음 쓴 검사로는 빨개지지 않아(다른 까닭으로 빨갰고, 확인한 낱말이 경로 이름에도 들어 있었다) 그 까닭의 문구를 보게 고친 뒤 다시 쟀다 |
+| — | 근거의 자리를 첫 갈래로 내려가 찾았다 | `test_a_reason_that_crosses_branches_is_refused` |
