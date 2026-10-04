@@ -5,7 +5,7 @@
 > [`docs/PRD-2단계.md`](docs/PRD-2단계.md), 3단계는 [`docs/PRD-3단계.md`](docs/PRD-3단계.md) 에 닫아 두었다.
 >
 > **앞 단계에 쓴 글이 「`PRD.md` 성공 기준 N」 · 「`PRD.md` 「하지 않을 일」」로 가리키는 것은 그 글을 쓴 단계의
-> PRD 다** — 3단계에 쓴 ADR(예: ADR 0016 의 「성공 기준 5」)이면 `docs/PRD-3단계.md` 다. ADR 은 고치지 않고 새 ADR 로
+> PRD 다** — 3단계 중에 쓴 ADR(예: ADR 0016 의 「성공 기준 5」)이면 `docs/PRD-3단계.md` 다. ADR 은 고치지 않고 새 ADR 로
 > 대체하므로(`CLAUDE.md`) 그 글을 옮겨 쓰지 않고 여기서 가리킨다(PR #95 Codex 리뷰).
 
 ## 지금은 범위가 없다
