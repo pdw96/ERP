@@ -96,6 +96,7 @@
 | `57a5bba` | — | 반품 쓰기 경로의 `_as_counted()` 만 `double` 로 바꿔도 잔량 검사가 통과한다 | `audit-quality` | 초록이 맞다 — 겹친 방어. 합이 `numeric` 이면 `double` 과의 비교에서 합 쪽 값이 이미 맞다. 합까지 바꾸면 빨갛다(`79d04b8` 묶음) |
 | `79d04b8` | — | 반품 쓰기 경로의 `_as_counted()` 만 `double` 로 바꿔도 잔량 검사가 통과한다 — 수를 고친 뒤에도 같다 | `audit-quality` | 초록이 맞다 — 겹친 방어. `57a5bba` 줄과 같은 자리다 |
 | `79d04b8` | — | 반품 쓰기 경로의 로트 잠금만 빼도 동시 반품 검사가 통과한다 | `audit-quality` | 초록이 맞다 — 겹친 방어. 검사와 로트가 하나씩 짝이라(`uq_lot_inspection`) 먼저 잡는 검사 잠금이 같은 로트의 반품을 줄 세운다. 둘 다 빼면 빨갛다. 로트를 검사 밖의 길로 줄이는 유형(폐기출고)이 서는 날 이 잠금이 홀로 선다 — 그 조각이 다시 잰다 |
+| `49b7d14` | 228 | `_is_type` 이 불리언을 정수로 받아도 통과한다 | `audit-quality` | 초록이 맞다 — 등가 어긋냄. 옛 형이 달라야 갈리는데 그때는 형의 변화가 이미 깨는 변경이다(「감사 ㊵ 의 고침」 묶음) |
 
 ## ⑧ 의 고침 (`03b6c1f`)
 
@@ -1427,3 +1428,42 @@ PostgreSQL 16)도 초록이다(392 passed).
 | — | 같은 메서드에 겹치는 경로 틀을 받았다 | `test_overlapping_path_templates_are_refused` 의 둘 |
 | — | 같은 `operationId` 둘을 받았다 | `test_an_operation_id_is_used_once` |
 | — | 문자열인 `x-known-values` 를 받았다 | `test_known_values_are_a_list_of_strings` |
+
+## 감사 ㊵ 의 고침 — 옛 서버가 무시하던 근거 · 목록 한 줄에 검사 하나 (`49b7d14`, 감사 NC-227 · 228)
+
+`app/api/compat.py` 의 분기를 하나씩 어긋낸 뒤 `tests/test_contract_judgment.py` 를 돌렸다. 어긋냄 없이 돌린 대조군과 같은 트리의 `pytest` 전체(실제 PostgreSQL 16)는 초록이다. NC-228 의 어긋냄은 감사자가 든 분기 가운데 판이 덜 오르는 방향을 골랐다.
+
+| NC | 무엇을 어긋냈나 | 빨개진 검사 |
+|---|---|---|
+| 227 | 옛 경로에 없던 쿼리 인자를 근거로 받았다 | `test_an_input_the_old_server_ignored_is_not_a_reason` |
+| 227 | 본문이 없던 경로의 본문을 근거로 받았다 | `test_an_input_the_old_server_ignored_is_not_a_reason` |
+| 228 | 스펙 형식의 판(`openapi`)이 바뀌어도 세지 않았다 | `test_each_line_of_the_list_moves_the_version` 의 `the-spec-format-moves` |
+| 228 | 요청에 선 필수 인자를 넓히는 변경으로 셌다 | `test_each_line_of_the_list_moves_the_version` 의 `a-required-input-comes` |
+| 228 | 사라진 인자를 넓히는 변경으로 셌다 | `test_each_line_of_the_list_moves_the_version` 의 `an-input-goes` |
+| 228 | 상태 코드가 서거나 사라져도 세지 않았다 | `test_the_judgment_asks_for_as_far_as_the_contract_moved` 의 `a-new-status-breaks` |
+| 228 | 사라진 요청 본문을 넓히는 변경으로 셌다 | `test_each_line_of_the_list_moves_the_version` 의 `a-body-goes` |
+| 228 | 필수로 선 요청 본문을 넓히는 변경으로 셌다 | `test_each_line_of_the_list_moves_the_version` 의 `a-required-body-comes` |
+| 228 | 인자가 필수가 되는 것을 넓히는 변경으로 셌다 | `test_each_line_of_the_list_moves_the_version` 의 `an-input-becomes-required` |
+| 228 | 응답 헤더 · 미디어 타입이 사라져도 세지 않았다 | `test_each_line_of_the_list_moves_the_version` 의 `an-answer-header-goes` |
+| 228 | 사라진 칸을 넓히는 변경으로 셌다 | `test_each_line_of_the_list_moves_the_version` 의 `an-answer-field-goes` |
+| 228 | 요청의 `anyOf` 가 다 사라지는 것을 깨는 변경으로 셌다 | `test_each_line_of_the_list_moves_the_version` 의 `request-branches-go` |
+| 228 | 요청 열거에서 빠진 값을 넓히는 변경으로 셌다 | `test_each_line_of_the_list_moves_the_version` 의 `a-request-value-goes` |
+| 228 | 요청에 새로 선 경계를 넓히는 변경으로 셌다 | `test_each_line_of_the_list_moves_the_version` 의 `a-request-bound-comes` |
+| 228 | 포함 · 배제 쌍의 경계가 사라지는 것(`after is None`)을 깨는 변경으로 셌다 | **없다 — 통과했다** |
+| 228 | 같은 어긋냄 — 위 끝이 사라지는 줄을 매개변수에 더한 뒤 | `test_each_line_of_the_list_moves_the_version` 의 `a-request-upper-end-goes` |
+| 228 | 깨는 변경 선언에 든 근거(`"because"`)를 받았다 | `test_a_breaking_declaration_carries_no_reason` |
+| 228 | 인자 이름이 없는 짧은 근거 자리를 받았다 | `test_a_reason_the_new_schema_does_not_take_is_refused` 의 `a-place-without-a-name` |
+| 228 | 근거의 값을 새 스키마의 수 경계와 견주지 않았다 | `test_a_name_declared_widening_must_point_at_an_input_the_old_schema_did_not_take` |
+| 228 | `_is_type` 이 불리언을 정수로 받았다 | **없다 — 통과했다** — 등가 어긋냄이다. 불리언은 수 경계를 건너뛰므로 옛 정수 칸도 `True` 를 받아 「받던 요청」으로 같은 답이 난다(`test_a_boolean_is_not_a_reason_for_an_integer` 독스트링) |
+| — | `_same` 을 파이썬의 `==` 로 되돌렸다(감사 ㊵ 낮음-2) | `test_a_default_that_turns_from_false_to_zero_moves` |
+
+**앞 묶음의 줄이 든 검사 가운데 지금은 없는 것**(감사 ㊵ 낮음-2). 옛 줄은 소급해 고치지 않고 여기 적는다 —
+그 줄의 「빨개진 검사」는 그 커밋에서 참이었고, 뒤의 커밋이 검사를 걷었다.
+
+- `test_security_for_every_path_and_its_schemes` · `security-on-a-path-breaks` · `a-bound-beside-a-ref-is-seen` ·
+  `a-required-path-input-breaks` — `7207002`(ADR 0021)가 걷었다. 그 모양은 이제 견주지 않고
+  `test_a_shape_the_judgment_does_not_know_is_refused` 가 거절을 문다
+- `test_a_boolean_is_not_a_number` — `d58c9f3` 가 걷었다(열거를 문자열로 좁혀 수 열거를 거절한다). 그 뒤
+  `_same` 을 무는 검사가 없었다 — 위 표의 마지막 줄이 다시 세웠다
+- `test_a_new_path_over_an_old_template_breaks` — `89e357e` 가 걷었다. 겹치는 틀은 이제
+  `test_overlapping_path_templates_are_refused` 가 거절로 문다
