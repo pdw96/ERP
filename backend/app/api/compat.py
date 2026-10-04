@@ -694,7 +694,19 @@ def _is_input(item: Any) -> bool:
 def _not_new(old: Mapping[str, Any], new: Mapping[str, Any], key: str, item: Any) -> str:
     """근거로 든 입력이 **옛 요청 스키마 밖이고 새 스키마 안인가** — 아니면 그 까닭."""
     loc = item["loc"]
-    before = _find(operation(old, key), loc)
+    was = operation(old, key)
+    # **옛 서버가 거절하던 입력이어야 한다**(감사 NC-227) — FastAPI 는 선언하지 않은 쿼리 인자와
+    # 본문 없는 경로에 온 본문을 거절하지 않고 무시한다. 그런 입력은 「옛 스키마 밖」이어도 받던
+    # 요청이다. 닫혀 있는 것은 옛 경로가 선언한 인자의 값과 옛 본문(모르는 칸을 받지 않는
+    # 객체)뿐이다
+    received = "받던 요청이다 — FastAPI 는 그것을 거절하지 않고 무시한다"
+    if loc[0] != "body" and len(loc) < 2:
+        return f"근거의 자리 {loc} 가 인자를 가리키지 않는다"
+    if was is not None and loc[0] == "body" and was["body"] is None:
+        return f"근거의 자리 {loc} — 옛 경로에 본문이 없었다. {received}"
+    if was is not None and loc[0] != "body" and (loc[0], loc[1]) not in was["parameters"]:
+        return f"근거의 자리 {loc} — 옛 경로에 없던 인자다. {received}"
+    before = _find(was, loc)
     after = _find(operation(new, key), loc)
     if before is _CROSSED or after is _CROSSED:
         return f"근거의 자리 {loc} 가 `anyOf` 의 갈래를 지난다 — 판정이 받지 않는 근거다"

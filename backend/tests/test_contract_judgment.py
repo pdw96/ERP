@@ -78,7 +78,9 @@ def test_the_version_moves_as_far_as_the_contract_moved() -> None:
     - 응답의 경계가 조여진다, 응답의 열거에서 값이 빠진다
     - 응답의 `anyOf` 에서 갈래가 준다, 응답에 `anyOf` 가 처음 선다
     - 응답의 열린 이름(`x-known-values`)에 값이 선다 — **기존 경로면 저자의 선언이
-      든다**(아래). 목록이 처음 서는 것도 같다
+      든다**(아래). 목록이 처음 서는 것도 같다. 다만 **새로 선 칸 · 상태 코드 · 갈래 안에
+      실린 이름은 따로 세지 않는다** — 그 칸 · 상태 코드 · 갈래가 서는 것이 위아래 줄대로
+      세어진다(감사 ㊵ 낮음-1)
 
     **깨는 변경**(그 밖의 모든 것 — 넓히는 것을 놓쳐 앞자리를 올리는 쪽이 깨는 것을
     놓치는 쪽보다 싸다):
@@ -110,7 +112,9 @@ def test_the_version_moves_as_far_as_the_contract_moved() -> None:
     앞자리를 올려도 그렇다. `docs/openapi-declarations.json` 의 새 판 키 아래에 그 경로와
     이름을 적고 `"change"` 를 고른다. 가르는 선은 옛 요청 스키마다(ADR 0018). 받던
     요청에 나가면 `"breaking"`, 옛 요청 스키마 밖이던 입력에만 나가면 `"widening"` 이고
-    그 입력을 `"because"` 에 `{"loc": [...], "value": ...}` 로 든다 — `loc` 은 pydantic 의
+    그 입력을 `"because"` 에 `{"loc": [...], "value": ...}` 로 든다. 그 입력은 **옛 서버가
+    거절하던** 것이어야 한다 — 옛 경로에 없던 쿼리 · 경로 인자와 본문이 없던 경로의 본문은
+    FastAPI 가 무시하고 받았으므로 근거가 아니다(감사 NC-227). `loc` 은 pydantic 의
     모양이고, 값은 언제나 든다(새 칸이면 그 칸에 보낼 값 하나). 값은 스칼라이고, 그 칸에
     형식(`format`)이 붙지 않았어야 하며, 자리가 `anyOf` 의 갈래를 지나지 않아야 한다. 판정이
     그 근거가 옛 사진에 없고 새 스펙의 제약을 모두 지나는지 견준다. 같은 경로 · 이름의
@@ -269,6 +273,12 @@ def _new_name_for_a_new_query(spec_: dict[str, Any]) -> None:
     )
 
 
+def _new_name_for_a_looser_limit(spec_: dict[str, Any]) -> None:
+    """옛 경로가 선언한 인자의 경계를 푼다 — 옛 서버는 `limit=300` 을 422 로 거절했다."""
+    _new_name(spec_)
+    _limit(spec_)["schema"]["maximum"] = 500
+
+
 @pytest.mark.parametrize(
     ("change", "stays", "moves"),
     [
@@ -356,12 +366,36 @@ def test_a_name_declared_widening_must_point_at_an_input_the_old_schema_did_not_
             ]
         }
 
+    beyond, within = (
+        {"loc": ["query", "limit"], "value": 300},
+        {"loc": ["query", "limit"], "value": 10},
+    )
+    assert _judged(_new_name_for_a_looser_limit, "1.1", declared(beyond)) == []
+    assert _judged(_new_name_for_a_looser_limit, "1.1", declared(within)) != []
+    assert _judged(_new_name, "1.1", declared(beyond)) != []
+    assert _judged(_new_name_for_a_looser_limit, "1.1", declared()) != []
+
+
+def test_an_input_the_old_server_ignored_is_not_a_reason() -> None:
+    """**옛 서버가 무시하던 입력은 근거가 못 된다**(감사 NC-227) — FastAPI 는 선언하지 않은
+    쿼리 인자와 본문 없는 경로에 온 본문을 거절하지 않고 받는다. 새로 선 쿼리 인자 `sort` 에
+    보낸 값은 옛 서버도 받던 요청이다."""
     sort = {"loc": ["query", "sort"], "value": "asc"}
-    limit = {"loc": ["query", "limit"], "value": 10}
-    assert _judged(_new_name_for_a_new_query, "1.1", declared(sort)) == []
-    assert _judged(_new_name_for_a_new_query, "1.1", declared(limit)) != []
-    assert _judged(_new_name, "1.1", declared(sort)) != []
-    assert _judged(_new_name_for_a_new_query, "1.1", declared()) != []
+    problems = _judged(_new_name_for_a_new_query, "1.1", {"1.1": [_widening(sort)]})
+    assert any("옛 경로에 없던 인자" in problem for problem in problems), problems
+
+    def a_body(spec_: dict[str, Any]) -> None:
+        _new_name(spec_)
+        schema = {
+            "type": "object",
+            "additionalProperties": False,
+            "properties": {"kind": {"type": "string"}},
+        }
+        _lots(spec_)["requestBody"] = {"content": {"application/json": {"schema": schema}}}
+
+    kind = {"loc": ["body", "kind"], "value": "a"}
+    problems = _judged(a_body, "1.1", {"1.1": [_widening(kind)]})
+    assert any("본문이 없었다" in problem for problem in problems), problems
 
 
 def test_a_declaration_of_another_version_is_not_read() -> None:
@@ -647,11 +681,12 @@ def _widening(*because: dict[str, Any]) -> dict[str, Any]:
 def test_two_declarations_of_one_name_are_refused() -> None:
     """**같은 경로 · 이름의 선언이 둘이면 빨갛다** — 어느 것을 믿을지가 파일의 순서에 달리면
     선언이 아니다(PR #84 Codex 리뷰 4 라운드)."""
-    sort = {"loc": ["query", "sort"], "value": "asc"}
+    beyond = {"loc": ["query", "limit"], "value": 300}
     broken = _broken("GET /lots", "limit_is_for_another_list")
-    assert _judged(_with_a_sort, "1.1", {"1.1": [_widening(sort)]}) == []
-    assert _judged(_with_a_sort, "1.1", {"1.1": [broken, _widening(sort)]}) != []
-    assert _judged(_with_a_sort, "2.0", {"2.0": [_widening(sort), broken]}) != []
+    change = _new_name_for_a_looser_limit
+    assert _judged(change, "1.1", {"1.1": [_widening(beyond)]}) == []
+    assert _judged(change, "1.1", {"1.1": [broken, _widening(beyond)]}) != []
+    assert _judged(change, "2.0", {"2.0": [_widening(beyond), broken]}) != []
 
 
 def test_a_reason_value_is_a_scalar() -> None:
@@ -802,3 +837,238 @@ def test_known_values_are_a_list_of_strings() -> None:
     new = _closed()
     _schema(new, "LotListRefusalDetail")["properties"]["type"]["x-known-values"] = "ab"
     assert compat.admit(new) != []
+
+
+# ── 목록 한 줄에 검사 하나 (감사 NC-228) ─────────────────────────────────────────
+# 한 어긋냄이 신호를 둘 내면 서로 가린다 — `_gone_field` 는 칸이 사라진 것과 필수가 풀린 것을
+# 함께 내어, 어느 한 분기를 어긋내도 다른 쪽이 빨갰다. 여기서는 옛 · 새 양쪽을 지어 **한 줄만**
+# 움직인다.
+
+
+def _mode(schema: dict[str, Any], **extra: Any) -> Callable[[dict[str, Any]], None]:
+    def change(spec_: dict[str, Any]) -> None:
+        _lots(spec_)["parameters"].append(
+            {"in": "query", "name": "mode", "schema": schema, **extra}
+        )
+
+    return change
+
+
+def _note(schema: dict[str, Any] | None) -> Callable[[dict[str, Any]], None]:
+    def change(spec_: dict[str, Any]) -> None:
+        properties = _schema(spec_, "LotOut")["properties"]
+        if schema is None:
+            properties.pop("note", None)
+        else:
+            properties["note"] = schema
+
+    return change
+
+
+def _nothing(spec_: dict[str, Any]) -> None:
+    pass
+
+
+def _body_on_lots(required: bool) -> Callable[[dict[str, Any]], None]:
+    def change(spec_: dict[str, Any]) -> None:
+        schema = {"type": "object", "additionalProperties": False, "properties": {}}
+        _lots(spec_)["requestBody"] = {
+            "required": required,
+            "content": {"application/json": {"schema": schema}},
+        }
+
+    return change
+
+
+def _retest_body(required: bool | None) -> Callable[[dict[str, Any]], None]:
+    def change(spec_: dict[str, Any]) -> None:
+        post = spec_["paths"]["/retests"]["post"]
+        if required is None:
+            del post["requestBody"]
+        else:
+            post["requestBody"]["required"] = required
+
+    return change
+
+
+def _limit_required(required: bool) -> Callable[[dict[str, Any]], None]:
+    def change(spec_: dict[str, Any]) -> None:
+        _limit(spec_)["required"] = required
+
+    return change
+
+
+def _gone_cursor(spec_: dict[str, Any]) -> None:
+    _lots(spec_)["parameters"] = [
+        p for p in _lots(spec_)["parameters"] if p["name"] != "cursor"
+    ]
+
+
+def _balance_not_required(spec_: dict[str, Any]) -> None:
+    _schema(spec_, "LotOut")["required"].remove("balance")
+
+
+def _gone_405(spec_: dict[str, Any]) -> None:
+    del _lots(spec_)["responses"]["405"]
+
+
+def _gone_header(spec_: dict[str, Any]) -> None:
+    del _lots(spec_)["responses"]["200"]["headers"]
+
+
+def _gone_media(spec_: dict[str, Any]) -> None:
+    del _lots(spec_)["responses"]["200"]["content"]
+
+
+def _openapi(spec_: dict[str, Any]) -> None:
+    spec_["openapi"] = "3.1.1"
+
+
+_STRING = {"type": "string"}
+
+
+@pytest.mark.parametrize(
+    ("before", "after", "stays", "moves"),
+    [
+        pytest.param(_nothing, _gone_cursor, "1.1", "2.0", id="an-input-goes"),
+        pytest.param(
+            _nothing, _mode(_STRING, required=True), "1.1", "2.0", id="a-required-input-comes"
+        ),
+        pytest.param(
+            _nothing, _limit_required(True), "1.1", "2.0", id="an-input-becomes-required"
+        ),
+        pytest.param(
+            _limit_required(True), _limit_required(False), "1.0", "1.1", id="an-input-is-let-go"
+        ),
+        pytest.param(_nothing, _body_on_lots(False), "1.0", "1.1", id="an-optional-body-comes"),
+        pytest.param(_nothing, _body_on_lots(True), "1.1", "2.0", id="a-required-body-comes"),
+        pytest.param(_nothing, _retest_body(None), "1.1", "2.0", id="a-body-goes"),
+        pytest.param(_nothing, _retest_body(False), "1.0", "1.1", id="a-body-is-let-go"),
+        pytest.param(
+            _mode({"type": "string", "enum": ["a", "b"]}),
+            _mode({"type": "string", "enum": ["a"]}),
+            "1.1",
+            "2.0",
+            id="a-request-value-goes",
+        ),
+        pytest.param(
+            _mode(_STRING),
+            _mode({"type": "string", "minLength": 2}),
+            "1.1",
+            "2.0",
+            id="a-request-bound-comes",
+        ),
+        pytest.param(
+            _mode({"type": "string", "maxLength": 5}),
+            _mode(_STRING),
+            "1.0",
+            "1.1",
+            id="a-request-bound-goes",
+        ),
+        pytest.param(
+            _mode({"anyOf": [_STRING]}), _mode({}), "1.0", "1.1", id="request-branches-go"
+        ),
+        pytest.param(
+            _mode({"type": "integer", "maximum": 5}),
+            _mode({"type": "integer"}),
+            "1.0",
+            "1.1",
+            id="a-request-upper-end-goes",
+        ),
+        pytest.param(
+            _note({"anyOf": [_STRING]}), _note({}), "1.1", "2.0", id="answer-branches-go"
+        ),
+        pytest.param(_note(_STRING), _note(None), "1.1", "2.0", id="an-answer-field-goes"),
+        pytest.param(
+            _nothing, _balance_not_required, "1.1", "2.0", id="an-answer-field-is-let-go"
+        ),
+        pytest.param(
+            _note({"type": "string", "enum": ["a", "b"]}),
+            _note({"type": "string", "enum": ["a"]}),
+            "1.0",
+            "1.1",
+            id="an-answer-value-goes",
+        ),
+        pytest.param(
+            _note({"type": "string", "enum": ["a"]}),
+            _note({"type": "string", "enum": ["a", "b"]}),
+            "1.1",
+            "2.0",
+            id="an-answer-value-comes",
+        ),
+        pytest.param(_nothing, _gone_405, "1.1", "2.0", id="a-status-goes"),
+        pytest.param(_nothing, _gone_header, "1.1", "2.0", id="an-answer-header-goes"),
+        pytest.param(_nothing, _gone_media, "1.1", "2.0", id="an-answer-media-goes"),
+        pytest.param(_nothing, _openapi, "1.1", "2.0", id="the-spec-format-moves"),
+    ],
+)
+def test_each_line_of_the_list_moves_the_version(
+    before: Callable[[dict[str, Any]], object],
+    after: Callable[[dict[str, Any]], object],
+    stays: str,
+    moves: str,
+) -> None:
+    """**독스트링 목록의 한 줄마다 한 검사**(감사 NC-228) — `stays` 로는 빨갛고 `moves` 로는
+    초록이다. 옛 스펙에도 같은 자리를 지어 그 줄 하나만 움직인다."""
+    old = _closed()
+    before(old)
+    new = copy.deepcopy(_closed())
+    before(new)
+    after(new)
+    new["info"]["version"] = stays
+    assert compat.judge(old, new, {}) != [], stays
+    new["info"]["version"] = moves
+    assert compat.judge(old, new, {}) == [], moves
+
+
+@pytest.mark.parametrize(
+    "reason",
+    [
+        pytest.param({"loc": ["query", "limit"], "value": 600}, id="beyond-the-new-bound"),
+        pytest.param({"loc": ["query", "limit"], "value": True}, id="a-boolean-for-a-number"),
+        pytest.param({"loc": ["query", "limit"], "value": "300"}, id="a-string-for-a-number"),
+        pytest.param({"loc": ["query"], "value": 300}, id="a-place-without-a-name"),
+    ],
+)
+def test_a_reason_the_new_schema_does_not_take_is_refused(reason: dict[str, Any]) -> None:
+    """근거의 값은 새 스키마의 경계와 형을 지나야 하고, 자리는 인자를 가리켜야 한다
+    (감사 NC-228)."""
+    assert _judged(_new_name_for_a_looser_limit, "1.1", {"1.1": [_widening(reason)]}) != []
+
+
+def test_a_breaking_declaration_carries_no_reason() -> None:
+    """깨는 변경이라는 선언은 근거를 들지 않는다 — 들면 모양이 맞지 않는 선언이다
+    (감사 NC-228)."""
+    entry = _broken("GET /lots", "limit_is_for_another_list")
+    entry["because"] = [{"loc": ["query", "limit"], "value": 300}]
+    assert _judged(_new_name_for_a_looser_limit, "2.0", {"2.0": [entry]}) != []
+
+
+def test_a_default_that_turns_from_false_to_zero_moves() -> None:
+    """**JSON 의 같음으로 견준다** — `false` 를 `0` 으로 바꾸는 것은 같은 값이 아니다(감사
+    낮음-2: `true` 는 `1` 이 아니라는 약속을 지키던 검사가 열거를 거절하면서 사라졌다)."""
+    old = _closed()
+    _mode({"type": "boolean", "default": False})(old)
+    new = _closed()
+    _mode({"type": "boolean", "default": 0})(new)
+    new["info"]["version"] = "1.0"
+    assert compat.judge(old, new, {}) != []
+
+
+def test_a_boolean_is_not_a_reason_for_an_integer() -> None:
+    """**불리언은 정수 칸의 근거가 못 된다** — 파이썬에서는 `True` 가 `1` 이라 경계를 지나
+    보인다. `1` 은 옛 경계 밖이라 근거가 되고 `True` 는 되지 않는다(감사 NC-228).
+
+    `_is_type` 의 불리언 가지만 어긋내면 이 검사는 빨개지지 않는다 — 불리언은 수 경계를
+    건너뛰므로 옛 정수 칸도 `True` 를 받아 「받던 요청」으로 같은 답이 난다. 옛 형이 달라야
+    갈리는데 그때는 형의 변화가 이미 깨는 변경이다. 판정 결과를 바꾸지 않는 어긋냄이다
+    (`mutations.md`)."""
+    old = _closed()
+    _limit(old)["schema"]["minimum"] = 2
+    new = _closed()
+    _new_name(new)
+    new["info"]["version"] = "1.1"
+    reason = {"loc": ["query", "limit"], "value": True}
+    assert compat.judge(old, new, {"1.1": [_widening(reason)]}) != []
+    reason["value"] = 1
+    assert compat.judge(old, new, {"1.1": [_widening(reason)]}) == []
