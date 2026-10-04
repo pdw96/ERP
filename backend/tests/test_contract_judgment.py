@@ -697,3 +697,55 @@ def test_a_formatted_value_is_not_a_reason() -> None:
     new["info"]["version"] = "1.1"
     reason = {"loc": ["query", "day"], "value": "not-a-date"}
     assert compat.judge(old, new, {"1.1": [_widening(reason)]}) != []
+
+
+def _named_request(spec_: dict[str, Any]) -> None:
+    _lots(spec_)["parameters"].append(
+        {"in": "query", "name": "mode", "schema": {"type": "string", "x-known-values": ["a"]}}
+    )
+
+
+def test_a_request_with_known_values_is_refused() -> None:
+    """**요청의 `x-known-values` 는 판정이 모르는 모양이다** — 받는 값을 바꾸지 않는 글인데
+    열거처럼 셀 수 있다(PR #84 Codex 리뷰 8 라운드)."""
+    new = _closed()
+    _named_request(new)
+    assert compat.admit(new) != []
+
+
+def test_a_reason_that_crosses_branches_is_refused() -> None:
+    """**근거의 자리가 `anyOf` 의 갈래를 지나면 받지 않는다** — 갈래마다 같은 자리가 있으면 어느
+    갈래와 견줄지 정할 수 없다(PR #84 Codex 리뷰 8 라운드)."""
+
+    def a_filter(old_kinds: list[str]) -> Callable[[dict[str, Any]], None]:
+        def change(spec_: dict[str, Any]) -> None:
+            branch = {
+                "type": "object",
+                "additionalProperties": False,
+                "properties": {"kind": {"type": "string", "enum": old_kinds}},
+            }
+            _schema(spec_, "RetestIn")["properties"]["filter"] = {
+                "anyOf": [branch, {"type": "null"}]
+            }
+
+        return change
+
+    old = _closed()
+    a_filter(["old"])(old)
+    new = _closed()
+    a_filter(["old", "new"])(new)
+    detail = _schema(new, "RetestRefusalDetail")["properties"]["type"]["x-known-values"]
+    detail.append("filter_is_new")
+    new["info"]["version"] = "1.1"
+    declared = {
+        "1.1": [
+            {
+                "operation": "POST /retests",
+                "name": "filter_is_new",
+                "change": "widening",
+                "because": [{"loc": ["body", "filter", "kind"], "value": "new"}],
+            }
+        ]
+    }
+    problems = compat.judge(old, new, declared)
+    assert any("갈래를 지난다" in problem for problem in problems), problems

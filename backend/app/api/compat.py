@@ -212,6 +212,10 @@ class _Admit:
         is_object = value.get("type") == "object" or "properties" in value
         if side == "request" and is_object and value.get("additionalProperties") is not False:
             self._found.append(f"{where} 의 요청 객체가 모르는 칸을 받는다")
+        # **요청의 열린 이름 목록은 판정이 모르는 모양이다** — 받는 값을 바꾸지 않는 글인데
+        # 열거처럼 셀 수 있다(PR #84 Codex 리뷰 8 라운드). 이 저장소는 응답의 이름에만 쓴다
+        if side == "request" and "x-known-values" in value:
+            self._found.append(f"{where} 의 요청에 `x-known-values` 가 있다")
         # **응답 객체는 칸을 닫지 않는다** — 닫으면 칸을 더하는 것이 넓히는 변경이 아니게 된다
         # (PR #84 Codex 리뷰 7 라운드). 이 저장소의 응답 모델은 칸을 닫지 않는다
         if side == "response" and "additionalProperties" in value:
@@ -654,6 +658,8 @@ def _not_new(old: Mapping[str, Any], new: Mapping[str, Any], key: str, item: Any
     loc = item["loc"]
     before = _find(operation(old, key), loc)
     after = _find(operation(new, key), loc)
+    if before is _CROSSED or after is _CROSSED:
+        return f"근거의 자리 {loc} 가 `anyOf` 의 갈래를 지난다 — 판정이 받지 않는 근거다"
     if "value" not in item:
         if after is None:
             return f"근거의 칸 {loc} 이 새 요청 스키마에 없다"
@@ -699,14 +705,18 @@ def _find(plain: Any, loc: list[Any]) -> Any:
     return schema
 
 
+# 근거의 자리가 `anyOf` 를 지난다는 표식 — 갈래마다 같은 자리가 있으면 어느 것을 견줄지 정할 수
+# 없다(PR #84 Codex 리뷰 8 라운드). 판정은 그런 자리를 근거로 받지 않는다
+_CROSSED: Any = object()
+
+
 def _step(schema: Any, part: str | int) -> Any:
+    if schema is _CROSSED:
+        return _CROSSED
     if not isinstance(schema, dict):
         return None
-    for key in _BRANCHES:
-        for branch in schema.get(key, []):
-            found = _step(branch, part)
-            if found is not None:
-                return found
+    if "anyOf" in schema:  # `admit` 이 옆 제약을 막았으므로 더 내려가려면 갈래를 지나야 한다
+        return _CROSSED
     if isinstance(part, int):
         return schema.get("items")
     return schema.get("properties", {}).get(part)
