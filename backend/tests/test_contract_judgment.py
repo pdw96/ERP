@@ -110,9 +110,9 @@ def test_the_version_moves_as_far_as_the_contract_moved() -> None:
     앞자리를 올려도 그렇다. `docs/openapi-declarations.json` 의 새 판 키 아래에 그 경로와
     이름을 적고 `"change"` 를 고른다. 가르는 선은 옛 요청 스키마다(ADR 0018). 받던
     요청에 나가면 `"breaking"`, 옛 요청 스키마 밖이던 입력에만 나가면 `"widening"` 이고
-    그 입력을 `"because"` 에 pydantic 의 `loc` 모양으로 든다 — 새 칸이면
-    `{"loc": [...]}`, 열거의 새 값이면 `{"loc": [...], "value": ...}`(값은 스칼라이고, 그 칸에
-    형식(`format`)이 붙지 않았어야 한다). 판정이
+    그 입력을 `"because"` 에 `{"loc": [...], "value": ...}` 로 든다 — `loc` 은 pydantic 의
+    모양이고, 값은 언제나 든다(새 칸이면 그 칸에 보낼 값 하나). 값은 스칼라이고, 그 칸에
+    형식(`format`)이 붙지 않았어야 하며, 자리가 `anyOf` 의 갈래를 지나지 않아야 한다. 판정이
     그 근거가 옛 사진에 없고 새 스펙의 제약을 모두 지나는지 견준다. 같은 경로 · 이름의
     선언은 하나다. 다른 판 키의 선언은 지나간 판의 기록이라 읽지 않는다.
 
@@ -355,7 +355,8 @@ def test_a_name_declared_widening_must_point_at_an_input_the_old_schema_did_not_
             ]
         }
 
-    sort, limit = {"loc": ["query", "sort"]}, {"loc": ["query", "limit"]}
+    sort = {"loc": ["query", "sort"], "value": "asc"}
+    limit = {"loc": ["query", "limit"], "value": 10}
     assert _judged(_new_name_for_a_new_query, "1.1", declared(sort)) == []
     assert _judged(_new_name_for_a_new_query, "1.1", declared(limit)) != []
     assert _judged(_new_name, "1.1", declared(sort)) != []
@@ -628,7 +629,7 @@ def _with_a_sort(spec_: dict[str, Any]) -> None:
         {
             "in": "query",
             "name": "sort",
-            "schema": {"type": "array", "items": {"type": "string"}},
+            "schema": {"type": "string"},
         }
     )
 
@@ -645,7 +646,7 @@ def _widening(*because: dict[str, Any]) -> dict[str, Any]:
 def test_two_declarations_of_one_name_are_refused() -> None:
     """**같은 경로 · 이름의 선언이 둘이면 빨갛다** — 어느 것을 믿을지가 파일의 순서에 달리면
     선언이 아니다(PR #84 Codex 리뷰 4 라운드)."""
-    sort = {"loc": ["query", "sort"]}
+    sort = {"loc": ["query", "sort"], "value": "asc"}
     broken = _broken("GET /lots", "limit_is_for_another_list")
     assert _judged(_with_a_sort, "1.1", {"1.1": [_widening(sort)]}) == []
     assert _judged(_with_a_sort, "1.1", {"1.1": [broken, _widening(sort)]}) != []
@@ -749,3 +750,30 @@ def test_a_reason_that_crosses_branches_is_refused() -> None:
     }
     problems = compat.judge(old, new, declared)
     assert any("갈래를 지난다" in problem for problem in problems), problems
+
+
+def test_a_reason_names_a_value() -> None:
+    """**근거는 언제나 값을 든다** — 칸만 들면 그 칸이 받을 수 있는 값이 있는지 모른다(PR #84
+    Codex 리뷰 9 라운드). 만족할 수 없는 칸에 보낸 값은 새 스키마가 받지 않는다."""
+    bare = {"loc": ["query", "sort"]}
+    assert _judged(_with_a_sort, "1.1", {"1.1": [_widening(bare)]}) != []
+
+    def impossible(spec_: dict[str, Any]) -> None:
+        _new_name(spec_)
+        schema = {"type": "string", "minLength": 2, "maxLength": 1}
+        _lots(spec_)["parameters"].append({"in": "query", "name": "sort", "schema": schema})
+
+    some = {"loc": ["query", "sort"], "value": "a"}
+    assert _judged(impossible, "1.1", {"1.1": [_widening(some)]}) != []
+
+
+@pytest.mark.parametrize("path", ["/lots/1", "/lots/{lot_number}"])
+def test_a_new_path_over_an_old_template_breaks(path: str) -> None:
+    """**새 경로가 기존 경로의 틀과 겹치면 깨는 변경이다** — 받던 요청을 가로챌 수 있다(PR #84
+    Codex 리뷰 9 라운드)."""
+
+    def overlap(spec_: dict[str, Any]) -> None:
+        spec_["paths"][path] = copy.deepcopy(spec_["paths"]["/lots/{lot_id}"])
+
+    assert _judged(overlap, "1.1") != []
+    assert _judged(overlap, "2.0") == []

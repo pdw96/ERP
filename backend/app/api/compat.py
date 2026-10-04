@@ -250,12 +250,33 @@ def compare(old: Mapping[str, Any], new: Mapping[str, Any]) -> Diff:
             after = new_paths.get(path, {}).get(method)
             key = f"{method.upper()} {path}"
             if before is None and after is not None:
-                diff.changes.append(Change("widening", key, "경로가 섰다"))
+                # **겹치는 경로는 넓히는 것이 아니다**(9 라운드) — `/lots/1` 은
+                # `/lots/{lot_id}` 가 받던 요청을 가로챌 수 있고, 거꾸로도 그렇다
+                overlaps = [
+                    p
+                    for p in old_paths
+                    if p != path and method in old_paths[p] and _overlap(p, path)
+                ]
+                if overlaps:
+                    diff.changes.append(
+                        Change("breaking", key, f"기존 경로 {overlaps} 와 겹친다")
+                    )
+                else:
+                    diff.changes.append(Change("widening", key, "경로가 섰다"))
             elif before is not None and after is None:
                 diff.changes.append(Change("breaking", key, "경로가 사라졌다"))
             elif before is not None and after is not None:
                 _Operation(diff, key).compare(operation(old, key), operation(new, key))
     return diff
+
+
+def _overlap(one: str, other: str) -> bool:
+    """두 경로 틀이 같은 요청 경로를 받을 수 있는가 — `{...}` 자리는 어느 마디와도 맞는다."""
+    left, right = one.strip("/").split("/"), other.strip("/").split("/")
+    return len(left) == len(right) and all(
+        a == b or a.startswith("{") or b.startswith("{")
+        for a, b in zip(left, right, strict=True)
+    )
 
 
 def operation(spec: Mapping[str, Any], key: str) -> dict[str, Any] | None:
@@ -644,7 +665,9 @@ def _declared(entries: Iterable[Any], problems: list[str]) -> dict[tuple[str, st
 def _is_input(item: Any) -> bool:
     return (
         isinstance(item, dict)
-        and set(item) <= {"loc", "value"}
+        # **근거는 언제나 값을 든다** — 칸만 들면 그 칸이 받을 수 있는 값이 하나라도 있는지
+        # 모른다(PR #84 Codex 리뷰 9 라운드). 새 칸이면 그 칸에 보낼 값 하나를 든다
+        and set(item) == {"loc", "value"}
         and isinstance(item.get("loc"), list)
         and len(item["loc"]) >= 1
         and all(isinstance(part, str | int) for part in item["loc"])
@@ -660,12 +683,6 @@ def _not_new(old: Mapping[str, Any], new: Mapping[str, Any], key: str, item: Any
     after = _find(operation(new, key), loc)
     if before is _CROSSED or after is _CROSSED:
         return f"근거의 자리 {loc} 가 `anyOf` 의 갈래를 지난다 — 판정이 받지 않는 근거다"
-    if "value" not in item:
-        if after is None:
-            return f"근거의 칸 {loc} 이 새 요청 스키마에 없다"
-        if before is not None:
-            return f"근거의 칸 {loc} 이 옛 요청 스키마에도 있었다 — 받던 요청이다"
-        return ""
     value = item["value"]
     if _formatted(after):
         # 판정은 형식(`format`)의 뜻을 모른다 — 그 값을 FastAPI 가 받는지 물을 수 없다(7 라운드)
