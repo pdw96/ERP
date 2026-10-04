@@ -96,7 +96,7 @@
 | `57a5bba` | — | 반품 쓰기 경로의 `_as_counted()` 만 `double` 로 바꿔도 잔량 검사가 통과한다 | `audit-quality` | 초록이 맞다 — 겹친 방어. 합이 `numeric` 이면 `double` 과의 비교에서 합 쪽 값이 이미 맞다. 합까지 바꾸면 빨갛다(`79d04b8` 묶음) |
 | `79d04b8` | — | 반품 쓰기 경로의 `_as_counted()` 만 `double` 로 바꿔도 잔량 검사가 통과한다 — 수를 고친 뒤에도 같다 | `audit-quality` | 초록이 맞다 — 겹친 방어. `57a5bba` 줄과 같은 자리다 |
 | `79d04b8` | — | 반품 쓰기 경로의 로트 잠금만 빼도 동시 반품 검사가 통과한다 | `audit-quality` | 초록이 맞다 — 겹친 방어. 검사와 로트가 하나씩 짝이라(`uq_lot_inspection`) 먼저 잡는 검사 잠금이 같은 로트의 반품을 줄 세운다. 둘 다 빼면 빨갛다. 로트를 검사 밖의 길로 줄이는 유형(폐기출고)이 서는 날 이 잠금이 홀로 선다 — 그 조각이 다시 잰다 |
-| `49b7d14` | 228 | `_is_type` 이 불리언을 정수로 받아도 통과한다 | `audit-quality` | 초록이 맞다 — 등가 어긋냄. 옛 형이 달라야 갈리는데 그때는 형의 변화가 이미 깨는 변경이다(「감사 ㊵ 의 고침」 묶음) |
+| `49b7d14` | 228 | `_is_type` 이 불리언을 정수로 받아도 통과한다 | `audit-quality` | **닫혔다** — 「등가 어긋냄」은 틀린 판정이었다. 요청 `anyOf` 에 정수 갈래가 서는 자리에서 거짓 근거가 지나간다(감사 ㊶ 낮음-2 · #91). 그 입력의 검사가 문다(「감사 ㊶ 의 고침」 묶음) |
 
 ## ⑧ 의 고침 (`03b6c1f`)
 
@@ -1467,3 +1467,29 @@ PostgreSQL 16)도 초록이다(392 passed).
   `_same` 을 무는 검사가 없었다 — 위 표의 마지막 줄이 다시 세웠다
 - `test_a_new_path_over_an_old_template_breaks` — `89e357e` 가 걷었다. 겹치는 틀은 이제
   `test_overlapping_path_templates_are_refused` 가 거절로 문다
+
+## 감사 ㊶ 의 고침 — 갈래 수 · 선다 · 풀린다 줄 · 불리언 가지 (`9e2358d`, 감사 NC-229 · 228)
+
+`app/api/compat.py` 의 분기를 하나씩 어긋낸 뒤 `tests/test_contract_judgment.py` 를 돌렸다. 어긋냄 없이 돌린 대조군과 같은 트리의 `pytest` 전체(실제 PostgreSQL 16)는 초록이다. NC-229 는 `test_each_line_of_the_list_moves_the_version` 에 매개변수 줄을 더해 고쳤다 — 단언과 `compat.py` 는 그대로이고, 줄을 짓는 준비 코드를 새로 더했다. 어긋냄마다 빨개진 줄은 그 어긋냄이 겨눈 매개변수 하나뿐이었다.
+
+| NC | 무엇을 어긋냈나 | 빨개진 검사 |
+|---|---|---|
+| 229 | 응답 본문의 미디어 타입이 서는 것을 넓히는 변경으로 셌다 | `test_each_line_of_the_list_moves_the_version` 의 `an-answer-media-comes` |
+| 229 | 응답 헤더가 서는 것을 깨는 변경으로 셌다 | `test_each_line_of_the_list_moves_the_version` 의 `an-answer-header-comes` |
+| 229 | `anyOf` 에 갈래가 서는 것을 응답에서도 넓히는 변경으로 셌다 | `test_each_line_of_the_list_moves_the_version` 의 `an-answer-branch-comes` |
+| 229 | `anyOf` 에 갈래가 서는 것을 요청에서도 깨는 변경으로 셌다 | `test_each_line_of_the_list_moves_the_version` 의 `a-request-branch-comes` |
+| 229 | `anyOf` 에서 갈래가 빠지는 것을 요청에서도 넓히는 변경으로 셌다 | `test_each_line_of_the_list_moves_the_version` 의 `a-request-branch-goes` |
+| 229 | `anyOf` 에서 갈래가 빠지는 것을 응답에서도 깨는 변경으로 셌다 | `test_each_line_of_the_list_moves_the_version` 의 `an-answer-branch-goes` |
+| 229 | 응답 칸이 필수가 되는 것을 깨는 변경으로 셌다 | `test_each_line_of_the_list_moves_the_version` 의 `an-answer-field-is-required` |
+| 229 | 요청 칸의 필수가 풀리는 것을 깨는 변경으로 셌다 | `test_each_line_of_the_list_moves_the_version` 의 `a-request-field-is-let-go` |
+| 229 | 필수 아닌 인자가 서는 것을 깨는 변경으로 셌다 | `test_each_line_of_the_list_moves_the_version` 의 `an-optional-input-comes` |
+| 228 | `_is_type` 이 불리언을 정수로 받았다(「감사 ㊵ 의 고침」 묶음의 초록 줄과 같은 어긋냄) | `test_a_boolean_is_not_a_reason_where_an_integer_branch_comes` |
+
+## 감사 ㊶ 의 고침 — 불리언 근거를 본문에서 잰다 (`a9df507`, PR #92 Codex 리뷰)
+
+위 묶음의 불리언 검사는 쿼리 인자에서 쟀는데, 쿼리 값은 언제나 문자열로 와 옛 `str` 인자가 `?mode=1` 도 받는다 — 검사가
+거짓 근거(`1`)를 맞는 예로 못박았다. 같은 검사를 본문 칸으로 옮겨 다시 쟀다. 어긋냄 없이 돌린 대조군은 초록이다.
+
+| NC | 무엇을 어긋냈나 | 빨개진 검사 |
+|---|---|---|
+| 228 | `_is_type` 이 불리언을 정수로 받았다 | `test_a_boolean_is_not_a_reason_where_an_integer_branch_comes` |
