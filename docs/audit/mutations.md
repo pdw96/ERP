@@ -1408,3 +1408,12 @@ PostgreSQL 16)도 초록이다(392 passed).
 | — | 요청의 `x-known-values` 를 받았다 | `test_a_request_with_known_values_is_refused` |
 | — | 근거의 자리가 갈래를 지나도 그 까닭을 내지 않았다 | `test_a_reason_that_crosses_branches_is_refused` — 처음 쓴 검사로는 빨개지지 않아(다른 까닭으로 빨갰고, 확인한 낱말이 경로 이름에도 들어 있었다) 그 까닭의 문구를 보게 고친 뒤 다시 쟀다 |
 | — | 근거의 자리를 첫 갈래로 내려가 찾았다 | `test_a_reason_that_crosses_branches_is_refused` |
+
+## 3단계 읽는 조각 B2 — 겹치는 경로 · 값 없는 근거 (`979930d`, PR #84 Codex 리뷰 9 라운드)
+
+`app/api/compat.py` 의 고침을 하나씩 되돌린 뒤 `tests/test_contract_judgment.py` 를 돌렸다. 어긋냄 없이 돌린 대조군과 같은 트리의 `pytest` 전체(실제 PostgreSQL 16)는 초록이다. 같은 커밋이 고친 CI 의 취소 규칙(`main` 은 취소하지 않는다)은 로컬에서 어긋낼 수 없다.
+
+| NC | 무엇을 어긋냈나 | 빨개진 검사 |
+|---|---|---|
+| — | 기존 경로의 틀과 겹치는 새 경로를 넓히는 변경으로 셌다 | `test_a_new_path_over_an_old_template_breaks` 의 둘 |
+| — | 값 없이 칸만 든 근거를 받았다 | `test_a_reason_names_a_value` |
