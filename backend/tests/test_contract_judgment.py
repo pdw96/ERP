@@ -1139,18 +1139,29 @@ def test_a_boolean_is_not_a_reason_for_an_integer() -> None:
     assert compat.judge(old, new, {"1.1": [_widening(reason)]}) == []
 
 
+def _mode_in_the_body(schema: dict[str, Any]) -> Callable[[dict[str, Any]], None]:
+    def change(spec_: dict[str, Any]) -> None:
+        _body_on_lots(False)(spec_)
+        body = _lots(spec_)["requestBody"]["content"]["application/json"]["schema"]
+        body["properties"]["mode"] = schema
+
+    return change
+
+
 def test_a_boolean_is_not_a_reason_where_an_integer_branch_comes() -> None:
     """**정수 갈래가 새로 선 자리에서도 불리언은 근거가 못 된다**(감사 ㊶ 낮음-2) — 요청
     `anyOf` 에 정수 갈래가 서는 것은 넓히는 변경이라, 옛 형이 달라도 판정이 근거를
     견준다. `_is_type` 이 불리언을 수로 읽으면 새 정수 갈래가 `True` 를 받아 거짓 근거가
-    지나간다."""
+    지나간다. **본문에서 잰다** — 쿼리 값은 언제나 문자열로 오므로 옛 `str` 인자가
+    `?mode=1` 도 받는다(PR #92 Codex 리뷰). JSON 본문의 `1` · `true` 는 문자열 칸이 받지
+    않는다."""
     old = _closed()
-    _mode({"anyOf": [_STRING]})(old)
+    _mode_in_the_body({"anyOf": [_STRING]})(old)
     new = _closed()
-    _mode({"anyOf": [_STRING, _INTEGER]})(new)
+    _mode_in_the_body({"anyOf": [_STRING, _INTEGER]})(new)
     _new_name(new)
     new["info"]["version"] = "1.1"
-    reason = {"loc": ["query", "mode"], "value": True}
+    reason = {"loc": ["body", "mode"], "value": True}
     assert compat.judge(old, new, {"1.1": [_widening(reason)]}) != []
     reason["value"] = 1
     assert compat.judge(old, new, {"1.1": [_widening(reason)]}) == []
