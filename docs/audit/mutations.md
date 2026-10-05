@@ -1517,3 +1517,23 @@ ADR 0024 가 「게이트를 세우는 조각은 하한을 어긋내 빨갛게 �
 | — | `[tool.coverage.run] branch` 를 `false` 로 바꿨다 | `test_the_judgment_module_keeps_its_branch_floor` |
 | — | 「판정 분기」 스텝이 판정 테스트가 아니라 `pytest` 전체를 돌려 재게 했다 | `test_the_judgment_module_keeps_its_branch_floor` |
 | — | 「판정 분기」 스텝의 `coverage report` 줄을 지웠다 | `test_every_check_step_is_still_there_and_can_still_fail` 와 `test_the_judgment_module_keeps_its_branch_floor` |
+
+## 4단계 조각 2 — 원장 줄의 창고 (`a0c0a09`, ADR 0022)
+
+가드를 먼저 세웠다 — 리비전이 없을 때 `test_upgrading_says_which_lot_holds_a_ledger_line_outside_the_raw_warehouse` 가
+「멈추지 않았다」로 빨간 것을 보고 리비전을 지었다. 아래는 그 뒤 하나씩 어긋낸 것이다. 어긋냄마다 고른 테스트 파일만
+돌렸고, 어긋냄 없이 돌린 같은 트리의 `pytest` 전체(실제 PostgreSQL 16)는 초록이다. 모델 쪽을 어긋낸 줄(M3 ~ M8)은
+리비전과 모델을 견주는 `tests/test_migrations.py` 도 함께 빨개지는 자리다 — 여기서는 겨냥한 검사만 돌렸다.
+
+| NC | 무엇을 어긋냈나 | 빨개진 검사 |
+|---|---|---|
+| — | 올릴 때의 가드(원재료창고가 아닌 로트의 원장 줄)를 지웠다 | `test_upgrading_says_which_lot_holds_a_ledger_line_outside_the_raw_warehouse` — CHECK 이름만 나와 로트 번호를 찾지 못한다 |
+| — | 내릴 때의 가드 조건을 `AND FALSE` 로 꺼 두었다 | `test_downgrade_counts_the_lines_that_would_lose_their_warehouse` |
+| — | 원장 줄의 창고 목록 CHECK 를 `TRUE` 로 바꿨다(모델) | `test_a_line_stands_only_in_a_warehouse_that_exists` |
+| — | 「창고가 담는 품목 유형」 CHECK 를 `TRUE` 로 바꿨다(모델) | `test_a_line_stands_only_in_a_warehouse_that_holds_its_item` |
+| — | 유형 쌍 외래키를 `(lot_id) → lots (id)` 하나로 줄였다(모델) | `test_a_line_takes_its_item_type_from_its_lot` |
+| — | 「유형이 정하는 창고」 CHECK 를 `TRUE` 로 바꿨다(모델) | `test_a_receipt_comes_into_the_raw_warehouse` 와 `test_a_return_leaves_from_the_raw_warehouse` |
+| — | 잔량 트리거의 「입고 줄의 창고 = 로트의 들어온 창고」 견줌을 `FALSE` 로 껐다 | `test_a_receipt_stands_in_the_warehouse_its_lot_came_into` |
+| — | 들어온 창고를 굳히는 트리거를 걸지 않았다(함수만 두고 `CREATE TRIGGER` 를 뺐다) | `test_the_warehouse_a_lot_came_into_stays_once_its_ledger_has_a_line` |
+| — | 재검사 쓰기 경로가 폐기 줄을 생산창고에 적게 했다 | `test_a_failure_throws_away_everything_left` — 「유형이 정하는 창고」가 폐기를 묻지 않으므로 제약은 지나가고, 쓰기 경로의 단언이 문다 |
+| — | 반품 쓰기 경로가 원장 줄을 생산창고에 적게 했다 | `test_a_lot_return_takes_one_ledger_line` 외 `tests/test_return_path.py` 넷 · `tests/test_return_api.py` 둘 |

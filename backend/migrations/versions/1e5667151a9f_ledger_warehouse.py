@@ -284,8 +284,9 @@ def upgrade() -> None:
     )
     # **채우는 동안만 잔량 트리거를 끈다.** 그 트리거는 원장 줄의 `UPDATE` 를 전부 거부한다 —
     # 사람이 일어난 일을 고치는 길을 막는 것이고, 그것이 맞다. 여기서 쓰는 것은 이 리비전이 방금
-    # 세운 빈 칸뿐이고 옛 줄의 사실(로트 · 유형 · 수량 · 시각)은 그대로다. `ALTER TABLE` 은 표에
-    # ACCESS EXCLUSIVE 를 잡으므로 그사이 다른 쓰기가 트리거 없이 끼지 못하고, 리비전 전체가 한
+    # 세운 빈 칸뿐이고 옛 줄의 사실(로트 · 유형 · 수량 · 시각)은 그대로다. 그사이 다른 쓰기가
+    # 트리거 없이 끼지 못하는 것은 위에서 칸을 더한 `ADD COLUMN` 이 ACCESS EXCLUSIVE 를 커밋까지
+    # 쥐고 있어서다 — 트리거를 끄는 문장 자신은 SHARE ROW EXCLUSIVE 만 잡는다. 리비전 전체가 한
     # 트랜잭션이라 중간에 멈추면 끈 것도 함께 되돌아간다.
     op.execute(
         "ALTER TABLE stock_ledger_entries DISABLE TRIGGER stock_ledger_entry_keeps_the_balance"

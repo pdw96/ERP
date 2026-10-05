@@ -43,7 +43,7 @@ ERP_TEST_DATABASE_URL="postgresql+psycopg://erp:erp@127.0.0.1:5432/erp_test" .ve
 
 ## 지금 어디인가
 
-**4단계 — 재고가 옮겨 가는 길. 첫 조각(판정의 분기 커버리지 하한, ADR 0024)이 섰다.** 범위는 `PRD.md`, 표의 초안은
+**4단계 — 재고가 옮겨 가는 길. 둘째 조각(원장 줄의 창고, ADR 0022)이 섰다.** 범위는 `PRD.md`, 표의 초안은
 `docs/schema-4단계.md`, 지어진 표의 색인은 `docs/schema.md` 가 든다. 닫힌 단계는
 `docs/PRD-1단계.md` · `docs/PRD-2단계.md` · `docs/PRD-3단계.md` 에 있고, 조각마다 무엇이 섰는지는 `README.md` 가 말한다.
 **다음 조각을 시작하기 전에 대장(`docs/audit/README.md`)과 열린 `audit-low` 이슈를 읽는다** — 열린 부적합과
