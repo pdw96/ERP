@@ -1537,3 +1537,13 @@ ADR 0024 가 「게이트를 세우는 조각은 하한을 어긋내 빨갛게 �
 | — | 들어온 창고를 굳히는 트리거를 걸지 않았다(함수만 두고 `CREATE TRIGGER` 를 뺐다) | `test_the_warehouse_a_lot_came_into_stays_once_its_ledger_has_a_line` |
 | — | 재검사 쓰기 경로가 폐기 줄을 생산창고에 적게 했다 | `test_a_failure_throws_away_everything_left` — 「유형이 정하는 창고」가 폐기를 묻지 않으므로 제약은 지나가고, 쓰기 경로의 단언이 문다 |
 | — | 반품 쓰기 경로가 원장 줄을 생산창고에 적게 했다 | `test_a_lot_return_takes_one_ledger_line` 외 `tests/test_return_path.py` 넷 · `tests/test_return_api.py` 둘 |
+
+## 4단계 조각 2 — 업그레이드의 lots 잠금 (`a8ae5a2`, PR #99 Codex 리뷰 1 라운드)
+
+업그레이드가 묻고 채우는 동안 `lots` 를 잠그지 않으면, 옛 버전의 트랜잭션이 그사이 로트의 창고를 바꿔도 가드와
+채우기가 옛 값을 읽어 로트와 입고 줄이 갈린 채로 올라간다. 리비전 맨 앞의 잠금 줄을 지우고 경합 테스트를 돌렸다 —
+어긋냄 없이 돌린 같은 트리의 `pytest` 전체(실제 PostgreSQL 16)는 초록이다.
+
+| NC | 무엇을 어긋냈나 | 빨개진 검사 |
+|---|---|---|
+| — | 리비전 맨 앞의 `LOCK TABLE lots IN SHARE ROW EXCLUSIVE MODE` 를 지웠다 | `test_upgrading_does_not_miss_a_lot_moved_while_it_runs` — 업그레이드가 「went through」로 끝난다 |
