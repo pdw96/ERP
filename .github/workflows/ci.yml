@@ -113,6 +113,20 @@ jobs:
           ERP_TEST_DATABASE_URL: postgresql+psycopg://erp:erp@localhost:5432/erp_test
         run: pytest
 
+      # ── 판정의 분기 커버리지 (ADR 0024) ────────────────────────────────────
+      # 판정 모듈(`app/api/compat.py`)의 분기가 판정 테스트에서 하나도 빠짐없이 도는가. 범위와
+      # 하한은 `backend/pyproject.toml` 의 `[tool.coverage]` 한 자리가 든다 — 여기 적지 않는다.
+      # **판정 테스트만 돌린다** — 다른 테스트가 우연히 지나간 분기는 판정 목록을 문 것이 아니다.
+      # 옛 계약은 위 「계약의 기준」 스텝이 남긴 `ERP_CONTRACT_BASELINE` 을 그대로 받는다.
+      #
+      # **이 스텝이 못 보는 것**(W-6 ③): 같은 줄이 인자에 따라 종류를 가르는 자리
+      # (`_map(..., "breaking")` 처럼) — 돌기만 하면 센다. 그 자리는 손으로 돌리는 어긋냄
+      # 기록(`docs/audit/mutations.md`)이 든다(ADR 0024 「결과」).
+      - name: 판정 분기
+        run: |
+          coverage run -m pytest tests/test_contract_judgment.py
+          coverage report
+
       # ── 컨테이너 부팅 경로 (감사 ⑪ NC-133) ────────────────────────────────
       # **이 잡에 붙인다. 새 잡을 만들지 않는다.** 필수 상태 체크는 잡 이름으로
       # 거는데 새 잡은 그 목록에 없으므로, 초록이어도 아무것도 막지 못한다 —

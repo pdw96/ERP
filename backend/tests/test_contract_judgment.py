@@ -1165,3 +1165,117 @@ def test_a_boolean_is_not_a_reason_where_an_integer_branch_comes() -> None:
     assert compat.judge(old, new, {"1.1": [_widening(reason)]}) != []
     reason["value"] = 1
     assert compat.judge(old, new, {"1.1": [_widening(reason)]}) == []
+
+
+# ── 4단계 조각 1 — 분기 커버리지 하한 (ADR 0024) ───────────────────────────────────
+# 하한을 세우며 `compat.py` 에서 테스트가 한 번도 돌리지 않던 분기를 하나씩 문다.
+# 거절의 **까닭**을 견준다 — `!= []` 만 보면 같은 입력이 다른 분기로 빨개져도 초록이다.
+
+
+def _path_item_not_an_object(spec_: dict[str, Any]) -> None:
+    spec_["paths"]["/ping"] = []
+
+
+def _schema_not_an_object(spec_: dict[str, Any]) -> None:
+    _schema(spec_, "LotOut")["properties"]["anything"] = True
+
+
+def _ref_outside_the_components(spec_: dict[str, Any]) -> None:
+    _schema(spec_, "LotOut")["properties"]["x"] = {"$ref": "#/definitions/X"}
+
+
+def _ref_to_nothing(spec_: dict[str, Any]) -> None:
+    _schema(spec_, "LotOut")["properties"]["x"] = {"$ref": "#/components/schemas/Nothing"}
+
+
+def _additional_properties_a_schema(spec_: dict[str, Any]) -> None:
+    # 객체가 아닌 요청 스키마에 건다 — 객체면 「모르는 칸을 받는다」가 함께 나서
+    # 이 까닭을 가린다
+    _mode({"type": "string", "additionalProperties": {}})(spec_)
+
+
+@pytest.mark.parametrize(
+    ("change", "reason"),
+    [
+        pytest.param(_path_item_not_an_object, "경로 /ping 이 객체가 아니다", id="path-item"),
+        pytest.param(_schema_not_an_object, "스키마가 객체가 아니다", id="schema"),
+        pytest.param(_ref_outside_the_components, "`$ref` '#/definitions/X'", id="ref-outside"),
+        pytest.param(_ref_to_nothing, "가리키는 것이 없다", id="ref-to-nothing"),
+        pytest.param(
+            _additional_properties_a_schema,
+            "`additionalProperties` 가 참 · 거짓이 아니다",
+            id="additional-properties",
+        ),
+    ],
+)
+def test_admit_says_why_it_refuses(
+    change: Callable[[dict[str, Any]], object], reason: str
+) -> None:
+    """**판정이 모르는 모양마다 까닭이 따로 선다** — 위 「모르는 모양」 검사가 거절을 묻는다면,
+    이 검사는 그 거절이 **그 자리의** 분기에서 났는지 묻는다."""
+    new = _closed()
+    change(new)
+    found = compat.admit(new)
+    assert [line for line in found if reason in line], found
+
+
+@pytest.mark.parametrize(
+    ("old_branch", "new_branch", "refused", "taken"),
+    [
+        pytest.param(_INTEGER, {"type": "string", "minLength": 2}, "a", "ab", id="min-length"),
+        pytest.param(
+            _STRING, {"type": "integer", "exclusiveMaximum": 5}, 5, 4, id="exclusive-maximum"
+        ),
+        pytest.param(
+            _STRING, {"type": "integer", "exclusiveMinimum": 5}, 5, 6, id="exclusive-minimum"
+        ),
+    ],
+)
+def test_a_reason_must_pass_every_bound_of_the_new_branch(
+    old_branch: dict[str, Any], new_branch: dict[str, Any], refused: Any, taken: Any
+) -> None:
+    """**근거의 값은 새 갈래의 경계마다 걸려 본다** — 경계 하나가 빠지면 그 경계 밖의 값이 거짓
+    근거로 지나간다. 받는 값을 함께 들어 그 경계 **하나만** 가르는지 본다(ADR 0024)."""
+    old = _closed()
+    _mode_in_the_body({"anyOf": [old_branch]})(old)
+    new = _closed()
+    _mode_in_the_body({"anyOf": [old_branch, new_branch]})(new)
+    _new_name(new)
+    new["info"]["version"] = "1.1"
+    reason = {"loc": ["body", "mode"], "value": refused}
+    problems = compat.judge(old, new, {"1.1": [_widening(reason)]})
+    assert [line for line in problems if "새 요청 스키마가 받지 않는다" in line], problems
+    reason["value"] = taken
+    assert compat.judge(old, new, {"1.1": [_widening(reason)]}) == []
+
+
+@pytest.mark.parametrize(
+    ("loc", "value", "why"),
+    [
+        pytest.param(["body", "mode", 0], 1, None, id="an-item-by-its-index"),
+        pytest.param(
+            ["body", "mode", 0], True, "새 요청 스키마가 받지 않는다", id="item-refused"
+        ),
+        pytest.param(
+            ["body", "nothing"], 1, "새 요청 스키마가 받지 않는다", id="no-such-field"
+        ),
+        pytest.param(
+            ["body", "nothing", "deeper"], 1, "새 요청 스키마가 받지 않는다", id="below-nothing"
+        ),
+        pytest.param(["body", "mode", 0, "x", "y"], 1, "갈래를 지난다", id="past-the-branches"),
+    ],
+)
+def test_a_reason_is_found_by_its_place(loc: list[Any], value: Any, why: str | None) -> None:
+    """**근거는 그 자리(`loc`)로 찾는다** — 수 마디는 배열의 항목으로, 없는 칸은 찾지 못한
+    자리로, `anyOf` 를 지난 뒤의 마디는 더 내려가도 지난 자리로 남는다(ADR 0024)."""
+    old = _closed()
+    _mode_in_the_body({"type": "array", "items": {"anyOf": [_STRING]}})(old)
+    new = _closed()
+    _mode_in_the_body({"type": "array", "items": {"anyOf": [_STRING, _INTEGER]}})(new)
+    _new_name(new)
+    new["info"]["version"] = "1.1"
+    problems = compat.judge(old, new, {"1.1": [_widening({"loc": loc, "value": value})]})
+    if why is None:
+        assert problems == []
+    else:
+        assert [line for line in problems if why in line], problems

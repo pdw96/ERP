@@ -59,6 +59,7 @@ _CI_STEPS = {
     "타입체크": r"mypy$",
     "계약의 기준": r"git fetch --no-tags --depth=1 origin",
     "테스트": r"pytest",
+    "판정 분기": r"coverage report$",
     "셸": r"git ls-files .*\| xargs .*shellcheck",
     "이미지": r"docker build ",
     "기동": r"curl -fsS -o /dev/null -X POST ",
@@ -203,3 +204,27 @@ def test_the_type_check_covers_every_gate_file() -> None:
 
     missing = [path for path in ("app", "migrations", *_GATE_FILES) if path not in files]
     assert missing == [], f"타입 검사의 범위([tool.mypy] files)에 없다: {missing}"
+
+
+def test_the_judgment_module_keeps_its_branch_floor() -> None:
+    """**판정 모듈의 분기 커버리지 하한이 그대로 있다** (ADR 0024 — 4단계 조각 1).
+
+    하한은 `pyproject.toml` 의 `[tool.coverage]` 한 자리가 든다. 위 검사는 「판정 분기」 스텝의
+    `coverage report` 가 있는 것만 문다 — 설정에서 하한을 내리거나 · 분기를 끄거나 · 범위를
+    넓혀 다른 모듈의 줄로 메워도 그 명령은 그대로 초록이다. 그래서 설정의 세 값과, 그 스텝이
+    **판정 테스트를** 돌려 재는 것을 여기서 문다.
+
+    **이 검사가 못 보는 부류**(W-6 ③): 판정 모듈 안에서 빼는 표시(`pragma: no cover`)로 분기를
+    덮는 것 — 설정이 아니라 코드의 글자다. 그 자리는 diff 를 보는 사람이다(`pyproject.toml` 의
+    주석이 「덮지 않고 걷어 낸다」를 든다).
+    """
+    config = tomllib.loads((BACKEND_ROOT / "pyproject.toml").read_text())["tool"]["coverage"]
+    assert config["run"].get("branch") is True, "분기가 아니라 줄을 잰다"
+    assert config["run"].get("source") == ["app.api.compat"], config["run"].get("source")
+    assert config["report"].get("fail_under") == 100, config["report"].get("fail_under")
+
+    _, steps = _backend_steps((REPO_ROOT / ".github" / "workflows" / "ci.yml").read_text())
+    lines = _executable_lines(steps["판정 분기"])
+    assert lines.index("coverage run -m pytest tests/test_contract_judgment.py") < lines.index(
+        "coverage report"
+    ), lines
