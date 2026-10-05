@@ -339,10 +339,14 @@ def retest(session: Session, request: IncomingRetest) -> Retested:
     # ── 떨어진 로트는 잔량 전부가 나간다 ───────────────────────────────────
     # 잔량이 있는 로트는 입고 줄이 있고, 입고 줄은 로트를 만든 검사와 쌍이다.
     assert lot.inspection_id is not None
+    # **창고는 로트가 들어온 창고다** — 이동이 서기 전에는 로트가 한 창고에만 있다. 나뉜 로트를
+    # 창고마다 한 줄로 폐기하는 것은 이동이 서는 조각의 일이다(`docs/schema-4단계.md`).
     entry = StockLedgerEntry(
         lot_id=lot.id,
         inspection_id=lot.inspection_id,
         txn_type=codes.TXN_DISPOSAL,
+        warehouse=lot.warehouse,
+        item_type=lot.item_type,
         quantity=left,
         occurred_at=judged_at,
         retest_id=inspection.id,

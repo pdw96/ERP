@@ -170,6 +170,8 @@ def an_expired_lot(
                 lot_id=lot.id,
                 inspection_id=passed.id,
                 txn_type=codes.TXN_PURCHASE_RECEIPT,
+                warehouse=codes.WAREHOUSE_RAW,
+                item_type=codes.RAW_MATERIAL,
                 quantity=quantity,
                 occurred_at=datetime.combine(arrived, datetime.min.time()),
             )
@@ -290,6 +292,8 @@ def test_a_failure_throws_away_everything_left(planted: Session) -> None:
         380.0,
         retested.inspection_id,
     )
+    # **나가는 창고는 로트가 있는 창고다** — 이동이 서기 전에는 들어온 창고 하나다(4단계 조각 2)
+    assert (entry.warehouse, entry.item_type) == (lot.warehouse, lot.item_type)
     assert _balance(planted, lot.id) == 0.0
 
 

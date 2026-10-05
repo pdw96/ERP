@@ -75,6 +75,12 @@ from app.core import codes
 # 일부만 버리면 떨어진 물건이 재고에 남는다. 폐기 줄은 재검사만 가리키고 양을 들지 않으므로
 # (재검사는 로트를 통째로 본다) 그 양이 맞는지는 합을 세는 이 자리가 본다.
 #
+# **입고 줄의 창고는 그 로트의 `lots.warehouse` 다**(4단계). 로트의 창고는 「들어온 창고」라는
+# 지나간 사실이 되고, 입고 줄이 그것을 원장에 적는다. 둘이 갈리면 로트는 생산창고로 들어왔다고
+# 말하는데 원장은 원재료창고로 들어왔다고 말한다. 입고 수량을 로트와 견주는 같은 자리에서 본다 —
+# 유형에 따라 걸리는 조건이라 외래키로 쓰면 입고 줄에서만 차는 칸과 양방향 CHECK 가 따라온다
+# (저장소 소유자, 2026-10-05).
+#
 # **유형이 없거나 로트가 없으면 아무 말 없이 넘긴다.** 그 줄은 외래키가 거부하고,
 # 거기서 나오는 말(제약 이름)이 더 정확하다. **셀 수 없는 수(`NaN` · 무한대)도
 # 넘긴다** — 넘기지 않으면 합이 `NaN` 이나 무한대가 되어 트리거가 엉뚱한 말(「잔량이
@@ -88,6 +94,7 @@ CREATE OR REPLACE FUNCTION stock_ledger_entry_keeps_the_balance() RETURNS trigge
 LANGUAGE plpgsql AS $$
 DECLARE
   lot_quantity double precision;
+  lot_warehouse text;
   lot_label text;
   effect text;
   expected text;
@@ -104,7 +111,7 @@ BEGIN
     RETURN NEW;
   END IF;
 
-  SELECT quantity, lot_number INTO lot_quantity, lot_label
+  SELECT quantity, warehouse, lot_number INTO lot_quantity, lot_warehouse, lot_label
   FROM lots WHERE id = NEW.lot_id FOR NO KEY UPDATE;
   IF NOT FOUND THEN
     RETURN NEW;
@@ -114,6 +121,13 @@ BEGIN
      AND NEW.quantity IS DISTINCT FROM lot_quantity THEN
     RAISE EXCEPTION '입고 줄의 수량(%)이 로트 %의 수량(%)과 다르다',
       NEW.quantity, lot_label, lot_quantity
+      USING ERRCODE = 'check_violation';
+  END IF;
+
+  IF NEW.txn_type = '{codes.TXN_PURCHASE_RECEIPT}'
+     AND NEW.warehouse IS DISTINCT FROM lot_warehouse THEN
+    RAISE EXCEPTION '입고 줄의 창고(%)가 로트 %의 들어온 창고(%)와 다르다',
+      NEW.warehouse, lot_label, lot_warehouse
       USING ERRCODE = 'check_violation';
   END IF;
 
@@ -201,6 +215,33 @@ LOT_QUANTITY_TRIGGER = """
 CREATE TRIGGER lot_quantity_stays_with_its_ledger
 BEFORE UPDATE OF quantity ON lots
 FOR EACH ROW EXECUTE FUNCTION lot_quantity_stays_with_its_ledger()
+"""
+
+# ── 로트 — 원장이 선 뒤에는 들어온 창고가 움직이지 않는다 (4단계) ──────────
+#
+# **`lots.warehouse` 는 「들어온 창고」다**(ADR 0022) — 로트가 지금 어디에 얼마 있는지는 원장
+# 줄의 창고별 합이고, 이 칸은 지나간 사실이다. 원장에 줄이 선 뒤에 고치면 고칠 수 없는 입고 줄의
+# 창고와 갈린다. 수량을 지키는 트리거와 같은 모양이다 — 줄이 없는 로트는 막지 않는다. 첫 줄이
+# 서기 전의 틈은 입고 줄을 넣을 때 위의 잔량 트리거가 로트와 견주어 닫는다.
+LOT_WAREHOUSE_FUNCTION = """
+CREATE OR REPLACE FUNCTION lot_warehouse_stays_with_its_ledger() RETURNS trigger
+LANGUAGE plpgsql AS $$
+BEGIN
+  IF NEW.warehouse IS DISTINCT FROM OLD.warehouse
+     AND EXISTS (SELECT 1 FROM stock_ledger_entries WHERE lot_id = OLD.id) THEN
+    RAISE EXCEPTION
+      '로트 %의 들어온 창고는 원장에 줄이 선 뒤에 고치지 않는다 — 입고 줄과 갈린다',
+      OLD.lot_number
+      USING ERRCODE = 'restrict_violation';
+  END IF;
+  RETURN NEW;
+END $$
+"""
+
+LOT_WAREHOUSE_TRIGGER = """
+CREATE TRIGGER lot_warehouse_stays_with_its_ledger
+BEFORE UPDATE OF warehouse ON lots
+FOR EACH ROW EXECUTE FUNCTION lot_warehouse_stays_with_its_ledger()
 """
 
 # ── 유형 — 원장이 선 뒤에는 방향이 움직이지 않는다 ──────────────────────────
@@ -597,6 +638,8 @@ def install(*, ledger: FromClause, returns: FromClause) -> None:
             LEDGER_GUARD_TRIGGER,
             LOT_QUANTITY_FUNCTION,
             LOT_QUANTITY_TRIGGER,
+            LOT_WAREHOUSE_FUNCTION,
+            LOT_WAREHOUSE_TRIGGER,
             EFFECT_FUNCTION,
             EFFECT_TRIGGER,
             RETEST_ADMISSION_FUNCTION,

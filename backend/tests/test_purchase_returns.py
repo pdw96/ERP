@@ -141,6 +141,8 @@ def _receipt(lot: Lot) -> StockLedgerEntry:
         lot_id=lot.id,
         inspection_id=lot.inspection_id,
         txn_type=codes.TXN_PURCHASE_RECEIPT,
+        warehouse=codes.WAREHOUSE_RAW,
+        item_type=codes.RAW_MATERIAL,
         quantity=lot.quantity,
         occurred_at=datetime(2026, 9, 21, 9, 30),
     )
@@ -200,6 +202,8 @@ def _return_line(document: PurchaseReturn, **overrides: object) -> StockLedgerEn
         "lot_id": document.lot_id,
         "inspection_id": document.inspection_id,
         "txn_type": codes.TXN_PURCHASE_RETURN,
+        "warehouse": codes.WAREHOUSE_RAW,
+        "item_type": codes.RAW_MATERIAL,
         "quantity": document.quantity,
         "occurred_at": document.returned_at,
         "purchase_return_id": document.id,
@@ -347,6 +351,8 @@ def test_a_return_line_names_its_document(prepared: Session) -> None:
             lot_id=lot.id,
             inspection_id=lot.inspection_id,
             txn_type=codes.TXN_PURCHASE_RETURN,
+            warehouse=codes.WAREHOUSE_RAW,
+            item_type=codes.RAW_MATERIAL,
             quantity=100.0,
             occurred_at=RETURNED,
         )
@@ -404,6 +410,8 @@ def test_a_type_without_a_document_still_cannot_stand(prepared: Session) -> None
             lot_id=lot.id,
             inspection_id=lot.inspection_id,
             txn_type=NOT_YET,
+            warehouse=codes.WAREHOUSE_RAW,
+            item_type=codes.RAW_MATERIAL,
             quantity=100.0,
             occurred_at=RETURNED,
         )

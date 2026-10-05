@@ -45,6 +45,12 @@ _WAREHOUSE_HOLDS_ITEM_TYPE = " OR ".join(
 )
 
 # 로트가 온 곳이 품목 유형을 따른다 — 자재는 사 오고 자사 품목은 만들어 낸다.
+# 유형이 창고를 정하는 줄은 그 창고에만 선다 — 목록 밖의 유형은 고르지 않는다.
+_LEDGER_TYPE_SETS_WAREHOUSE = " AND ".join(
+    f"(txn_type <> '{txn_type}' OR warehouse = '{warehouse}')"
+    for txn_type, warehouse in codes.LEDGER_TYPE_WAREHOUSES.items()
+)
+
 _ORIGIN_MATCHES_ITEM_TYPE = " OR ".join(
     f"(lot_origin = '{origin}' AND item_type IN ({_quoted(item_types)}))"
     for origin, item_types in codes.LOT_ORIGIN_ITEM_TYPES.items()
@@ -207,6 +213,11 @@ class Lot(Base):
         # **재검사가 가리킬 상대.** 재검사는 로트를 품목과 쌍으로 가리켜, 남의 품목 기준으로
         # 잰 재검사가 서지 않게 한다(`fk_inspection_target_lot`).
         UniqueConstraint("id", "item_id", name="uq_lot_id_item"),
+        # **원장 줄이 유형을 끌어올 상대**(4단계). 원장 줄의 창고가 그 품목을 담을 수 있는지는
+        # 유형을 알아야 묻는데, 유형은 로트를 건너야 보인다 — 원장 줄이 이 쌍을 가리켜 유형을
+        # 끌어온다(`fk_stock_ledger_entry_lot_type`). 기본키 `id` 하나로는 두 칸 외래키가 서지
+        # 않는다.
+        UniqueConstraint("id", "item_type", name="uq_lot_id_item_type"),
     )
 
     id: Mapped[int] = mapped_column(primary_key=True)
@@ -534,6 +545,29 @@ class StockLedgerEntry(Base):
         CheckConstraint(
             f"quantity >= 0 AND {is_finite('quantity')}", name="ck_stock_ledger_entry_quantity"
         ),
+        # ── 줄이 선 창고 (4단계, ADR 0022) ─────────────────────────────────────
+        # **로트는 하나여도 창고는 줄마다다** — 일부를 옮기면 한 로트가 두 창고에 선다. 잔량을
+        # 창고별로 세는 것은 이동이 서는 조각의 일이고, 이 칸은 그 앞에서 「어디서
+        # 일어났는가」를 적는다.
+        CheckConstraint(
+            f"warehouse IN ({_quoted(codes.WAREHOUSES)})",
+            name="ck_stock_ledger_entry_warehouse",
+        ),
+        # **그 창고가 그 품목을 담을 수 있다** — `lots` 의 같은 이름 규칙이 줄에도 걸린다.
+        # 유형은 아래 외래키가 로트에서 끌어온다.
+        CheckConstraint(
+            _WAREHOUSE_HOLDS_ITEM_TYPE, name="ck_stock_ledger_entry_warehouse_holds_type"
+        ),
+        ForeignKeyConstraint(
+            ["lot_id", "item_type"],
+            ["lots.id", "lots.item_type"],
+            name="fk_stock_ledger_entry_lot_type",
+        ),
+        # **유형이 창고를 정한다**(`codes.LEDGER_TYPE_WAREHOUSES`) — 사 온 물건은 원재료창고로
+        # 들어오고, 공급사에 돌려보내는 것도 원재료창고에서만 나간다.
+        CheckConstraint(
+            _LEDGER_TYPE_SETS_WAREHOUSE, name="ck_stock_ledger_entry_type_sets_warehouse"
+        ),
         # **로트 하나에 입고 줄은 하나다.** 둘이 서면 같은 물건이 두 번 들어온
         # 것이 되고, 잔량이 실물의 두 배가 된다.
         #
@@ -581,6 +615,13 @@ class StockLedgerEntry(Base):
 
     quantity: Mapped[float] = mapped_column(Float)
     occurred_at: Mapped[datetime] = mapped_column(DateTime)
+
+    # **이 줄이 일어난 창고.** 구매입고 줄은 그 로트의 `lots.warehouse` 와 같다 — 줄을 넣을 때
+    # 잔량 트리거가 견준다(`stock_ledger_entry_keeps_the_balance`).
+    warehouse: Mapped[str] = mapped_column(String(20))
+    # **값을 나르는 칸이 아니라 외래키의 자리다** — 로트의 유형을 끌어와 위의 「창고가 담는
+    # 품목 유형」을 이 줄에서 묻게 한다.
+    item_type: Mapped[str] = mapped_column(String(20))
 
     # **그 로트를 만든 검사를 가리킨다.** 입고 줄에는 그것이 근거이고, 반품 · 폐기 줄에는
     # 「어느 판정으로 들어온 물건이 나갔는가」다. 반품은 검사를 아는 로트만 하고, 폐기는

@@ -612,6 +612,9 @@ def receive(session: Session, request: IncomingInspection) -> Judged:
     entry = StockLedgerEntry(
         lot_id=lot.id,
         txn_type=codes.TXN_PURCHASE_RECEIPT,
+        # 입고 줄의 창고는 로트가 들어온 창고다 — 잔량 트리거가 견준다
+        warehouse=lot.warehouse,
+        item_type=lot.item_type,
         quantity=request.quantity,
         occurred_at=judged_at,
         inspection_id=inspection.id,

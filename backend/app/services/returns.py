@@ -291,6 +291,10 @@ def return_to_supplier(session: Session, request: IncomingReturn) -> Returned:
     entry = StockLedgerEntry(
         lot_id=lot.id,
         txn_type=codes.TXN_PURCHASE_RETURN,
+        # 반품은 원재료창고에서만 나간다(저장소 소유자, 2026-10-05) — 원장 CHECK 가 같은
+        # 목록으로 건다
+        warehouse=codes.LEDGER_TYPE_WAREHOUSES[codes.TXN_PURCHASE_RETURN],
+        item_type=lot.item_type,
         quantity=request.quantity,
         occurred_at=returned_at,
         inspection_id=inspection.id,

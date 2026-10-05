@@ -935,6 +935,8 @@ def test_a_receipt_line_cannot_name_someone_elses_judgement(prepared: Session) -
         StockLedgerEntry(
             lot_id=bare_lot.id,
             txn_type=codes.TXN_PURCHASE_RECEIPT,
+            warehouse=codes.WAREHOUSE_RAW,
+            item_type=codes.RAW_MATERIAL,
             # **로트 수량과 같게 둔다** — 다르면 잔량 트리거가 **먼저** 물어 짝은
             # 묻지 않게 된다.
             quantity=500.0,
