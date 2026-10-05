@@ -100,6 +100,8 @@ def _entry(session: Session, **overrides: object) -> StockLedgerEntry:
         "lot_id": session.query(Lot).one().id,
         "inspection_id": session.query(Inspection).one().id,
         "txn_type": codes.TXN_PURCHASE_RECEIPT,
+        "warehouse": codes.WAREHOUSE_RAW,
+        "item_type": codes.RAW_MATERIAL,
         "quantity": 500.0,
         "occurred_at": datetime(2026, 9, 21, 9, 30),
     }

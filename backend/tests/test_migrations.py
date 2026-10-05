@@ -1860,9 +1860,10 @@ SELECT l.inspection_id, l.inspection_result, l.id, '대물', 'IQ-FM', 100.0,
 FROM lots AS l;
 
 INSERT INTO stock_ledger_entries (lot_id, txn_type, txn_type_group, quantity, occurred_at,
-                                  inspection_id, purchase_return_id)
-SELECT r.lot_id, '구매반품출고', 'TXN_TYPE', r.quantity, r.returned_at, r.inspection_id, r.id
-FROM purchase_returns AS r
+                                  inspection_id, purchase_return_id, warehouse, item_type)
+SELECT r.lot_id, '구매반품출고', 'TXN_TYPE', r.quantity, r.returned_at, r.inspection_id, r.id,
+       '원재료', l.item_type
+FROM purchase_returns AS r JOIN lots AS l ON l.id = r.lot_id
 """
 
 
@@ -2266,3 +2267,184 @@ def test_the_disposal_source_is_corrected_only_where_the_seed_left_it(
                 assert conn.execute(read).scalar_one() == planted
         finally:
             scoped.dispose()
+
+
+# ── 4단계 조각 2 — 원장 줄의 창고 ────────────────────────────────────────────────
+# 원장 줄이 창고와 품목 유형을 들게 되는 리비전. 옛 줄은 그 로트의 `lots.warehouse` ·
+# `lots.item_type` 으로 채우고, 구매입고 · 구매반품출고 줄은 원재료창고에만 선다.
+
+
+def test_upgrading_says_which_lot_holds_a_ledger_line_outside_the_raw_warehouse(
+    engine: Engine,
+) -> None:
+    """**조이기 전에 묻는다** — 원재료창고가 아닌 로트에 선 원장 줄을 로트 번호로 말한다.
+
+    옛 줄의 창고는 그 로트의 `lots.warehouse` 로 채운다. 3단계까지의 줄은 전부 원재료창고의
+    원자재 로트에서 났어야 하지만, 앞 스키마는 원자재 로트를 생산창고에도 세울 수 있었다.
+    그런 로트의 입고 줄을 그대로 채우면 「구매입고는 원재료창고」 CHECK 가 제약 이름만 내놓고
+    멈춘다 — 배포하는 사람은 어느 로트 때문인지 모른다.
+    """
+    schema = "ledger_warehouse_guard"
+    with _schema(engine, schema):
+        config = _upgrade_with(
+            engine,
+            schema,
+            "e84fbec436c0",
+            _WITH_A_LEDGER_LINE + ";\nUPDATE lots SET warehouse = '생산'",
+        )
+
+        with pytest.raises(
+            Exception, match="원재료창고가 아닌 로트에 원장 줄이 있다: SL-2026-0001"
+        ):
+            command.upgrade(config, "head")
+
+
+def test_the_data_step_fills_each_line_from_its_lot(engine: Engine) -> None:
+    """**옮겨 채운다 — 지어내지 않는다.** 옛 줄의 창고와 유형은 그 로트의 들어온 창고와
+    유형이다."""
+    schema = "ledger_warehouse_fill"
+    with _schema(engine, schema):
+        config = _upgrade_with(engine, schema, "e84fbec436c0", _WITH_A_LEDGER_LINE)
+
+        command.upgrade(config, "head")
+
+        scoped = _engine_for_schema(engine, schema)
+        try:
+            with scoped.connect() as conn:
+                filled = conn.execute(
+                    text("SELECT txn_type, warehouse, item_type FROM stock_ledger_entries")
+                ).all()
+        finally:
+            scoped.dispose()
+
+    assert filled == [("구매입고", "원재료", "원자재")], filled
+
+
+# 머리까지 올린 뒤 만료된 로트를 재검사에서 떨어뜨리고, 그 폐기 줄을 **들어온 창고와 다른
+# 창고**에 세운다. 이동이 서기 전에는 쓰기 경로가 그런 줄을 내지 않지만 제약은 막지 않는다 —
+# 폐기는 창고를 고르지 않는 유형이고, 나뉜 로트를 창고마다 폐기하는 것은 이동 조각의 일이다.
+_A_DISPOSAL_ELSEWHERE = """
+INSERT INTO code_groups (group_code, name, value_fixed, description) VALUES
+  ('NC_REASON', '불합격사유', FALSE, '시험');
+
+INSERT INTO common_codes (group_code, code, name) VALUES
+  ('INSP_STAGE', '재검사', '재검사'), ('NC_REASON', 'IQ-MOI', '수분'),
+  ('TXN_TYPE', '폐기출고', '폐기출고');
+
+INSERT INTO txn_type_attributes (group_code, code, total_effect, source_document_type)
+VALUES ('TXN_TYPE', '폐기출고', '감소', '재검사 불합격');
+
+INSERT INTO nonconformity_attributes (group_code, code, measure_kind)
+VALUES ('NC_REASON', 'IQ-MOI', '계수');
+
+INSERT INTO nonconformity_stage_rules (reason_code, stage_code, disposition)
+VALUES ('IQ-MOI', '재검사', '폐기');
+
+INSERT INTO inspections (inspection_stage, stage_group, item_id, item_type, material_group,
+                         target_lot_id, judged_at, judged_by, result, nonconformity_group,
+                         nonconformity_code)
+SELECT '재검사', 'INSP_STAGE', l.item_id, l.item_type, i.material_group, l.id,
+       TIMESTAMP '2026-10-02 09:00', '검사원 1', '불합격', 'NC_REASON', 'IQ-MOI'
+FROM lots AS l JOIN items AS i ON i.id = l.item_id;
+
+INSERT INTO stock_ledger_entries (lot_id, txn_type, txn_type_group, quantity, occurred_at,
+                                  inspection_id, retest_id, retest_result, warehouse, item_type)
+SELECT r.target_lot_id, '폐기출고', 'TXN_TYPE', 500.0, r.judged_at, l.inspection_id, r.id,
+       r.result, '생산', l.item_type
+FROM inspections AS r JOIN lots AS l ON l.id = r.target_lot_id
+WHERE r.inspection_stage = '재검사'
+"""
+
+
+def test_downgrade_counts_the_lines_that_would_lose_their_warehouse(engine: Engine) -> None:
+    """**되돌리기가 사람이 남긴 것을 조용히 지우지 않는다**(W-6 ①) — 창고 칸을 지우면 로트의
+    들어온 창고와 다른 창고에 선 줄이 어디서 일어났는지 잃는다. 들어온 창고와 같은 줄은 다시
+    채울 수 있으므로 세지 않는다."""
+    schema = "ledger_warehouse_downgrade"
+    with _schema(engine, schema):
+        config = _upgrade_with(engine, schema, "e84fbec436c0", _WITH_AN_EXPIRED_LOT)
+        command.upgrade(config, "head")
+        scoped = _engine_for_schema(engine, schema)
+        try:
+            with scoped.begin() as conn:
+                for statement in _A_DISPOSAL_ELSEWHERE.strip().split(";"):
+                    if statement.strip():
+                        conn.execute(text(statement))
+        finally:
+            scoped.dispose()
+
+        with pytest.raises(Exception, match="다른 창고에 선 원장 줄 1건"):
+            command.downgrade(config, "53bd4c97a00e")
+
+
+def test_downgrade_goes_quietly_when_every_line_stands_where_its_lot_came_in(
+    engine: Engine,
+) -> None:
+    """**가드가 정상 경로를 막지 않는다** — 들어온 창고와 같은 줄만 있으면 조용히 내려가고, 줄은
+    그대로 남는다."""
+    schema = "ledger_warehouse_downgrade_quiet"
+    with _schema(engine, schema):
+        config = _upgrade_with(engine, schema, "e84fbec436c0", _WITH_A_LEDGER_LINE)
+        command.upgrade(config, "head")
+
+        command.downgrade(config, "53bd4c97a00e")
+
+        scoped = _engine_for_schema(engine, schema)
+        try:
+            with scoped.connect() as conn:
+                kept = conn.execute(text("SELECT count(*) FROM stock_ledger_entries")).scalar()
+        finally:
+            scoped.dispose()
+
+    assert kept == 1
+
+
+def test_upgrading_does_not_miss_a_lot_moved_while_it_runs(engine: Engine) -> None:
+    """**옮겨지는 중인 로트를 놓치지 않는다**(PR #99 Codex 리뷰) — 옛 버전의 트랜잭션이 원장
+    줄이 선 로트의 창고를 바꾸는 동안 올리면, `lots` 를 잠그지 않은 업그레이드는 옛 창고를 읽어
+    가드를 지나고 그 값으로 입고 줄을 채운다. 뒤의 제약이 쓰는 쪽을 기다렸다가 서면 로트와 입고
+    줄이 갈린 채로 올라가고, 굳히는 트리거는 그 뒤의 고침만 막는다."""
+    schema = "ledger_warehouse_upgrade_race"
+    with _schema(engine, schema):
+        config = _upgrade_with(engine, schema, "e84fbec436c0", _WITH_A_LEDGER_LINE)
+        command.upgrade(config, "53bd4c97a00e")
+        scoped = _engine_for_schema(engine, schema)
+        writer = scoped.connect()
+        outcome: dict[str, object] = {}
+        try:
+            writer.begin()
+            writer.execute(text("UPDATE lots SET warehouse = '생산'"))
+
+            def go() -> None:
+                try:
+                    command.upgrade(config, "head")
+                    outcome["upgrade"] = "went through"
+                except Exception as error:
+                    outcome["upgrade"] = error
+
+            runner = threading.Thread(target=go)
+            runner.start()
+            deadline = time.monotonic() + 10
+            with scoped.connect() as watcher:
+                while runner.is_alive() and time.monotonic() < deadline:
+                    waiting = watcher.execute(
+                        text(
+                            "SELECT count(*) FROM pg_locks AS l"
+                            " JOIN pg_class AS c ON c.oid = l.relation"
+                            " JOIN pg_namespace AS n ON n.oid = c.relnamespace"
+                            " WHERE NOT l.granted AND n.nspname = :schema"
+                        ),
+                        {"schema": schema},
+                    ).scalar_one()
+                    if waiting:
+                        break
+                    time.sleep(0.02)
+            writer.commit()
+            runner.join(30)
+            assert not runner.is_alive(), "올리기가 끝나지 않았다"
+        finally:
+            writer.close()
+            scoped.dispose()
+
+        assert isinstance(outcome["upgrade"], Exception), outcome["upgrade"]
+        assert "SL-2026-0001" in str(outcome["upgrade"])

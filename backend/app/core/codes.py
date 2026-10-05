@@ -262,6 +262,15 @@ WAREHOUSE_ITEM_TYPES: dict[str, tuple[str, ...]] = {
     WAREHOUSE_FINISHED: (FINISHED_GOODS,),
 }
 
+# **유형이 정하는 창고**(4단계 — `docs/schema-4단계.md`). 원장 줄의 창고는 그 유형이 말하는
+# 자리다 — 사 온 물건은 원재료창고로 들어오고, 공급사에 돌려보내는 것도 원재료창고에서만 나간다
+# (저장소 소유자, 2026-10-05). 여기 없는 유형(폐기출고)은 창고를 고르지 않는다 — 그 로트가 있는
+# 창고에서 나간다. 원장 CHECK 가 이 목록으로 걸린다.
+LEDGER_TYPE_WAREHOUSES = {
+    TXN_PURCHASE_RECEIPT: WAREHOUSE_RAW,
+    TXN_PURCHASE_RETURN: WAREHOUSE_RAW,
+}
+
 # ── 로트가 온 곳 ───────────────────────────────────────────────────────────
 # 원칙 ① — 재고 로트는 언제나 합격 후에 생긴다. **물건이 온 곳만 다르다** —
 # 번호는 둘 다 우리가 짓는다(`docs/schema-2단계.md`).
