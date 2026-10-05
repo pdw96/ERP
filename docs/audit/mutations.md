@@ -1493,3 +1493,27 @@ PostgreSQL 16)도 초록이다(392 passed).
 | NC | 무엇을 어긋냈나 | 빨개진 검사 |
 |---|---|---|
 | 228 | `_is_type` 이 불리언을 정수로 받았다 | `test_a_boolean_is_not_a_reason_where_an_integer_branch_comes` |
+
+## 4단계 조각 1 — 판정의 분기 커버리지 하한 (`012de42`, ADR 0024)
+
+ADR 0024 가 「게이트를 세우는 조각은 하한을 어긋내 빨갛게 되는 것을 본다」를 든다. 어긋냄 없이 돌린 대조군 — CI 의
+「판정 분기」 스텝과 같은 두 명령(`coverage run -m pytest tests/test_contract_judgment.py` · `coverage report`) — 은
+분기 100% 로 초록이고, 같은 트리의 `pytest` 전체(실제 PostgreSQL 16)는 이 기록이 서기 전의 `test_every_gate_has_a_record_of_turning_red`
+하나만 빨갛다(이 묶음이 그 기록이다).
+
+하한 자체가 빨개진 것 — 검사가 아니라 스텝의 명령이 문다:
+
+| 무엇을 어긋냈나 | 「판정 분기」 스텝 |
+|---|---|
+| `test_a_reason_must_pass_every_bound_of_the_new_branch` 의 `exclusive-maximum` 매개변수 줄을 뺐다 | `coverage report` 가 exit 2 — 99%, `_accepts` 의 `exclusiveMaximum` 거절 줄이 돌지 않는다. `pytest` 는 초록이다 |
+| 걷어 낸 `judge()` 의 「판이 뒤로 갔다」 갈래를 되살렸다 | `coverage report` 가 exit 2 — 99%, 되살린 줄이 돌지 않는다. 닿을 수 없는 분기를 다시 들이면 하한이 문다 |
+
+하한이 못 보는 자리와 설정을 무는 검사:
+
+| NC | 무엇을 어긋냈나 | 빨개진 검사 |
+|---|---|---|
+| — | `admit` 의 「`additionalProperties` 가 참 · 거짓이 아니다」 까닭 줄을 `pass` 로 바꿨다 — 분기는 그대로 돌아 하한은 100% 다 | `test_admit_says_why_it_refuses` 의 `additional-properties` — 까닭을 견주는 단언이 문다. 하한만으로는 못 잡는 「돌기만 하는」 자리다(ADR 0024 「결과」) |
+| — | `[tool.coverage.report] fail_under` 를 `90` 으로 내렸다 | `test_the_judgment_module_keeps_its_branch_floor` |
+| — | `[tool.coverage.run] branch` 를 `false` 로 바꿨다 | `test_the_judgment_module_keeps_its_branch_floor` |
+| — | 「판정 분기」 스텝이 판정 테스트가 아니라 `pytest` 전체를 돌려 재게 했다 | `test_the_judgment_module_keeps_its_branch_floor` |
+| — | 「판정 분기」 스텝의 `coverage report` 줄을 지웠다 | `test_every_check_step_is_still_there_and_can_still_fail` 와 `test_the_judgment_module_keeps_its_branch_floor` |

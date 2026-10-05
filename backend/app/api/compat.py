@@ -294,12 +294,15 @@ def _overlap(one: str, other: str) -> bool:
     )
 
 
-def operation(spec: Mapping[str, Any], key: str) -> dict[str, Any] | None:
-    """`"GET /lots"` 의 요청과 응답을 `$ref` 를 풀고 글을 걷어 낸 모양으로 돌려준다."""
+def operation(spec: Mapping[str, Any], key: str) -> dict[str, Any]:
+    """`"GET /lots"` 의 요청과 응답을 `$ref` 를 풀고 글을 걷어 낸 모양으로 돌려준다.
+
+    **두 스펙에 다 있는 경로만 묻는다** — 견주기(`compare`)가 그 경로만 들여보내고, 새 이름은
+    그 견주기에서만 난다. 없는 경로를 물으면 `KeyError` 다(ADR 0024 — 아무도 부르지 않는
+    분기는 두지 않는다).
+    """
     method, _, path = key.partition(" ")
-    raw = spec.get("paths", {}).get(path, {}).get(method.lower())
-    if raw is None:
-        return None
+    raw = spec["paths"][path][method.lower()]
     plain = _Plain(spec)
     body = raw.get("requestBody")
     return {
@@ -341,9 +344,8 @@ class _Plain:
     def content(self, content: Mapping[str, Any]) -> dict[str, Any]:
         return {media: self.schema(body.get("schema", {})) for media, body in content.items()}
 
-    def schema(self, value: Any) -> Any:
-        if not isinstance(value, dict):
-            return value
+    def schema(self, value: Mapping[str, Any]) -> dict[str, Any]:
+        # 객체가 아닌 스키마는 `admit` 이 거절했다
         if "$ref" in value:  # `admit` 이 옆 칸과 제 자신을 가리키는 것을 막았다
             return self.schema(
                 self._spec["components"]["schemas"][value["$ref"].rsplit("/")[-1]]
@@ -430,9 +432,6 @@ class _Operation:
 
     def _schema(self, old: Any, new: Any, side: Side, where: str) -> None:
         if _same(old, new):
-            return
-        if not isinstance(old, dict) or not isinstance(new, dict):
-            self._note("breaking", where, "스키마가 바뀌었다")
             return
         for end, pair in _PAIRS.items():
             self._pair(end, pair, old, new, side, where)
@@ -640,9 +639,10 @@ def judge(
             + "\n".join(f"  - {c.where}: {c.what}" for c in widening)
         )
     elif not breaking and not widening and after != before:
+        # **판이 뒤로 가는 것은 위 세 갈래가 다 문다**(감사 ㊷ OB-1) — 깨는 변경이면 앞자리가,
+        # 넓히는 변경이면 판이 오르지 않았고, 변화가 없으면 판이 움직였다. 따로 묻는 갈래를
+        # 두면 아무도 닿지 않는 분기가 된다(ADR 0024)
         problems.append(f"계약이 그대로인데 판이 움직였다({moved})")
-    elif after < before:
-        problems.append(f"판이 뒤로 갔다({moved})")
     return problems
 
 
@@ -704,9 +704,9 @@ def _not_new(old: Mapping[str, Any], new: Mapping[str, Any], key: str, item: Any
     received = "받던 요청이다 — FastAPI 는 그것을 거절하지 않고 무시한다"
     if loc[0] != "body" and len(loc) < 2:
         return f"근거의 자리 {loc} 가 인자를 가리키지 않는다"
-    if was is not None and loc[0] == "body" and was["body"] is None:
+    if loc[0] == "body" and was["body"] is None:
         return f"근거의 자리 {loc} — 옛 경로에 본문이 없었다. {received}"
-    if was is not None and loc[0] != "body" and (loc[0], loc[1]) not in was["parameters"]:
+    if loc[0] != "body" and (loc[0], loc[1]) not in was["parameters"]:
         return f"근거의 자리 {loc} — 옛 경로에 없던 인자다. {received}"
     before = _find(was, loc)
     after = _find(operation(new, key), loc)
@@ -729,20 +729,17 @@ def _formatted(schema: Any) -> bool:
     return "format" in schema or any(_formatted(branch) for branch in schema.get("anyOf", []))
 
 
-def _find(plain: Any, loc: list[Any]) -> Any:
+def _find(plain: Mapping[str, Any], loc: list[Any]) -> Any:
     """pydantic 의 `loc` 모양으로 요청 스키마를 찾는다.
 
     `["body", "칸", ...]` 은 본문에서, `["query", "이름", ...]` 은 그 인자에서 내려간다.
+    인자를 가리키지 않는 자리(`["query"]`)는 `_not_new` 가 먼저 거절했다.
     """
-    if plain is None:
-        return None
     if loc[0] == "body":
         body = plain["body"]
         schema = None if body is None else body["content"].get("application/json")
         rest = loc[1:]
     else:
-        if len(loc) < 2:
-            return None
         parameter = plain["parameters"].get((loc[0], loc[1]))
         schema = None if parameter is None else parameter["schema"]
         rest = loc[2:]
@@ -768,14 +765,13 @@ def _step(schema: Any, part: str | int) -> Any:
     return schema.get("properties", {}).get(part)
 
 
-def _accepts(schema: Any, value: Any) -> bool:
+def _accepts(schema: Mapping[str, Any], value: Any) -> bool:
     """그 값이 이 스키마를 지나는가 — 판정이 아는 제약을 **모두** 묻는다.
 
     열거에 들었어도 길이 · 경계 · 형에 걸리면 받지 않는 값이다 — 그런 값은 선언의 근거가 될
     수 없다(PR #84 Codex 리뷰 3 라운드). 형식(`format`)은 묻지 않는다 — 판정이 그 뜻을 모른다.
+    스키마는 언제나 객체다 — 찾지 못한 자리(`None`)는 부르는 쪽이 먼저 가른다.
     """
-    if not isinstance(schema, dict):
-        return False
     branches = schema.get("anyOf")
     if branches is not None and not any(_accepts(branch, value) for branch in branches):
         return False
