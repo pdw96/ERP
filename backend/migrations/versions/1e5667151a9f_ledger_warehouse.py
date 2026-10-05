@@ -27,8 +27,9 @@
 하나라도 있으면 몇 건인지 말하고 멈춘다(W-6 ①). **세기 전에 잠근다** — 줄을 넣는 트랜잭션이
 커밋되기 전에 세면 0 을 보고 지나간다.
 
-**올릴 때 잠근다.** 칸을 더하고 채우는 원장과 유일키를 받는 `lots` 에 ACCESS EXCLUSIVE 가 커밋까지
-남는다 — 읽기까지 멈춘다. 채우는 `UPDATE` · `SET NOT NULL` · CHECK · 외래키가 옛 줄 전부를 지나므로
+**올릴 때 잠근다.** 맨 앞에서 `lots` 를 SHARE ROW EXCLUSIVE 로 잠근다 — 가드와 채우기가 읽는 로트의
+창고를 옛 버전의 트랜잭션이 그사이 바꾸지 못하게(PR #99 Codex 리뷰). 칸을 더하고 채우는 원장과 유일키를
+받는 `lots` 에 ACCESS EXCLUSIVE 가 커밋까지 남는다 — 읽기까지 멈춘다. 채우는 `UPDATE` · `SET NOT NULL` · CHECK · 외래키가 옛 줄 전부를 지나므로
 잠금의 길이는 원장의 행 수가 정한다. `migrations/env.py` 가 전체를 트랜잭션 하나로 감싼다.
 
 Revision ID: 1e5667151a9f
@@ -259,6 +260,12 @@ END $$
 
 
 def upgrade() -> None:
+    # **묻고 채우기 전에 `lots` 를 잠근다**(PR #99 Codex 리뷰). 가드와 채우기는 로트의 창고를 읽는데,
+    # 원장 표의 잠금은 `lots` 를 막지 않는다 — 옛 버전의 트랜잭션이 그사이 창고를 바꾸면 가드는
+    # 옛 값을 보고 지나가고, 입고 줄은 옛 값으로 채워지고, 굳히는 트리거는 그 뒤의 고침만 막는다.
+    # `SHARE ROW EXCLUSIVE` 는 쓰는 쪽(`ROW EXCLUSIVE`)이 끝나기를 기다렸다가 그 뒤의 쓰기를 커밋까지
+    # 막는다 — 읽기는 막지 않는다. 뒤에 유일키를 더하며 ACCESS EXCLUSIVE 로 올라간다.
+    op.execute("LOCK TABLE lots IN SHARE ROW EXCLUSIVE MODE")
     op.add_column("stock_ledger_entries", sa.Column("warehouse", sa.String(20), nullable=True))
     op.add_column("stock_ledger_entries", sa.Column("item_type", sa.String(20), nullable=True))
 

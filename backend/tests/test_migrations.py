@@ -2397,3 +2397,54 @@ def test_downgrade_goes_quietly_when_every_line_stands_where_its_lot_came_in(
             scoped.dispose()
 
     assert kept == 1
+
+
+def test_upgrading_does_not_miss_a_lot_moved_while_it_runs(engine: Engine) -> None:
+    """**옮겨지는 중인 로트를 놓치지 않는다**(PR #99 Codex 리뷰) — 옛 버전의 트랜잭션이 원장
+    줄이 선 로트의 창고를 바꾸는 동안 올리면, `lots` 를 잠그지 않은 업그레이드는 옛 창고를 읽어
+    가드를 지나고 그 값으로 입고 줄을 채운다. 뒤의 제약이 쓰는 쪽을 기다렸다가 서면 로트와 입고
+    줄이 갈린 채로 올라가고, 굳히는 트리거는 그 뒤의 고침만 막는다."""
+    schema = "ledger_warehouse_upgrade_race"
+    with _schema(engine, schema):
+        config = _upgrade_with(engine, schema, "e84fbec436c0", _WITH_A_LEDGER_LINE)
+        command.upgrade(config, "53bd4c97a00e")
+        scoped = _engine_for_schema(engine, schema)
+        writer = scoped.connect()
+        outcome: dict[str, object] = {}
+        try:
+            writer.begin()
+            writer.execute(text("UPDATE lots SET warehouse = '생산'"))
+
+            def go() -> None:
+                try:
+                    command.upgrade(config, "head")
+                    outcome["upgrade"] = "went through"
+                except Exception as error:
+                    outcome["upgrade"] = error
+
+            runner = threading.Thread(target=go)
+            runner.start()
+            deadline = time.monotonic() + 10
+            with scoped.connect() as watcher:
+                while runner.is_alive() and time.monotonic() < deadline:
+                    waiting = watcher.execute(
+                        text(
+                            "SELECT count(*) FROM pg_locks AS l"
+                            " JOIN pg_class AS c ON c.oid = l.relation"
+                            " JOIN pg_namespace AS n ON n.oid = c.relnamespace"
+                            " WHERE NOT l.granted AND n.nspname = :schema"
+                        ),
+                        {"schema": schema},
+                    ).scalar_one()
+                    if waiting:
+                        break
+                    time.sleep(0.02)
+            writer.commit()
+            runner.join(30)
+            assert not runner.is_alive(), "올리기가 끝나지 않았다"
+        finally:
+            writer.close()
+            scoped.dispose()
+
+        assert isinstance(outcome["upgrade"], Exception), outcome["upgrade"]
+        assert "SL-2026-0001" in str(outcome["upgrade"])
