@@ -3,12 +3,12 @@ name: slice-review
 description: 조각으로 나눠 진행하는 레포에서 PR 리뷰 지적을 그 조각의 설계 · 요구사항에 비춰 안 · 밖 · 말하지 않음으로 가르고, 답글과 회차 표를 남깁니다. 리뷰 봇이나 사람의 지적이 PR 에 왔을 때, 리뷰 회차가 길어질 때 쓰세요.
 ---
 
-<!-- pdw96/claude-kit@55a8a79 에서 옴. 이 레포에 맞게 고쳐도 된다 — 원본으로 되먹이지 않는다. -->
+<!-- pdw96/claude-kit@11b06db 에서 옴. 이 레포에서만 참인 고침은 이 사본에만 산다 — 다른 레포에서도 같은 말이면 원본으로 넘긴다. -->
 
 # 리뷰 지적 가르기
 
 리뷰가 회차마다 설계의 빈 경계를 한 칸씩 채우지 않게, 지적을 기준에 비춰 가른다. 단계는 claude-kit 의 절차 지도
-(https://github.com/pdw96/claude-kit/blob/55a8a79/docs/procedure.md) 4 단계다.
+(https://github.com/pdw96/claude-kit/blob/11b06db8347b1152f0d11fd2be937b699367ae9e/docs/procedure.md) 4 단계다.
 
 ## 1. 기준
 
