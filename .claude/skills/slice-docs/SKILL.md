@@ -7,7 +7,7 @@ description: 프로젝트를 조각으로 나눠 진행할 때 의도 · 마스�
 
 # 조각 문서
 
-절차는 claude-kit 의 절차 지도가 든다 — https://github.com/pdw96/claude-kit/blob/main/docs/procedure.md .
+절차는 claude-kit 의 절차 지도가 든다 — https://github.com/pdw96/claude-kit/blob/34aad2a/docs/procedure.md .
 단계마다 들어가고 나가는 조건, 문서의 칸, 살아 있는 문서와 기록의 규칙은 거기서 읽는다. 여기에 옮겨 적지 않는다.
 
 ## 틀
