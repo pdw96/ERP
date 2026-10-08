@@ -59,7 +59,10 @@ def seed(engine: Engine) -> bool:
         # 없이 보내면 psycopg 가 `%` 를 건드리지 않는다.
         #
         # 같은 트랜잭션 안이므로 중간에 터지면 앞 파일이 넣은 것도 함께 되돌아간다.
-        cursor = conn.connection.dbapi_connection.cursor()
+        #
+        # 커서는 풀 프록시에서 꺼낸다 — 돌려주는 것은 같은 드라이버 커서다.
+        # `.dbapi_connection` 은 반납된 연결이면 `None` 이라 `Optional` 로 적혀 있다.
+        cursor = conn.connection.cursor()
         try:
             for path in sorted(SEED_DIR.glob("*.sql")):
                 cursor.execute(path.read_text(encoding="utf-8"))
