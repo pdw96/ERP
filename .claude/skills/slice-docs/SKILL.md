@@ -3,13 +3,12 @@ name: slice-docs
 description: 프로젝트를 조각으로 나눠 진행할 때 의도 · 마스터플랜 · 조각 요구사항 · 설계 문서를 틀대로 씁니다. 새 프로젝트의 의도나 마스터플랜을 처음 세울 때, 마스터플랜에서 조각을 꺼내 착공(요구사항 + 설계)할 때, 조각을 닫는 기록을 쓸 때 쓰세요.
 ---
 
-<!-- pdw96/claude-kit@22c1e97 에서 옴. 이 레포에 맞게 고쳐도 된다 — 원본으로 되먹이지 않는다. -->
+<!-- pdw96/claude-kit@34aad2a 에서 옴. 이 레포에 맞게 고쳐도 된다 — 원본으로 되먹이지 않는다. -->
 
 # 조각 문서
 
-절차는 claude-kit 의 절차 지도가 든다 — https://github.com/pdw96/claude-kit/blob/22c1e972f31062480f2f3f0914348ef90cd3c5c8/docs/procedure.md .
+절차는 claude-kit 의 절차 지도가 든다 — https://github.com/pdw96/claude-kit/blob/34aad2a/docs/procedure.md .
 단계마다 들어가고 나가는 조건, 문서의 칸, 살아 있는 문서와 기록의 규칙은 거기서 읽는다. 여기에 옮겨 적지 않는다.
-이 사본의 틀과 같은 커밋(`22c1e97`)에 고정했다 — `main` 을 가리키면 원본이 움직일 때 절차와 틀이 갈린다(PR #101 Codex 리뷰).
 
 ## 틀
 
@@ -36,5 +35,5 @@ description: 프로젝트를 조각으로 나눠 진행할 때 의도 · 마스�
 
 ## 이 스킬의 일이 아닌 것
 
-ADR · `CLAUDE.md` · README · 스키마 문서는 쓰지 않는다. 구현 코드도 쓰지 않는다 — 구현은 착공 PR 이 머지된 뒤
+ADR · `CLAUDE.md` · README · 스키마 문서는 쓰지 않는다. 리뷰 지적을 가르는 일은 같은 플러그인의 스킬 `slice-review` 다. 구현 코드도 쓰지 않는다 — 구현은 착공 PR 이 머지된 뒤
 설계 ⑥ 의 나눔대로 간다.
