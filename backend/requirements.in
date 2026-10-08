@@ -22,10 +22,10 @@
 # **opentelemetry-api 는 고르지 않았다** — FastAPI 0.142 가 내장 OpenTelemetry 를 들이며
 # 런타임 의존성으로 끌고 오는 전이 의존성이다. 이 저장소는 그것을 부르지 않고, 그래서 여기
 # 입력으로 적지 않는다 — 판은 FastAPI 의 조건대로 잠금이 고르고 Dependabot 이 올린다.
-FastAPI==0.141.1
+FastAPI==0.142.2
 starlette==1.7.0
 uvicorn==0.54.0
-SQLAlchemy==2.1.1
+SQLAlchemy==2.1.3
 alembic==1.20.0
 psycopg[binary]==3.3.6
 pydantic-settings==2.15.0
