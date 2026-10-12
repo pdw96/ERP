@@ -29,8 +29,14 @@
 
 **올릴 때 잠근다.** 맨 앞에서 `lots` 를 SHARE ROW EXCLUSIVE 로 잠근다 — 가드와 채우기가 읽는 로트의
 창고를 옛 버전의 트랜잭션이 그사이 바꾸지 못하게(PR #99 Codex 리뷰). 칸을 더하고 채우는 원장과 유일키를
-받는 `lots` 에 ACCESS EXCLUSIVE 가 커밋까지 남는다 — 읽기까지 멈춘다. 채우는 `UPDATE` · `SET NOT NULL` · CHECK · 외래키가 옛 줄 전부를 지나므로
-잠금의 길이는 원장의 행 수가 정한다. `migrations/env.py` 가 전체를 트랜잭션 하나로 감싼다.
+받는 `lots` 에 ACCESS EXCLUSIVE 가 커밋까지 남는다 — 읽기까지 멈춘다. 잠금의 길이는 행 수가 정한다 —
+채우는 `UPDATE` · `SET NOT NULL` · CHECK · 외래키가 원장의 옛 줄 전부를 지나고, 유일키가 `lots` 전부를 읽어
+인덱스를 만든다(감사 ㊸). `migrations/env.py` 가 전체를 트랜잭션 하나로 감싼다.
+
+**내릴 때도 잠근다**(감사 ㊸). 세는 동안 원장은 SHARE 다 — 쓰기만 멈추고, 세는 쿼리가 원장 전부를
+훑는다. 그 뒤 `DROP TRIGGER` 가 `lots` 에, 제약과 칸을 지우는 것이 원장에 ACCESS EXCLUSIVE 를 잡아 두 표의
+**읽기까지** 커밋까지 멈춘다 — 더 내려가는 리비전의 단계를 지나서까지다. 다시 검증하는 구간은 없고, 행
+수에 비례하는 것은 세는 쿼리뿐이다.
 
 Revision ID: 1e5667151a9f
 Revises: 53bd4c97a00e
