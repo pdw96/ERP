@@ -114,12 +114,14 @@ LLM 을 품은 제품이면 한 항목을 더 봅니다.
 
 **원시 SQL 과 마이그레이션 도구의 API 를 둘 다 찾으세요** — 도구는 같은 DDL 을 함수로 냅니다(`op.create_index` · `AddIndex` 등). 한쪽만 찾으면 0 건이 나옵니다.
 
-**이 저장소는 Alembic 입니다** — 같은 DDL 이 `op.create_check_constraint` · `op.create_foreign_key` · `op.alter_column(nullable=False)` · `op.create_unique_constraint` · `op.create_primary_key` · `op.create_index`(`postgresql_concurrently` 없이) · `op.alter_column(type_=...)` 로 나옵니다. 실제로 `ADD CONSTRAINT ... CHECK` 는 0 건이고 `op.create_check_constraint` 가 넷이었습니다. 상수 `server_default` 는 PostgreSQL 11+ 가 카탈로그에만 적어 표를 다시 쓰지 않습니다(`relfilenode` 로 실측함) — 세면 거짓 양성이 납니다.
+**이 저장소는 Alembic 입니다** — 실제로 `ADD CONSTRAINT ... CHECK` 는 0 건이고 `op.create_check_constraint` 가 넷이었습니다. 두 열을 다 찾습니다.
 
-- **표를 다시 쓰는가** — 컬럼 타입 변경, 휘발성 기본값을 단 컬럼 추가
-- **기존 행 전체를 검증하는가** — CHECK · 외래키 추가, `SET NOT NULL`
-- **잠금을 잡고 인덱스를 만드는가** — 동시 생성 옵션 없는 인덱스 · 유니크 · 기본키
-- **잠금이 언제 풀리는가** — 마이그레이션 전체가 트랜잭션 하나에 담기면 첫 DDL 의 잠금이 커밋까지 간다
+| 무엇을 보는가 | 원시 SQL | 파이썬 API (Alembic) |
+|---|---|---|
+| 표를 다시 쓰는가 | `ADD COLUMN ... SERIAL` · `GENERATED` · **휘발성** 기본값(`now()` · `random()`), `ALTER COLUMN ... TYPE` | `op.add_column(... Identity=...)`, `op.alter_column(type_=...)`. **`server_default` 가 상수면 다시 쓰지 않는다** — PG11+ 는 카탈로그에만 적고(`relfilenode` 로 실측함), 그것까지 세면 **거짓 양성**이 난다 |
+| 기존 행 **전체를 검증**하는가 | `ADD CONSTRAINT ... CHECK`, `SET NOT NULL`, 외래키 추가 | `op.create_check_constraint`, `op.create_foreign_key`, `op.alter_column(nullable=False)` |
+| 잠금을 잡고 인덱스를 만드는가 | `ADD CONSTRAINT ... UNIQUE` · `PRIMARY KEY`, `CONCURRENTLY` 없는 `CREATE INDEX` | `op.create_unique_constraint`, `op.create_primary_key`, `op.create_index`(`postgresql_concurrently` 없이) |
+| **잠금이 언제 풀리는가** | — | 리비전 끝인가 마이그레이션 끝인가. `env.py` 가 전체를 트랜잭션 하나로 감싸면(`transaction_per_migration` 없이) 첫 `ALTER` 의 잠금이 데이터 단계를 지나 **커밋까지** 유지된다 |
 
 엔진 · 판을 확인했으면 —
 
@@ -129,6 +131,7 @@ LLM 을 품은 제품이면 한 항목을 더 봅니다.
 | 쓰기를 멈추는데 피할 형태가 없고, 리비전 · PR 이 그 잠금을 맞게 적었다 | 적합 — 잠금 사실과 전제를 적고 심각도 확인불가 |
 | 쓰기를 멈추는데 리비전 · PR 에 잠금 설명이 없다 | 부적합 — 배포하는 사람이 모르고 지나간다. 고치는 것은 적는 것이다(W-1) |
 | 리비전 · PR 의 잠금 설명이 위에서 센 것과 어긋난다 | 부적합 — 배포하는 사람이 그 설명을 믿는다 |
+| 위 네 눈 어느 것에도 해당하지 않는다 | 적합 |
 
 실제로 이 저장소에서 한 번 그렇게 지나갔습니다 — NC-21 의 고침이 「CHECK 여섯」·「네 표」를 적었고 실제는 넷·셋이었습니다.
 
