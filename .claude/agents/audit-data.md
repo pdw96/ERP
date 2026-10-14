@@ -114,7 +114,7 @@ LLM 을 품은 제품이면 한 항목을 더 봅니다.
 
 **원시 SQL 과 마이그레이션 도구의 API 를 둘 다 찾으세요** — 도구는 같은 DDL 을 함수로 냅니다(`op.create_index` · `AddIndex` 등). 한쪽만 찾으면 0 건이 나옵니다.
 
-**이 저장소는 Alembic 입니다** — 같은 DDL 이 `op.create_check_constraint` · `op.create_foreign_key` · `op.alter_column(nullable=False)` · `op.create_index`(`postgresql_concurrently` 없이) · `op.alter_column(type_=...)` 로 나옵니다. 실제로 `ADD CONSTRAINT ... CHECK` 는 0 건이고 `op.create_check_constraint` 가 넷이었습니다. 상수 `server_default` 는 PostgreSQL 11+ 가 카탈로그에만 적어 표를 다시 쓰지 않습니다(`relfilenode` 로 실측함) — 세면 거짓 양성이 납니다.
+**이 저장소는 Alembic 입니다** — 같은 DDL 이 `op.create_check_constraint` · `op.create_foreign_key` · `op.alter_column(nullable=False)` · `op.create_unique_constraint` · `op.create_primary_key` · `op.create_index`(`postgresql_concurrently` 없이) · `op.alter_column(type_=...)` 로 나옵니다. 실제로 `ADD CONSTRAINT ... CHECK` 는 0 건이고 `op.create_check_constraint` 가 넷이었습니다. 상수 `server_default` 는 PostgreSQL 11+ 가 카탈로그에만 적어 표를 다시 쓰지 않습니다(`relfilenode` 로 실측함) — 세면 거짓 양성이 납니다.
 
 - **표를 다시 쓰는가** — 컬럼 타입 변경, 휘발성 기본값을 단 컬럼 추가
 - **기존 행 전체를 검증하는가** — CHECK · 외래키 추가, `SET NOT NULL`
@@ -127,6 +127,7 @@ LLM 을 품은 제품이면 한 항목을 더 봅니다.
 |---|---|
 | 쓰기를 멈추고, 피할 수 있는 형태(동시 인덱스 생성, `NOT VALID` 뒤 `VALIDATE`, 단계적 백필)가 있는데 안 썼다 | 부적합 |
 | 쓰기를 멈추는데 피할 형태가 없다 | 잠금 사실과 전제를 적고 심각도 확인불가 |
+| 쓰기를 멈추는데 리비전 · PR 에 잠금 설명이 없다 | 부적합 — 배포하는 사람이 모르고 지나간다. 고치는 것은 적는 것이다(W-1) |
 | 리비전 · PR 의 잠금 설명이 위에서 센 것과 어긋난다 | 부적합 — 배포하는 사람이 그 설명을 믿는다 |
 
 실제로 이 저장소에서 한 번 그렇게 지나갔습니다 — NC-21 의 고침이 「CHECK 여섯」·「네 표」를 적었고 실제는 넷·셋이었습니다.
@@ -286,7 +287,7 @@ NC-1 부터 붙이되, **없는 지난 회차를 지어내지 마세요.**
 
 ## 확인불가 항목
 
-### U-1 · <한 줄 요약>
+### UNK-1 · <한 줄 요약>
 - 체크 항목: <#> — 그 행은 확인불가로 둡니다. 일부가 적합이어도 쪼개지 않습니다
 - 위치: `path:line`
 - 판정하려면: <무엇이 있으면 판정되는가 — diff · 실행 결과 · 배포 설정 · 사람의 답>
@@ -297,14 +298,14 @@ NC-1 부터 붙이되, **없는 지난 회차를 지어내지 마세요.**
 
 ## 지난 회차
 - 지난 기록: `<경로>` (<날짜>) — 없으면 「없음 — 이번이 첫 회차」
-- 다음 번호: NC-<n> · U-<m> — 지난 기록의 「다음 번호」와 이번에 쓴 가장 큰 번호 다음 중 큰 것. U 도 NC 처럼 잇고 은퇴시킵니다
+- 다음 번호: NC-<n> · UNK-<m> — 지난 기록의 「다음 번호」와 이번에 쓴 가장 큰 번호 다음 중 큰 것. UNK 도 NC 처럼 잇고 은퇴시킵니다
 
 | 이전 | 이번 | 근거 위치 |
 |---|---|---|
 | NC-1 | 유지 | `path:line` |
 | NC-2 | 해소 | `path:line` — 검사가 붙었다 |
 | NC-3 | 이번엔 안 봄 | 범위 밖 — <경로> |
-| U-1 | 유지 | `path:line` — 근거가 아직 없다 |
+| UNK-1 | 유지 | `path:line` — 근거가 아직 없다 |
 
 ## 안 본 것
 <이번 범위에서 제외한 영역과 담당 감사자>
