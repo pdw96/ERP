@@ -5,4 +5,4 @@
 # **click 은 묶지 않는다**(ADR 0006). click 8.2 이상에서 pip-compile 이 잠금 머리의 명령에
 # `--no-index` 를 잘못 찍는데, 그 줄은 사람이 읽는 주석일 뿐이고 `lock.sh` 가 지운다.
 # 묶어 두면 Dependabot 이 매주 그 범위를 넓히는 PR 을 낸다.
-pip-tools==7.6.1
+pip-tools==7.6.2
