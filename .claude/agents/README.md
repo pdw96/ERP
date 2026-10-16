@@ -1,6 +1,6 @@
 # 감사자
 
-`pdw96/claude-kit@018842c` 의 `vibe-audit` 플러그인에서 온 사본이다. 브리핑 커맨드
+`pdw96/claude-kit@ddcd21f` 의 `vibe-audit` 플러그인에서 온 사본이다. 브리핑 커맨드
 `/audit-brief` 도 같은 커밋에서 와 `.claude/commands/` 에 있다.
 
 **이 레포에서만 참인 고침은 이 사본에만 산다.** 원본은 아무 레포에도 안 들어가 본
