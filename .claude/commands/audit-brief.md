@@ -5,7 +5,7 @@ argument-hint: "[기준 커밋/브랜치 — 필수] [감사자 이름]"
 arguments: [base, auditor]
 ---
 
-<!-- pdw96/claude-kit@018842c 에서 옴. 이 레포에서만 참인 고침은 이 사본에만 산다 — 다른 레포에서도 같은 말이면 원본으로 넘긴다. -->
+<!-- pdw96/claude-kit@ddcd21f 에서 옴. 이 레포에서만 참인 고침은 이 사본에만 산다 — 다른 레포에서도 같은 말이면 원본으로 넘긴다. -->
 
 기준(`$base`)과 지금 작업트리의 차이를 모아 `.claude/audit-brief.md` 에 씁니다.
 
