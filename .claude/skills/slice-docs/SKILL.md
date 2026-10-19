@@ -3,11 +3,11 @@ name: slice-docs
 description: 프로젝트를 조각으로 나눠 진행할 때 의도 · 마스터플랜 · 조각 요구사항 · 설계 문서를 틀대로 씁니다. 새 프로젝트의 의도나 마스터플랜을 처음 세울 때, 마스터플랜에서 조각을 꺼내 착공(요구사항 + 설계)할 때, 조각을 닫는 기록을 쓸 때 쓰세요.
 ---
 
-<!-- pdw96/claude-kit@987df53 에서 옴. 이 레포에서만 참인 고침은 이 사본에만 산다 — 다른 레포에서도 같은 말이면 원본으로 넘긴다. -->
+<!-- pdw96/claude-kit@f4ea3a5 에서 옴. 이 레포에서만 참인 고침은 이 사본에만 산다 — 다른 레포에서도 같은 말이면 원본으로 넘긴다. -->
 
 # 조각 문서
 
-절차는 claude-kit 의 절차 지도가 든다 — https://github.com/pdw96/claude-kit/blob/987df534549ff72ee06744de1bbaa88efdc0cc85/docs/procedure.md .
+절차는 claude-kit 의 절차 지도가 든다 — https://github.com/pdw96/claude-kit/blob/f4ea3a51fcc30f44554f83b66cead05a60a70cdd/docs/procedure.md .
 단계마다 들어가고 나가는 조건, 문서의 칸, 살아 있는 문서와 기록의 규칙은 거기서 읽는다. 여기에 옮겨 적지 않는다.
 
 ## 틀
