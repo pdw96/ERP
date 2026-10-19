@@ -27,8 +27,9 @@ import sys
 
 USAGE = "사용법: verify-slice-gate.py [--base <rev> --head <rev>]"
 MASTER = "docs/master-plan.md"
-SLICE_DOC = re.compile(r"^docs/slices/[^/]+/(requirements|design)\.md$")
-ADR = re.compile(r"^docs/adr/[^/]+\.md$")
+# D1 의 끝은 `\Z` — `$` 는 끝의 줄바꿈 앞에서도 맞아 `docs/adr/x.md\n` 같은 이름을 결정 문서로 읽는다(E3 — `-z` 는 이름을 그대로 넘긴다).
+SLICE_DOC = re.compile(r"^docs/slices/[^/]+/(requirements|design)\.md\Z")
+ADR = re.compile(r"^docs/adr/[^/]+\.md\Z")
 FOLDER = re.compile(r"^`(docs/slices/[^/`\s]+/)`")
 HEADING = re.compile(r"^(#+) (.*)$")
 
@@ -109,15 +110,34 @@ def choose(argv):
     return base, None, "로컬"
 
 
+def names(*args):
+    """git 이 내는 경로 목록 — E3. 줄로 받지 않고 `-z` 로 받아 NUL 로 가른다. 줄로 받으면 git 은 ASCII 밖의 글자
+    (한글 조각 폴더 · ADR 이름)가 든 경로를 따옴표로 감싸 8진수로 이스케이프해 낸다(기본 설정 `core.quotepath=true`) —
+    그 경로는 결정 문서로 읽히지 않는다. 사용자의 git 설정에 기대지 않는다.
+
+    바이트로 받아 직접 푼다 — 텍스트 모드는 `\r` · `\r\n` 을 `\n` 으로 바꿔 이름이 기준의 파일과 갈린다. UTF-8 이 아닌
+    바이트는 `surrogateescape` 로 남겨, `cat-file -e` 에 넘길 때 같은 바이트로 돌아간다."""
+    p = subprocess.run(["git", args[0], "-z", *args[1:]], capture_output=True)
+    if p.returncode != 0:
+        raise Unknown(f"git {' '.join(args)} 이 실패했다")
+    return [b.decode("utf-8", "surrogateescape") for b in p.stdout.split(b"\0") if b]
+
+
+def shown(paths):
+    """실패 줄에 찍는 경로 — E3. 인쇄할 수 없는 글자(줄바꿈 · 탭 · ESC 같은 제어 문자)는 `\\n` 처럼 역슬래시 꼴로, 한글을 비롯한
+    그 밖은 그대로. 줄바꿈을 그대로 찍으면 실패가 한 줄이 아니고(R1), 그 줄이 GitHub Actions 워크플로 명령(`::warning::`)으로 읽힐 수 있다."""
+    return ", ".join("".join(c if c.isprintable() else c.encode("unicode_escape").decode("ascii") for c in p) for p in paths)
+
+
 def changed(base, head):
     """merge-base(기준, 머리)에서 머리까지 바뀐 경로 — B3. 이름 바꿈은 옛 경로와 새 경로 둘 다."""
     mb = must("merge-base", base, head or "HEAD").strip()
     if head:
-        out = must("diff", "--name-only", "--no-renames", mb, head)
+        out = names("diff", "--name-only", "--no-renames", mb, head)
     else:
-        out = must("diff", "--name-only", "--no-renames", mb)
-        out += must("ls-files", "--others", "--exclude-standard")
-    return sorted({p for p in out.splitlines() if p})
+        out = names("diff", "--name-only", "--no-renames", mb)
+        out += names("ls-files", "--others", "--exclude-standard")
+    return sorted(set(out))
 
 
 # ── 기준 마스터플랜 — 문서 대조 검사(verify-docs.py 의 lines · section · table)와 같은 법(R3) ──
@@ -200,18 +220,18 @@ def judge(base, paths):
 
     g1 = outside if founding else []
     if g1:
-        bad.append(f"[G1] 착공 PR 에 결정 문서 밖의 파일이 있다 — 새 조각 문서 {', '.join(founding)} 와 함께: {', '.join(g1)}")
+        bad.append(f"[G1] 착공 PR 에 결정 문서 밖의 파일이 있다 — 새 조각 문서 {shown(founding)} 와 함께: {shown(g1)}")
 
     if outside:
         doing = doing_of(ls)
         if doing is None:
-            bad.append(f"[G2] 기준 마스터플랜의 「조각 나눔」 표를 읽지 못했다 — 결정 문서 밖: {', '.join(outside)}")
+            bad.append(f"[G2] 기준 마스터플랜의 「조각 나눔」 표를 읽지 못했다 — 결정 문서 밖: {shown(outside)}")
         else:
             ready = [n for n, folder in doing if folder and at_base(base, folder + "design.md")]
             if not ready:
                 have = ", ".join(f"{n}({folder or '폴더 없음'})" for n, folder in doing) or "없다"
                 bad.append(f"[G2] 기준에 설계가 머지된 `진행` 조각이 없다 — 기준의 `진행` 조각: {have}. "
-                           f"결정 문서 밖: {', '.join(outside)}")
+                           f"결정 문서 밖: {shown(outside)}")
     return bad
 
 
