@@ -3,7 +3,7 @@
 **재검사는 로트를 만들지 않고 있는 로트를 가리킨다.** 유효기간이 지난 로트가 재고를 떠나지
 않고 검사로 돌아와, **경시변화 항목만** 다시 잰다. 합격하면 새 만료일이 이 재검사에 박히고
 (로트의 옛 만료일은 고치지 않는다 — 라벨에 찍혀 나간 값이다), 불합격하면 그 로트의 잔량
-전부가 원장에 폐기출고 한 줄로 나간다.
+전부가 원장에 폐기출고로 나간다 — **잔량이 남은 창고마다 한 줄이다**(4단계 이동, 아래).
 
 ### 계산이 먼저이고 사람이 나중이다 (원칙 ③)
 
@@ -20,10 +20,18 @@ IQC 와 같다 — 검사원이 넣는 것은 측정값과, 계산이 보지 못
 순간의 상태를 보고 통과해 트리거의 500 을 맞는다. 둘이 갈리면 트리거가 이긴다(이름 없는
 거절이 난다) — 경계가 같은지는 테스트가 문다.
 
+### 나뉜 로트는 창고마다 버린다 (4단계 이동)
+
+이동이 서면 로트 하나가 원재료창고와 생산창고에 나뉘어 있을 수 있다. 원장의 잔량 트리거는
+**폐기 줄 하나가 그 창고의 잔량 전부인지**를 보므로, 로트 전체를 한 창고에 버리는 줄은 그 창고의
+잔량을 넘어 거부된다. 그래서 잔량을 창고별로 세어 **남은 창고마다 한 줄**을 낸다. 줄의 순서는
+`codes.WAREHOUSES` 의 순서다 — 응답의 id 목록이 늘 같은 순서로 나간다.
+
 ### 한 트랜잭션이다
 
 재검사 · 측정값 · 폐기 줄이 한 번에 들어가거나 아무것도 들어가지 않는다. 떨어진 재검사가 폐기 줄
-없이 서는 것은 커밋할 때 트리거가 막는다(`retest_failure_has_its_disposal_line`).
+없이 서거나 창고 하나를 빠뜨리는 것은 커밋할 때 트리거가 막는다
+(`retest_failure_has_its_disposal_line` — 로트의 잔량이 모든 창고에서 0 인지 본다).
 """
 
 from collections import Counter
@@ -101,7 +109,9 @@ class Retested:
     result: str
     nonconformity_code: str | None
     renewed_expiry_date: date | None
-    ledger_entry_id: int | None
+    # 떨어졌으면 잔량이 남았던 창고마다 폐기 줄 하나, `codes.WAREHOUSES` 의 순서로.
+    # 합격이면 비었다.
+    ledger_entry_ids: tuple[int, ...]
 
 
 def _refuse(code: RetestRefusal, message: str) -> RefusedInspection:
@@ -122,8 +132,13 @@ def _lot(session: Session, lot_id: int) -> Lot:
     return lot
 
 
-def _balance(session: Session, lot: Lot) -> float:
-    """그 로트의 원장 합 — 트리거와 같은 셈이다. 로트 줄은 `_lot()` 이 이미 잠갔다."""
+def _balances(session: Session, lot: Lot) -> dict[str, float]:
+    """그 로트의 창고별 원장 합 — 트리거와 같은 셈(로트 × 창고)이다. 로트 줄은 `_lot()` 이
+    이미 잠갔다.
+
+    줄이 한 번도 서지 않은 창고는 없다. 합은 `numeric` 으로 센 뒤 옮긴다 — 트리거가 폐기 줄과
+    견주는 것도 그 합이다.
+    """
     signed = case(
         (
             TxnTypeAttribute.total_effect == codes.EFFECT_INCREASE,
@@ -134,16 +149,17 @@ def _balance(session: Session, lot: Lot) -> float:
             -cast(StockLedgerEntry.quantity, Numeric),
         ),
     )
-    total = session.scalar(
-        select(func.coalesce(func.sum(signed), 0))
+    rows = session.execute(
+        select(StockLedgerEntry.warehouse, func.sum(signed))
         .join(
             TxnTypeAttribute,
             (TxnTypeAttribute.group_code == StockLedgerEntry.txn_type_group)
             & (TxnTypeAttribute.code == StockLedgerEntry.txn_type),
         )
         .where(StockLedgerEntry.lot_id == lot.id)
-    )
-    return float(total or 0)
+        .group_by(StockLedgerEntry.warehouse)
+    ).all()
+    return {warehouse: float(total or 0) for warehouse, total in rows}
 
 
 def _must_have_expired(session: Session, lot: Lot, today: date) -> None:
@@ -250,8 +266,15 @@ def retest(session: Session, request: IncomingRetest) -> Retested:
 
     judged_at = clock.now()
     _must_have_expired(session, lot, judged_at.date())
-    left = _balance(session, lot)
-    if left <= 0:
+    # 잔량이 남은 창고만, `codes.WAREHOUSES` 의 순서로. 음수인 창고는 원장 트리거가 서지
+    # 못하게 한다.
+    balances = _balances(session, lot)
+    left = {
+        warehouse: balances[warehouse]
+        for warehouse in codes.WAREHOUSES
+        if balances.get(warehouse, 0.0) > 0
+    }
+    if not left:
         raise _refuse(
             RetestRefusal.NOTHING_LEFT_IN_THE_LOT,
             f"로트 {lot.lot_number} 에 남은 것이 없다 — 없는 물건은 재검사하지 않는다",
@@ -334,24 +357,25 @@ def retest(session: Session, request: IncomingRetest) -> Retested:
 
     if result == codes.JUDGMENT_PASSED:
         session.flush()
-        return Retested(inspection.id, result, None, renewed, None)
+        return Retested(inspection.id, result, None, renewed, ())
 
-    # ── 떨어진 로트는 잔량 전부가 나간다 ───────────────────────────────────
+    # ── 떨어진 로트는 잔량 전부가 나간다 — 잔량이 남은 창고마다 한 줄 ─────────
     # 잔량이 있는 로트는 입고 줄이 있고, 입고 줄은 로트를 만든 검사와 쌍이다.
     assert lot.inspection_id is not None
-    # **창고는 로트가 들어온 창고다** — 이동이 서기 전에는 로트가 한 창고에만 있다. 나뉜 로트를
-    # 창고마다 한 줄로 폐기하는 것은 이동이 서는 조각의 일이다(`docs/schema-4단계.md`).
-    entry = StockLedgerEntry(
-        lot_id=lot.id,
-        inspection_id=lot.inspection_id,
-        txn_type=codes.TXN_DISPOSAL,
-        warehouse=lot.warehouse,
-        item_type=lot.item_type,
-        quantity=left,
-        occurred_at=judged_at,
-        retest_id=inspection.id,
-        retest_result=result,
-    )
-    session.add(entry)
+    entries = [
+        StockLedgerEntry(
+            lot_id=lot.id,
+            inspection_id=lot.inspection_id,
+            txn_type=codes.TXN_DISPOSAL,
+            warehouse=warehouse,
+            item_type=lot.item_type,
+            quantity=quantity,
+            occurred_at=judged_at,
+            retest_id=inspection.id,
+            retest_result=result,
+        )
+        for warehouse, quantity in left.items()
+    ]
+    session.add_all(entries)
     session.flush()
-    return Retested(inspection.id, result, reason, None, entry.id)
+    return Retested(inspection.id, result, reason, None, tuple(entry.id for entry in entries))

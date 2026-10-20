@@ -18,9 +18,9 @@ from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session
 
 from app.api.app import app, session_scope
-from app.core import clock
+from app.core import clock, codes
 from app.db.inspection import Inspection
-from app.db.inventory import StockLedgerEntry
+from app.db.inventory import Lot, StockLedgerEntry
 from app.services.retests import RetestRefusal
 from tests.test_retest_path import (  # noqa: F401
     FINE,
@@ -28,6 +28,7 @@ from tests.test_retest_path import (  # noqa: F401
     _committed_schema,
     an_expired_lot,
     planted,
+    split,
 )
 from tests.test_write_path import _MOISTURE
 
@@ -63,11 +64,13 @@ def test_a_pass_comes_back_with_its_new_expiry(
         "result",
         "nonconformity_code",
         "renewed_expiry_date",
-        "ledger_entry_id",
+        "ledger_entry_ids",
     }
     assert body["result"] == "합격"
     assert body["renewed_expiry_date"] == str(clock.today() + timedelta(days=SHELF_LIFE))
-    assert body["ledger_entry_id"] is None
+    # **합격이면 빈 목록이다** — 비우지(`null`) 않는다. 부르는 쪽이 줄의 수로 분기하지
+    # 않는다(ADR 0025)
+    assert body["ledger_entry_ids"] == []
 
 
 def test_a_failure_comes_back_with_its_disposal_line(
@@ -79,8 +82,31 @@ def test_a_failure_comes_back_with_its_disposal_line(
     assert response.status_code == 201, response.text
     body = response.json()
     assert (body["result"], body["renewed_expiry_date"]) == ("불합격", None)
-    entry = planted.get(StockLedgerEntry, body["ledger_entry_id"])
+    (entry_id,) = body["ledger_entry_ids"]
+    entry = planted.get(StockLedgerEntry, entry_id)
     assert entry is not None and entry.retest_id == body["inspection_id"]
+
+
+def test_a_split_lot_comes_back_with_a_disposal_line_for_each_warehouse(
+    client: TestClient,
+    planted: Session,  # noqa: F811
+) -> None:
+    """**나뉜 로트의 불합격은 폐기 줄 id 를 모두 돌려준다**(ADR 0025) — 옛 칸 하나로는 둘째 줄을
+    돌려줄 수 없었다. 순서는 `codes.WAREHOUSES` 의 순서다."""
+    lot = an_expired_lot(planted)
+    split(planted, lot, 200.0)
+
+    response = client.post("/retests", json=_payload(lot.id, moisture=0.9))
+
+    assert response.status_code == 201, response.text
+    body = response.json()
+    entries = [planted.get(StockLedgerEntry, entry_id) for entry_id in body["ledger_entry_ids"]]
+    assert [
+        (entry.warehouse, entry.quantity, entry.retest_id) for entry in entries if entry
+    ] == [
+        (codes.WAREHOUSE_RAW, 300.0, body["inspection_id"]),
+        (codes.WAREHOUSE_PRODUCTION, 200.0, body["inspection_id"]),
+    ]
 
 
 def test_a_business_refusal_names_itself_in_the_same_shape(
@@ -166,13 +192,29 @@ def test_the_spec_lists_every_retest_refusal_name(client: TestClient) -> None:
     assert "enum" not in judged
 
 
-def test_a_201_means_the_commit_passed_the_deferred_check(engine: Engine) -> None:
+@pytest.mark.parametrize(
+    ("moved", "warehouses"),
+    [
+        (None, [codes.WAREHOUSE_RAW]),
+        # **나뉜 로트** — 「모든 창고가 비었는가」도 커밋 때의 지연 트리거가 묻는다(4단계 이동).
+        (200.0, [codes.WAREHOUSE_RAW, codes.WAREHOUSE_PRODUCTION]),
+    ],
+)
+def test_a_201_means_the_commit_passed_the_deferred_check(
+    engine: Engine, moved: float | None, warehouses: list[str]
+) -> None:
     """**201 은 커밋이 지나간 뒤에 나간다** — 떨어진 재검사의 폐기 줄을 묻는 지연 트리거까지.
 
     테스트 세션의 SAVEPOINT 안에서는 지연 트리거가 **한 번도 돌지 않는다.** 커밋이 실제로
     일어나는 스키마에 붙여, 엔드포인트가 응답 전에 하는 커밋이 그 트리거를 지나는 것을 본다.
     """
     with _committed_schema(engine, "retest_api_commit") as (scoped, lot_id):
+        if moved is not None:
+            with Session(scoped) as session:
+                lot = session.get(Lot, lot_id)
+                assert lot is not None
+                split(session, lot, moved)
+                session.commit()
 
         def real_scope() -> Iterator[Session]:
             with Session(scoped) as session:
@@ -186,6 +228,10 @@ def test_a_201_means_the_commit_passed_the_deferred_check(engine: Engine) -> Non
 
         assert response.status_code == 201, response.text
         with Session(scoped) as session:
-            entry = session.get(StockLedgerEntry, response.json()["ledger_entry_id"])
-            assert entry is not None
-            assert entry.retest_id == response.json()["inspection_id"]
+            entries = [
+                session.get(StockLedgerEntry, entry_id)
+                for entry_id in response.json()["ledger_entry_ids"]
+            ]
+            assert [
+                (entry.warehouse, entry.retest_id) for entry in entries if entry is not None
+            ] == [(warehouse, response.json()["inspection_id"]) for warehouse in warehouses]

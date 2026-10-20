@@ -4,7 +4,7 @@
 검사하는 것은 —
 
 - **합격이면 새 만료일이 판정일에서 설정기간을 센 값인가**(ADR 0017), 불합격이면 잔량 전부가
-  폐기 한 줄로 나가는가
+  폐기로 나가는가 — 이동으로 나뉜 로트면 잔량이 남은 창고마다 한 줄씩(4단계 이동)
 - **트리거가 막는 것을 쓰기 경로가 먼저 이름으로 막는가** — 그리고 **같은 경계로** 막는가
 - **두 재검사가 동시에 와도 둘째가 이름을 받는가** — 쓰기 경로가 트리거와 같은 순서로 잠그지
   않으면 둘째는 묻는 순간의 상태를 보고 통과해 트리거의 500 을 맞는다
@@ -33,7 +33,7 @@ from app.db.code_attributes import (
     TxnTypeAttribute,
 )
 from app.db.inspection import Inspection, InspectionMeasurement
-from app.db.inventory import Lot, StockLedgerEntry
+from app.db.inventory import Lot, StockLedgerEntry, StockTransferClosure, StockTransferRequest
 from app.db.master import Item, Partner
 from app.services import incoming
 from app.services.incoming import Measurement, RefusedInspection
@@ -186,6 +186,65 @@ def planted(session: Session) -> Session:
     return session
 
 
+def split(session: Session, lot: Lot, moved: float) -> None:
+    """**로트를 나눈다** — `moved` 만큼 원재료창고에서 생산창고로 옮긴 처리 하나를 넣는다.
+
+    이동의 쓰기 경로가 서기 전이라 요청 · 처리 종결 · 원장 두 줄을 데이터베이스에 그대로
+    넣는다(`tests/test_stock_transfer.py` 의 `_process` 와 같은 모양). 시각은 입고 다음 날이다 —
+    로트가 아직 살아 있던 때다. 이동의 유형과 생산창고는 여기서 심는다 — 재검사의 기준정보에는
+    없다.
+    """
+    planted_already = select(TxnTypeAttribute).where(
+        TxnTypeAttribute.code == codes.TXN_TRANSFER_OUT
+    )
+    if session.scalars(planted_already).first() is None:
+        add_code(session, codes.WAREHOUSE, codes.WAREHOUSE_PRODUCTION, "생산창고")
+        for txn_type in codes.TRANSFER_TXN_TYPES:
+            add_code(session, codes.TXN_TYPE, txn_type)
+        session.flush()
+        session.add_all(
+            TxnTypeAttribute(
+                code=txn_type,
+                total_effect=codes.LEDGER_EFFECTS[txn_type],
+                source_document_type="이동 처리",
+            )
+            for txn_type in codes.TRANSFER_TXN_TYPES
+        )
+        session.flush()
+    at = datetime.combine(lot.received_date + timedelta(days=1), datetime.min.time())
+    request = StockTransferRequest(
+        lot_id=lot.id, quantity=moved, requested_at=at, requested_by="생산 1"
+    )
+    session.add(request)
+    session.flush()
+    closure = StockTransferClosure(
+        request_id=request.id,
+        closure_type=codes.CLOSURE_PROCESSED,
+        lot_id=lot.id,
+        quantity=moved,
+        requested_at=at,
+        closed_at=at,
+        closed_by="자재 담당 1",
+    )
+    session.add(closure)
+    session.flush()
+    session.add_all(
+        StockLedgerEntry(
+            lot_id=lot.id,
+            inspection_id=lot.inspection_id,
+            txn_type=txn_type,
+            warehouse=codes.LEDGER_TYPE_WAREHOUSES[txn_type],
+            item_type=lot.item_type,
+            quantity=moved,
+            occurred_at=at,
+            transfer_closure_id=closure.id,
+            transfer_closure_type=closure.closure_type,
+        )
+        for txn_type in codes.TRANSFER_TXN_TYPES
+    )
+    session.flush()
+
+
 def a_retest(lot_id: int, moisture: float = FINE, **overrides: object) -> IncomingRetest:
     """수분 하나를 다시 잰 재검사 — 규격(≤ 0.5) 밖이면 불합격이다."""
     fields: dict[str, object] = {
@@ -235,7 +294,7 @@ def test_a_pass_renews_the_expiry_from_the_day_it_was_judged(planted: Session) -
         codes.JUDGMENT_PASSED,
         None,
         clock.today() + timedelta(days=SHELF_LIFE),
-        None,
+        (),
     )
     planted.expire_all()
     assert planted.get(Lot, lot.id).expiry_date == labelled  # type: ignore[union-attr]
@@ -274,7 +333,8 @@ def test_a_retest_is_judged_on_the_site_wall_clock(
 
 
 def test_a_failure_throws_away_everything_left(planted: Session) -> None:
-    """**불합격이면 잔량 전부가 폐기 한 줄로 나간다** — 앞서 돌려보낸 것을 뺀 나머지다."""
+    """**불합격이면 잔량 전부가 폐기로 나간다** — 앞서 돌려보낸 것을 뺀 나머지다. 나뉘지 않은
+    로트라 한 줄이다."""
     lot = an_expired_lot(planted)
     return_to_supplier(planted, _from_the_lot(lot.inspection_id, 120.0))  # type: ignore[arg-type]
 
@@ -285,16 +345,68 @@ def test_a_failure_throws_away_everything_left(planted: Session) -> None:
         _MOISTURE_REASON,
         None,
     )
-    entry = planted.get(StockLedgerEntry, retested.ledger_entry_id)
+    (entry_id,) = retested.ledger_entry_ids
+    entry = planted.get(StockLedgerEntry, entry_id)
     assert entry is not None
     assert (entry.txn_type, entry.quantity, entry.retest_id) == (
         codes.TXN_DISPOSAL,
         380.0,
         retested.inspection_id,
     )
-    # **나가는 창고는 로트가 있는 창고다** — 이동이 서기 전에는 들어온 창고 하나다(4단계 조각 2)
+    # **나가는 창고는 로트가 있는 창고다** — 나뉘지 않은 로트는 들어온 창고 하나다(4단계 조각 2)
     assert (entry.warehouse, entry.item_type) == (lot.warehouse, lot.item_type)
     assert _balance(planted, lot.id) == 0.0
+
+
+def _disposals(session: Session, retested: Retested) -> list[tuple[str, float]]:
+    """돌려준 id 순서대로 (창고, 수량) — 그 줄이 모두 이 재검사의 폐기 줄인지도 본다."""
+    found = []
+    for entry_id in retested.ledger_entry_ids:
+        entry = session.get(StockLedgerEntry, entry_id)
+        assert entry is not None
+        assert (entry.txn_type, entry.retest_id) == (codes.TXN_DISPOSAL, retested.inspection_id)
+        found.append((entry.warehouse, entry.quantity))
+    return found
+
+
+def test_a_split_lot_is_thrown_away_in_each_warehouse(planted: Session) -> None:
+    """**나뉜 로트는 잔량이 남은 창고마다 한 줄, 합쳐서 잔량 전부다**(`PRD.md` 시나리오 ③ · 성공
+    기준 6). 들어온 창고에 로트 전체를 버리는 한 줄은 그 창고의 잔량을 넘어 트리거가 거부한다 —
+    3단계의 경로가 그대로면 여기서 500 이 난다. id 는 `codes.WAREHOUSES` 의 순서로 돌아온다."""
+    lot = an_expired_lot(planted)
+    return_to_supplier(planted, _from_the_lot(lot.inspection_id, 120.0))  # type: ignore[arg-type]
+    split(planted, lot, 200.0)
+
+    retested = retest(planted, a_retest(lot.id, moisture=0.9))
+
+    assert _disposals(planted, retested) == [
+        (codes.WAREHOUSE_RAW, 180.0),
+        (codes.WAREHOUSE_PRODUCTION, 200.0),
+    ]
+    assert _balance(planted, lot.id) == 0.0
+
+
+def test_a_lot_moved_out_whole_is_thrown_away_where_it_now_is(planted: Session) -> None:
+    """**빈 창고에는 폐기 줄이 서지 않는다** — 원재료창고가 비었으면 생산창고 한 줄이다. 0 짜리
+    줄은 원장이 받지 않는다(`ck_stock_ledger_entry_disposal_takes_something`)."""
+    lot = an_expired_lot(planted)
+    split(planted, lot, 500.0)
+
+    retested = retest(planted, a_retest(lot.id, moisture=0.9))
+
+    assert _disposals(planted, retested) == [(codes.WAREHOUSE_PRODUCTION, 500.0)]
+    assert _balance(planted, lot.id) == 0.0
+
+
+def test_a_split_lot_that_passes_throws_nothing_away(planted: Session) -> None:
+    """합격이면 나뉜 로트도 그대로다 — 폐기 줄이 없고 돌려줄 id 도 없다."""
+    lot = an_expired_lot(planted)
+    split(planted, lot, 200.0)
+
+    retested = retest(planted, a_retest(lot.id))
+
+    assert (retested.result, retested.ledger_entry_ids) == (codes.JUDGMENT_PASSED, ())
+    assert _balance(planted, lot.id) == 500.0
 
 
 def test_a_failure_whose_balance_does_not_add_up_in_binary_still_empties_the_lot(
