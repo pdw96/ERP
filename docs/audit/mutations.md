@@ -1637,5 +1637,5 @@ PostgreSQL 16)는 초록이다. 모델 쪽을 어긋낸 줄은 리비전과 모�
 | — | `API_VERSION` 을 `2.1` 에서 `2.0` 으로 내렸다 | `test_the_version_moves_as_far_as_the_contract_moved` — 경로가 섰는데 판이 그대로다 · `test_the_spec_matches_the_snapshot_in_the_repository` |
 
 **세우지 않은 가드 둘** — 어긋낼 것이 없어 표에 없다. 처리 경로가 만료를 묻기 전에 로트 줄을 따로 잠그는 것(잔량 셈이 같은 줄을
-잠그므로 걷어 내도 아무 검사가 빨개지지 않았다)과, 트리거의 「처리 시각 이전에 판정된 재검사」 조건(처리 시각이 「지금」이라
+잠그므로 겹치고, 겹친 잠금은 걷어 내도 빨개질 시험이 없다)과, 트리거의 「처리 시각 이전에 판정된 재검사」 조건(처리 시각이 「지금」이라
 시계가 거꾸로 가지 않고는 닿지 않는다, NC-129). 까닭은 `app/services/transfers.py` 의 `_may_move` · `_live_expiry` 가 든다.
