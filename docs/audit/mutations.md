@@ -1547,3 +1547,52 @@ ADR 0024 가 「게이트를 세우는 조각은 하한을 어긋내 빨갛게 �
 | NC | 무엇을 어긋냈나 | 빨개진 검사 |
 |---|---|---|
 | — | 리비전 맨 앞의 `LOCK TABLE lots IN SHARE ROW EXCLUSIVE MODE` 를 지웠다 | `test_upgrading_does_not_miss_a_lot_moved_while_it_runs` — 업그레이드가 「went through」로 끝난다 |
+
+## 4단계 조각 3 — 이동 PR A (`9b75fd3`, ADR 0022 · 0023)
+
+가드를 먼저 쟀다 — 리비전 파일(`c3a9e7d41b58`)을 치운 트리에서 올릴 때의 가드 둘과 내릴 때의 가드를 보는 시험이 빨갛다
+(아래 첫 줄). 그 뒤 하나씩 어긋냈다. 어긋냄마다 겨냥한 시험만 돌렸고, 어긋냄 없이 돌린 같은 트리의 `pytest` 전체(실제
+PostgreSQL 16)는 초록이다. 모델 쪽을 어긋낸 줄은 리비전과 모델을 견주는 `tests/test_migrations.py` 도 함께 빨개지는 자리다 —
+여기서는 겨냥한 시험만 돌렸다. 처음 지은 어긋냄 넷은 쓸모가 없었다 — 둘은 `RAISE` 뒤의 닿지 않는 줄을 고쳐 행동이 바뀌지
+않았고, 둘은 모듈을 깨뜨려 시험이 아니라 수집이 멈췄다. 다시 지어 빨개진 것을 아래에 적는다.
+
+| NC | 무엇을 어긋냈나 | 빨개진 검사 |
+|---|---|---|
+| — | 리비전 파일을 치웠다(머리가 `1e5667151a9f`) | `test_upgrading_says_which_lot_goes_below_zero_in_a_warehouse` · `test_upgrading_says_which_lot_holds_a_disposal_of_nothing` · `test_downgrade_counts_the_transfer_requests_that_would_vanish` |
+| — | 올릴 때의 「창고마다 음수」 가드를 `AND FALSE` 로 껐다 | `test_upgrading_says_which_lot_goes_below_zero_in_a_warehouse` — 바뀐 트리거는 옛 줄을 다시 세지 않아 그대로 올라간다 |
+| — | 올릴 때의 「0 짜리 폐기 줄」 가드를 `AND FALSE` 로 껐다 | `test_upgrading_says_which_lot_holds_a_disposal_of_nothing` — CHECK 이름만 나와 로트 번호를 찾지 못한다 |
+| — | 리비전 맨 앞의 `LOCK TABLE stock_ledger_entries IN SHARE ROW EXCLUSIVE MODE` 를 지웠다 | `test_upgrading_does_not_miss_a_line_written_while_it_runs` |
+| — | 내릴 때의 요청 가드를 `AND FALSE` 로 껐다 | `test_downgrade_counts_the_transfer_requests_that_would_vanish` |
+| — | 내릴 때의 `LOCK TABLE stock_transfer_requests IN SHARE MODE` 를 지웠다 | `test_downgrade_does_not_miss_a_request_still_being_written` |
+| — | 요청 수량 CHECK 를 `TRUE` 로 바꿨다(모델) | `test_a_request_moves_something` — 0 · 음수 · `NaN` · 무한대 넷 다 |
+| — | 요청자 `is_present()` 를 `TRUE` 로 바꿨다(모델) | `test_a_request_names_who_asked` |
+| — | 요청 트리거의 「입고 시각보다 앞선다」 견줌을 `FALSE` 로 껐다 | `test_a_request_comes_after_the_lot_came_in` |
+| — | 요청 트리거의 「입고 줄이 없다」 거부를 `FALSE` 로 껐다 | `test_a_lot_with_no_receipt_is_not_requested` |
+| — | 요청 트리거의 고치기 · 지우기 거부(`TG_OP <> 'INSERT'`)를 `FALSE` 로 껐다 | `test_a_request_is_never_rewritten` — 고치기 둘 · 지우기 하나 |
+| — | 종결의 요청 유일키(`uq_stock_transfer_closure_request`)를 지웠다(모델) | `test_one_request_has_one_end` 셋과 `test_processing_and_cancelling_one_request_at_once` |
+| — | 종결 구분 CHECK 를 `TRUE` 로 바꿨다(모델) | `test_an_end_is_a_processing_or_a_cancellation` |
+| — | 종결 → 요청 쌍 외래키를 `(request_id) → (id)` 하나로 줄였다(모델) | `test_an_end_carries_what_its_request_says` — 부분 처리 · 다른 요청 시각 · 다른 로트 셋 다 |
+| — | 「요청보다 먼저 끝나지 않는다」 CHECK 를 `TRUE` 로 바꿨다(모델) | `test_an_end_does_not_come_before_its_request` |
+| — | 종결자 `is_present()` 를 `TRUE` 로 바꿨다(모델) | `test_an_end_names_who_closed_it` |
+| — | 종결 트리거의 고치기 · 지우기 거부를 `FALSE` 로 껐다 | `test_an_end_is_never_rewritten` — 고치기 둘 · 지우기 하나 |
+| — | 종결 트리거의 만료 거부를 `FALSE` 로 껐다 | `test_an_expired_lot_is_not_moved` 와 `test_processing_and_retest_share_one_boundary` 의 다음 날 둘 |
+| — | 종결 트리거가 처리 시각 뒤의 재검사도 읽게 했다(`judged_at <= NEW.closed_at` 를 뺐다) | `test_a_renewal_judged_after_the_processing_does_not_cover_it` |
+| — | 종결 트리거의 경계를 `<` 에서 `<=` 로 바꿨다 — 만료일 당일을 막는다 | `test_a_lot_still_moves_on_its_expiry_day` 와 `test_processing_and_retest_share_one_boundary` 의 만료일 당일 |
+| — | 종결 트리거의 경계를 하루 늦췄다(`< NEW.closed_at::date - 1`) | `test_an_expired_lot_is_not_moved` 와 `test_processing_and_retest_share_one_boundary` 의 다음 날 둘 |
+| — | 처리의 지연 트리거가 거부하기 전에 `RETURN NULL` 하게 했다 | `test_processing_takes_both_ledger_lines` — 줄 없음 · 출고만 · 입고만 셋 다 |
+| — | 처리의 지연 트리거에서 입고 줄을 묻는 갈래를 뺐다 | `test_processing_takes_both_ledger_lines` 의 출고만 — 다른 둘은 초록이 맞다(출고 줄을 묻는 갈래가 남았다) |
+| — | 이동 줄의 양방향 CHECK 에 `OR TRUE` 를 붙였다(모델) | `test_a_transfer_line_names_its_processing` 와 `test_only_a_transfer_line_names_a_processing` |
+| — | 「차면 처리다」 CHECK 의 처리 조건을 `OR TRUE` 로 풀었다(모델) | `test_a_transfer_line_follows_a_processing` 의 취소 — 비운 갈래는 앞 조건이 문다 |
+| — | 「차면 처리다」 CHECK 에서 「종결과 구분이 함께 찬다」 조건을 뺐다(모델) | `test_a_transfer_line_follows_a_processing` 의 빈 구분 |
+| — | 이동 줄 → 처리 종결 쌍 외래키를 지웠다(모델) | `test_a_transfer_line_says_what_its_processing_says` — 다른 수량 · 다른 시각 · 다른 로트 셋 다 |
+| — | 처리 하나에 쪽마다 한 줄인 인덱스를 `unique=False` 로 바꿨다(모델) | `test_one_processing_takes_one_line_on_each_side` |
+| — | `codes.LEDGER_TYPE_WAREHOUSES` 에서 이동 유형 둘을 뺐다 | `test_a_transfer_runs_from_raw_to_production` 둘 다 — CHECK 도 넘기는 조건도 같은 목록에서 지어 함께 풀린다 |
+| — | 잔량 트리거의 합에서 `AND e.warehouse = NEW.warehouse` 를 뺐다 — 로트 하나로 센다 | `test_a_transfer_takes_no_more_than_the_raw_warehouse_holds` · `test_what_moved_to_production_is_not_returned` · `test_two_processings_of_one_lot_at_once_do_not_both_take_it` |
+| — | 잔량 트리거의 로트 잠금(`FOR NO KEY UPDATE`)을 뺐다 | `test_two_processings_of_one_lot_at_once_do_not_both_take_it` 와 `test_a_retest_waits_for_a_processing_of_the_same_lot` |
+| — | 잔량 트리거의 「설 수 없는 창고의 줄은 넘긴다」를 지웠다 | `test_a_line_stands_only_in_a_warehouse_that_holds_its_item` 와 `test_a_transfer_runs_from_raw_to_production` 의 생산창고 출고 — CHECK 이름 대신 「잔량이 음수다」가 나온다 |
+| — | 잔량 트리거의 「폐기는 그 창고의 잔량 전부」를 `FALSE` 로 껐다 | `test_a_disposal_takes_its_whole_warehouse` |
+| — | 잔량 트리거의 「나가는 줄은 입고 뒤」 견줌을 `FALSE` 로 껐다 | `test_a_transfer_line_does_not_come_before_the_lot_came_in` |
+| — | 「0 은 폐기가 아니다」 CHECK 를 `TRUE` 로 바꿨다(모델) | `test_a_disposal_of_nothing_does_not_stand` |
+| — | 재검사의 지연 트리거에서 「커밋 때 로트 잔량 0」 거부를 `FALSE` 로 껐다 | `test_a_disposal_that_misses_a_warehouse_does_not_stand` |
+| — | 폐기 줄의 창고마다 유일 인덱스를 `unique=False` 로 바꿨다(모델) | `test_one_retest_takes_one_disposal_line_in_each_warehouse` |
+| — | 그 인덱스를 옛 모양 `(retest_id)` 로 되돌렸다(모델) | `test_a_split_lot_is_disposed_of_in_each_warehouse` |
