@@ -84,14 +84,16 @@ C 가 새 서비스 파일 줄을 더한다.
 - **판정은 `ledger_entry_id` 를 지우는 것을 깨는 변경으로 가른다** — B 가 판을 `1.1` 로 둔 채 돌려 「칸이 사라졌다」 ·
   「필수가 풀렸다」로 빨개지는 것을 보았다(`docs/audit/mutations.md` 「이동 PR B」). 이슈 #85 · #93 의 조용한 통과는 이 자리에
   닿지 않았고, 판정을 고치지 않았다
-- **이동 경로의 거절 이름**(PR C 가 열기 전에 정했다) — 요청은 `unknown_lot` 하나, 종결은 `unknown_transfer_request` ·
-  `request_is_already_processed` · `request_is_already_cancelled` · `lot_has_expired` · `more_than_the_raw_warehouse_holds`.
-  열거는 `app/services/transfers.py` 가 든다. 가른 자리 셋 —
+- **이동 경로의 거절 이름**(PR C 가 정하고 저장소 소유자가 확인했다, 2026-10-20) — 요청은 `unknown_lot` 하나, 종결은
+  `unknown_transfer_request` · `request_is_already_processed` · `request_is_already_cancelled` · `lot_has_expired` ·
+  `more_than_the_raw_warehouse_holds`. 열거는 `app/services/transfers.py` 가 든다. 가른 자리 셋 —
   - **원재료창고의 잔량은 반품과 다른 이름이다** — 반품의 `more_than_the_lot_holds` 는 이동보다 먼저 나갔고 고치면 깨는
     변경이다. 이동은 처음 서는 경로라 셈 그대로의 이름을 단다. 로트를 읽는 응답의 `balance` 는 모든 창고의 합이다
   - **이미 끝난 요청은 처리됐는지 취소됐는지를 가른다** — 부르는 쪽이 다음 할 일(새로 요청하는가)이 둘에서 갈린다
   - **원자재가 아닌 로트 · 입고 줄이 없는 로트는 이름을 두지 않는다** — 지금 로트를 짓는 길은 관문 1 하나라 그런 로트가
     쓰기 경로로는 서지 않는다(NC-129). 그 요청은 요청 트리거가 막는다
+- **종결의 응답은 원장 줄 id 목록 하나다** — 처리면 출고 · 입고 두 줄, 취소면 빈 목록. 종결의 id 는 싣지 않는다 — 요청
+  하나에 종결 하나라 `transfer_request_id` 가 이미 가리킨다(같은 확인)
 - **종결의 구분은 요청 본문의 닫힌 열거다**(`ClosureType`) — 다른 글자는 pydantic 의 `enum` 으로 돌아간다. 열거로 적느라
   `codes.CLOSURE_TYPES` 와 두 벌이 되어 `tests/test_transfer_api.py` 가 견준다
 - **짓는 순서는 데이터베이스 → 재검사 → 이동 쓰기 경로다**(⑥). 재검사 경로를 이동보다 먼저 고치는 까닭 — 이동 엔드포인트가 서는
