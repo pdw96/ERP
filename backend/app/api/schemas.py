@@ -201,8 +201,10 @@ class RetestOut(BaseModel):
     - `inspection_id` — 재검사에는 다른 손잡이가 없다. 같은 로트에 재검사가 여럿 설 수 있다
     - `renewed_expiry_date` — **합격이면 새 만료일이다.** 계산이 낸 값이고(ADR 0017) 라벨에 다시
       찍힐 값이라, 부르는 쪽이 다시 셈하게 하면 한 사실을 두 번 짓게 된다. 불합격이면 비어 있다
-    - `ledger_entry_id` — 떨어졌으면 잔량 전부가 원장에서 나갔다는 것을 부르는 쪽이 확인할
-      자리다. 합격이면 비어 있다
+    - `ledger_entry_ids` — 떨어졌으면 잔량 전부가 원장에서 나갔다는 것을 부르는 쪽이 확인할
+      자리다. **잔량이 남았던 창고마다 폐기 줄 하나**라 목록이다 — 이동으로 나뉜 로트면 둘이다.
+      합격이면 빈 목록이다. 옛 칸 `ledger_entry_id`(하나)를 대신한 깨는 변경이라 판이 `2.0` 이
+      됐다(ADR 0025) — 줄의 수로 분기하지 않도록 하나일 때도 목록이다
     """
 
     inspection_id: int
@@ -210,7 +212,7 @@ class RetestOut(BaseModel):
     result: str = known_names([codes.JUDGMENT_PASSED, codes.JUDGMENT_FAILED])
     nonconformity_code: str | None
     renewed_expiry_date: date | None
-    ledger_entry_id: int | None
+    ledger_entry_ids: list[int]
 
 
 class LotOut(BaseModel):

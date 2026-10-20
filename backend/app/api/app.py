@@ -82,10 +82,13 @@ from app.services.site_clock import assert_the_site_clock_holds
 # 목록도 거기 한 자리에 있다. 기존 경로의 응답에 이름이 늘면 저자가
 # `docs/openapi-declarations.json` 에 가른다 — 받던 요청에 나가는지는 스펙이 말하지 않는다.
 #
+# **앞자리가 처음 오른 것은 `2.0` 이다**(ADR 0025) — 재검사 응답의 폐기 줄 id 가 칸 하나에서
+# 목록으로 바뀌었다. 이동으로 나뉜 로트는 창고마다 폐기 줄이 서서 칸 하나로는 다 돌려줄 수 없다.
+#
 # **그리고 프레임워크의 기본값과 달라야 한다.** 기본값이 하필 `0.1.0` 이라, 그
 # 값을 쓰면 「적었다」와 「안 적었다」가 밖에서 구별되지 않는다 — 검사가 통과하면서
 # 아무것도 지키지 않게 된다(실제로 돌연변이가 그것을 드러냈다).
-API_VERSION = "1.0"
+API_VERSION = "2.0"
 
 
 @asynccontextmanager
@@ -630,9 +633,10 @@ def post_retest(
 ) -> RetestOut | JSONResponse:
     """만료된 로트 하나를 다시 검사한다.
 
-    합격이면 새 만료일이 그 재검사에 박히고, 불합격이면 그 로트의 잔량 전부가 원장에 폐기출고
-    한 줄로 나간다. **어떤 갈래를 무엇이 막는지는** `app/services/retests.py` 의
-    `RetestRefusal` 이 든다 — 검사와 같은 예외(`RefusedInspection`)로 온다.
+    합격이면 새 만료일이 그 재검사에 박히고, 불합격이면 그 로트의 잔량 전부가 원장에 폐기출고로
+    나간다 — 잔량이 남은 창고마다 한 줄이고, 응답이 그 줄의 id 를 모두 돌려준다. **어떤 갈래를
+    무엇이 막는지는** `app/services/retests.py` 의 `RetestRefusal` 이 든다 — 검사와 같은
+    예외(`RefusedInspection`)로 온다.
     """
     try:
         retested = retest(
@@ -662,7 +666,7 @@ def post_retest(
         result=retested.result,
         nonconformity_code=retested.nonconformity_code,
         renewed_expiry_date=retested.renewed_expiry_date,
-        ledger_entry_id=retested.ledger_entry_id,
+        ledger_entry_ids=list(retested.ledger_entry_ids),
     )
 
 
