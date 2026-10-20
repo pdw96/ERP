@@ -1611,3 +1611,31 @@ PostgreSQL 16)는 초록이다. 모델 쪽을 어긋낸 줄은 리비전과 모�
 | — | 창고 순서를 `codes.WAREHOUSES` 의 거꾸로 했다 | `test_a_split_lot_is_thrown_away_in_each_warehouse` · `test_a_split_lot_comes_back_with_a_disposal_line_for_each_warehouse` · `test_a_201_means_the_commit_passed_the_deferred_check` 의 나뉜 로트 |
 | — | 잔량이 남은 창고 가운데 첫 창고만 버렸다 | `test_a_split_lot_is_thrown_away_in_each_warehouse` · `test_a_split_lot_comes_back_with_a_disposal_line_for_each_warehouse` · `test_a_201_means_the_commit_passed_the_deferred_check` 의 나뉜 로트 — 커밋 때의 지연 트리거가 500 을 낸다 |
 | — | 응답이 id 목록의 첫째만 싣게 했다 | `test_a_split_lot_comes_back_with_a_disposal_line_for_each_warehouse` · `test_a_201_means_the_commit_passed_the_deferred_check` 의 나뉜 로트 |
+
+## 4단계 조각 3 — 이동 PR C (`f36808c`)
+
+이동 쓰기 경로 · 반품의 원재료창고 잔량 · 현장 시계 · 판을 하나씩 어긋냈다. 어긋냄마다 `tests/test_transfer_path.py` ·
+`tests/test_transfer_api.py` · `tests/test_return_path.py` · `tests/test_api.py` · `tests/test_contract_judgment.py` 를 돌렸고,
+어긋냄 없이 돌린 같은 트리의 `pytest` 전체(실제 PostgreSQL 16)는 초록이다.
+
+| NC | 무엇을 어긋냈나 | 빨개진 검사 |
+|---|---|---|
+| — | 요청 — 로트가 있는지 묻지 않았다 | `test_an_unknown_lot_is_named` · `test_a_business_refusal_names_itself_in_the_same_shape[request]` — 외래키의 500 |
+| — | 종결 — 요청이 있는지 묻지 않았다 | `test_an_unknown_request_is_named` · `test_a_business_refusal_names_itself_in_the_same_shape[closure]` |
+| — | 종결 — 요청 줄을 잠그지 않았다 | `test_processing_and_cancelling_one_request_at_once_the_second_is_named` 둘 — 둘째가 유일키에서 진다 |
+| — | 종결 — 이미 끝난 요청인지 묻지 않았다 | `test_a_request_closes_once` 넷 · 위의 동시 시험 둘 |
+| — | 종결 — 처리됨 · 취소됨의 이름을 맞바꿨다 | `test_a_request_closes_once` 넷 · 위의 동시 시험 둘 |
+| — | 처리 — 만료를 묻지 않았다 | `test_an_expired_lot_is_requested_but_not_moved` · `test_a_lot_thrown_away_by_a_retest_is_named_as_expired` · `test_the_write_path_and_the_trigger_draw_the_same_expiry_line[expired-yesterday]` |
+| — | 처리 — 만료 경계를 `<` 에서 `<=` 로 | `test_the_write_path_and_the_trigger_draw_the_same_expiry_line[expires-today]` |
+| — | 처리 — 재검사의 갱신 만료일을 보지 않고 라벨의 것만 | `test_a_lot_renewed_by_a_retest_moves_again` |
+| — | 처리 — 원재료창고의 잔량을 묻지 않았다 | `test_a_request_for_more_than_there_is_still_stands` · `test_a_second_processing_counts_only_what_is_left_in_the_raw_warehouse` · `test_the_write_path_and_the_trigger_count_the_same_warehouse[300.5-False]` · `test_two_processings_of_one_lot_at_once_the_second_is_named` · `test_a_refused_processing_leaves_nothing_behind` |
+| — | 처리 — 원장 두 줄을 입고 · 출고 순서로 | `test_processing_moves_the_quantity_in_one_transaction` · `test_processing_comes_back_with_both_ledger_lines` |
+| — | 잔량 셈(`goes_below_zero`) — 창고를 거르지 않고 로트 전체로 | `test_a_second_processing_counts_only_what_is_left_in_the_raw_warehouse` · `test_the_write_path_and_the_trigger_count_the_same_warehouse[300.5-False]` · `test_a_return_counts_only_what_is_left_in_the_raw_warehouse[300.5-False]` · `test_two_processings_of_one_lot_at_once_the_second_is_named` |
+| — | 잔량 셈 — 로트 줄을 잠그지 않았다 | `test_two_processings_of_one_lot_at_once_the_second_is_named` — 둘째가 트리거의 500 을 받는다 |
+| — | 현장 시계 — `requested_at` 을 `_STAMPED` 에서 뺐다 | `test_a_transfer_stamped_in_the_future_stops_the_site_clock[request]` |
+| — | 현장 시계 — `closed_at` 을 `_STAMPED` 에서 뺐다 | `test_a_transfer_stamped_in_the_future_stops_the_site_clock[closure]` |
+| — | `API_VERSION` 을 `2.1` 에서 `2.0` 으로 내렸다 | `test_the_version_moves_as_far_as_the_contract_moved` — 경로가 섰는데 판이 그대로다 · `test_the_spec_matches_the_snapshot_in_the_repository` |
+
+**세우지 않은 가드 둘** — 어긋낼 것이 없어 표에 없다. 처리 경로가 만료를 묻기 전에 로트 줄을 따로 잠그는 것(잔량 셈이 같은 줄을
+잠그므로 걷어 내도 아무 검사가 빨개지지 않았다)과, 트리거의 「처리 시각 이전에 판정된 재검사」 조건(처리 시각이 「지금」이라
+시계가 거꾸로 가지 않고는 닿지 않는다, NC-129). 까닭은 `app/services/transfers.py` 의 `_may_move` · `_live_expiry` 가 든다.
