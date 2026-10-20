@@ -618,11 +618,14 @@ def test_a_disposal_says_what_its_retest_says(
         _add(prepared, _disposal(prepared, retest, **overrides))
 
 
-def test_one_retest_takes_one_disposal_line(prepared: Session) -> None:
-    """둘째 줄이 0 이면 잔량 규칙은 막지 못한다 — 한 재검사에 폐기 줄은 하나다."""
+def test_a_disposal_of_nothing_does_not_stand(prepared: Session) -> None:
+    """**0 은 폐기가 아니다**(4단계) — 둘째 줄이 0 이면 잔량 규칙은 막지 못한다. 빈 창고에
+    선 0 짜리 줄은 「그 창고의 잔량 전부」와 커밋 때의 검사를 모두 지나 「잔량이 남은 창고마다
+    한 줄」을 깨뜨린다. 창고마다 하나라는 유일 인덱스는 `tests/test_stock_transfer.py` 가
+    잰다."""
     retest = _fail_and_dispose(prepared)
 
-    with pytest.raises(IntegrityError, match="uq_stock_ledger_entry_one_line_per_retest"):
+    with pytest.raises(IntegrityError, match="ck_stock_ledger_entry_disposal_takes_something"):
         _add(prepared, _disposal(prepared, retest, 0.0))
 
 

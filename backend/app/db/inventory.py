@@ -425,6 +425,137 @@ class PurchaseReturn(Base):
     returned_by: Mapped[str] = mapped_column(String(50))
 
 
+class StockTransferRequest(Base):
+    """이동 요청 — **어느 로트를 얼마나 생산창고로 옮겨 달라는 의도**(4단계).
+
+    ### 재고를 잡지 않는다
+
+    요청은 의도이고 사실이 아니다(원칙 ②). 요청 수량이 잔량을 넘어도 요청은 선다 — 잔량은
+    처리하는 순간 원장의 트리거가 본다. 그래서 「요청 잔량」 같은 칸이 없다.
+
+    ### 구간 칸이 없다
+
+    지금 구간은 원재료창고 → 생산창고 하나뿐이고, 그것은 처리가 내는 수불유형(`생산출고` ·
+    `생산입고`)이 이미 말한다. 값이 하나뿐인 칸을 지어내지 않는다.
+
+    ### 고치지 않는다
+
+    잘못 낸 요청은 취소하고 새로 낸다(원칙 ⑦). 트리거가 고치기와 지우기를 거부하고, 로트가
+    들어온 뒤에만 요청을 받는다(`stock_transfer_request_comes_after_the_receipt`).
+    """
+
+    __tablename__ = "stock_transfer_requests"
+    __table_args__ = (
+        ForeignKeyConstraint(["lot_id"], ["lots.id"], name="fk_stock_transfer_request_lot"),
+        # **0 은 요청이 아니다.** 옮길 것이 없는 요청은 처리해도 원장에 아무 일도 일어나지
+        # 않는다.
+        CheckConstraint(
+            f"quantity > 0 AND {is_finite('quantity')}",
+            name="ck_stock_transfer_request_quantity",
+        ),
+        CheckConstraint(
+            is_present("requested_by"), name="ck_stock_transfer_request_requested_by_is_present"
+        ),
+        # `id` 가 이미 기본키라 행을 좁히지 않는다 — **종결이 가리킬 상대**다. PostgreSQL 은
+        # 복합 외래키가 가리키는 칸 묶음에 그 묶음 그대로의 유일 제약을 요구한다.
+        UniqueConstraint(
+            "id",
+            "lot_id",
+            "quantity",
+            "requested_at",
+            name="uq_stock_transfer_request_closure_match",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    lot_id: Mapped[int] = mapped_column(Integer)
+    # `items.stock_uom` 단위.
+    quantity: Mapped[float] = mapped_column(Float)
+    requested_at: Mapped[datetime] = mapped_column(DateTime)
+    # **낸 사람.** 판정자와 같이 사용자 표 없이 식별 칸 하나로 적는다.
+    requested_by: Mapped[str] = mapped_column(String(50))
+
+
+class StockTransferClosure(Base):
+    """이동 요청의 끝 — **처리 또는 취소 가운데 하나**(4단계, ADR 0023).
+
+    ### 요청 하나에 종결 하나
+
+    처리와 취소가 **한 표의 한 칸**이라 요청 유일키 하나가 「처리된 요청을 취소」와 「취소된
+    요청을 처리」를 함께 막는다. 같은 요청의 처리와 취소가 동시에 오면 유일키에서 하나가 진다.
+
+    ### 요청을 쌍으로 받는다
+
+    로트 · 수량 · 요청 시각을 요청에서 **쌍 외래키로** 받는다 — 처리 수량은 요청 수량과
+    같다(부분 처리 없음). 요청 시각을 들기에 「요청보다 먼저 끝난 종결」을 이 줄의 CHECK 가
+    본다.
+
+    ### 처리에는 원장 두 줄이 따르고 취소에는 없다
+
+    처리 종결 하나에 `생산출고` 한 줄과 `생산입고` 한 줄 — 두 줄이 같은 로트 · 같은 수량 · 같은
+    시각으로 이 줄을 가리킨다. 「처리는 두 줄을 가진다」는 다른 표의 줄을 세는 규칙이라 커밋할
+    때 지연 트리거가 묻는다. 취소는 처리되기 전의 의도를 거두는 것이라 원장을 건드리지 않는다.
+
+    ### 만료된 로트는 옮기지 않는다
+
+    처리 시각에 살아 있던 만료일을 그 시각의 현장 날짜와 견준다 — 트리거가 본다(ADR 0016 의
+    경계). 요청은 막지 않는다. 만료는 옮기는 순간의 사실이다.
+    """
+
+    __tablename__ = "stock_transfer_closures"
+    __table_args__ = (
+        # **요청 하나에 종결 하나**(ADR 0023).
+        UniqueConstraint("request_id", name="uq_stock_transfer_closure_request"),
+        # **값은 둘뿐이다.** 없으면 다른 글자를 적은 종결이 유일키를 차지해 요청을 처리도 취소도
+        # 아닌 채로 끝낸다.
+        CheckConstraint(
+            f"closure_type IN ({_quoted(codes.CLOSURE_TYPES)})",
+            name="ck_stock_transfer_closure_type",
+        ),
+        # **요청의 로트 · 수량 · 요청 시각을 쌍으로 받는다.** 네 칸 모두 `NOT NULL` 이라 복합
+        # 외래키가 건너뛰는 자리가 없다.
+        ForeignKeyConstraint(
+            ["request_id", "lot_id", "quantity", "requested_at"],
+            [
+                "stock_transfer_requests.id",
+                "stock_transfer_requests.lot_id",
+                "stock_transfer_requests.quantity",
+                "stock_transfer_requests.requested_at",
+            ],
+            name="fk_stock_transfer_closure_request",
+        ),
+        # **요청보다 먼저 끝나지 않는다** — 받은 요청 시각을 한 줄 안에서 견준다.
+        CheckConstraint(
+            "closed_at >= requested_at", name="ck_stock_transfer_closure_after_the_request"
+        ),
+        CheckConstraint(
+            is_present("closed_by"), name="ck_stock_transfer_closure_closed_by_is_present"
+        ),
+        # `id` 가 이미 기본키라 행을 좁히지 않는다 — **원장의 이동 줄이 가리킬 상대**다.
+        # 구분까지 가리켜 원장 줄이 그 종결이 처리인지를 자기 줄의 CHECK 로 묻는다.
+        UniqueConstraint(
+            "id",
+            "closure_type",
+            "lot_id",
+            "quantity",
+            "closed_at",
+            name="uq_stock_transfer_closure_ledger_match",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    request_id: Mapped[int] = mapped_column(Integer)
+    closure_type: Mapped[str] = mapped_column(String(10))
+    # **값을 나르는 칸이 아니라 외래키의 자리다** — 요청에서 받는다.
+    lot_id: Mapped[int] = mapped_column(Integer)
+    quantity: Mapped[float] = mapped_column(Float)
+    requested_at: Mapped[datetime] = mapped_column(DateTime)
+    # 처리 시각 또는 취소 시각.
+    closed_at: Mapped[datetime] = mapped_column(DateTime)
+    # **처리자 또는 취소자.** 취소는 누구든 낸다 — 요청자와 견주지 않는다(소유자, 2026-10-19).
+    closed_by: Mapped[str] = mapped_column(String(50))
+
+
 class StockLedgerEntry(Base):
     """수불 원장 한 줄 — **로트가 생기고 움직인 사실.**
 
@@ -447,20 +578,22 @@ class StockLedgerEntry(Base):
     문서도 없는 유형이 원장에 서고, 그러면 잔량을 세는 쪽이 **그 줄을 더해야
     하는지 빼야 하는지 모른다.** 속성 줄을 가리키면 그 한 겹이 더 막힌다.
 
-    ### 원장에 나는 줄은 구매입고 · 구매반품출고 · 폐기출고다
+    ### 원장에 나는 줄은 근거 문서가 선 유형뿐이다
 
     합격이 로트를 만들고 그 자리에 입고 한 줄이 남는다. 공급사에 돌려보낸 재고는
-    반품 문서와 함께 반품 한 줄로 빠진다. 재검사에서 떨어진 로트는 그 잔량 전부가
-    폐기 한 줄로 나간다. 나머지 유형은 내는 쪽이 아직 없으므로,
+    반품 문서와 함께 반품 한 줄로 빠진다. 재검사에서 떨어진 로트는 잔량이 남은 창고마다
+    폐기 한 줄로 나간다. 처리된 이동은 원재료창고의 생산출고와 생산창고의 생산입고 두 줄이다.
+    받는 유형의 목록은 `codes.LEDGER_EFFECTS` 가 든다. 나머지 유형은 내는 쪽이 아직 없으므로,
     받아 두면 **근거 문서가 없는 줄**이 서고 화면에서는 실제로 일어난 일처럼 보인다.
     그 유형을 내는 조각이 설 때 CHECK 가 함께 넓어진다.
 
-    ### 잔량은 트리거가 지킨다
+    ### 잔량은 트리거가 지킨다 — 로트 × 창고로
 
-    「한 로트의 줄을 합한 잔량이 0 밑으로 내려가지 않는다」와 「입고 줄의 수량은 로트
+    「한 로트가 한 창고에 가진 잔량이 0 밑으로 내려가지 않는다」와 「입고 줄의 수량은 로트
     수량과 같다」는 다른 줄 · 다른 표를 보는 규칙이라 CHECK 로 적을 수 없다. 트리거가
     건다 — `app/db/ledger_guards.py`, ADR 0013. 같은 트리거가 줄을 고치거나 지우는 것을
-    거부한다: 고칠 수 있으면 잔량 규칙을 그 길로 우회한다.
+    거부한다: 고칠 수 있으면 잔량 규칙을 그 길로 우회한다. 로트 하나가 두 창고에 나뉘어 있을
+    수 있으므로(ADR 0022) 합은 창고마다 센다 — 원재료창고에 남은 것보다 많이 옮기지 못한다.
 
     > **이 줄이 가리키는 검사는 그 로트를 만든 검사다.** 표가 설 때는 로트가
     > 검사를 몰라 묶을 수 없었고 미결로 들어 두었던 자리이며, 쓰기 경로가
@@ -545,6 +678,59 @@ class StockLedgerEntry(Base):
         CheckConstraint(
             f"quantity >= 0 AND {is_finite('quantity')}", name="ck_stock_ledger_entry_quantity"
         ),
+        # **0 은 폐기가 아니다**(4단계). 원장 수량은 `>= 0` 이라 빈 창고에도 0 짜리 폐기 줄이
+        # 서고, 그 줄은 「그 창고의 잔량 전부」와 커밋 때의 검사를 모두 지난다 — 「잔량이 남은
+        # 창고마다 한 줄」이라는 모양이 깨진다(PR #96 Codex 리뷰).
+        CheckConstraint(
+            f"txn_type <> '{codes.TXN_DISPOSAL}' OR quantity > 0",
+            name="ck_stock_ledger_entry_disposal_takes_something",
+        ),
+        # ── 이동 줄 — 처리 종결을 가리킨다 (4단계, ADR 0023) ─────────────────── **같은 로트 ·
+        # 같은 수량 · 같은 시각까지, 그리고 구분까지.** 종결만 가리키면 요청은 20 을 옮겼는데
+        # 원장은 50 을 옮기는 줄이 선다.
+        ForeignKeyConstraint(
+            [
+                "transfer_closure_id",
+                "transfer_closure_type",
+                "lot_id",
+                "quantity",
+                "occurred_at",
+            ],
+            [
+                "stock_transfer_closures.id",
+                "stock_transfer_closures.closure_type",
+                "stock_transfer_closures.lot_id",
+                "stock_transfer_closures.quantity",
+                "stock_transfer_closures.closed_at",
+            ],
+            name="fk_stock_ledger_entry_transfer_closure",
+        ),
+        # **양방향이다.** 이동 줄인데 종결이 비면 위의 외래키가 통째로 건너뛰어지고, 이동이
+        # 아닌데 차면 다른 줄이 이동의 근거를 들고 있다.
+        CheckConstraint(
+            f"(txn_type IN ({_quoted(codes.TRANSFER_TXN_TYPES)}))"
+            " = (transfer_closure_id IS NOT NULL)",
+            name="ck_stock_ledger_entry_transfer_names_its_closure",
+        ),
+        # **구분 칸은 종결과 함께 차고, 차면 처리다.** 외래키는 줄이 적은 구분을 그대로 종결에서
+        # 찾을 뿐이라, 이것이 없으면 이동 줄이 「취소」를 적고 취소 종결을 가리켜 거두어진
+        # 요청으로 재고를 옮긴다(PR #96 Codex 리뷰). 두 조건을 따로 적는다 — 한 식으로 쓰면
+        # 구분이 빌 때 비교가 NULL 이 되어 통과한다.
+        CheckConstraint(
+            "(transfer_closure_id IS NULL) = (transfer_closure_type IS NULL)"
+            " AND (transfer_closure_type IS NULL"
+            f" OR transfer_closure_type = '{codes.CLOSURE_PROCESSED}')",
+            name="ck_stock_ledger_entry_transfer_follows_a_processing",
+        ),
+        # **처리 하나에 출고 줄 하나 · 입고 줄 하나** — 그리고 커밋할 때 두 줄을 찾는 자리다
+        # (`stock_transfer_processing_has_its_ledger_lines`).
+        Index(
+            "uq_stock_ledger_entry_one_line_per_transfer_side",
+            "transfer_closure_id",
+            "txn_type",
+            unique=True,
+            postgresql_where=text("transfer_closure_id IS NOT NULL"),
+        ),
         # ── 줄이 선 창고 (4단계, ADR 0022) ─────────────────────────────────────
         # **로트는 하나여도 창고는 줄마다다** — 일부를 옮기면 한 로트가 두 창고에 선다. 잔량을
         # 창고별로 세는 것은 이동이 서는 조각의 일이고, 이 칸은 그 앞에서 「어디서
@@ -564,7 +750,8 @@ class StockLedgerEntry(Base):
             name="fk_stock_ledger_entry_lot_type",
         ),
         # **유형이 창고를 정한다**(`codes.LEDGER_TYPE_WAREHOUSES`) — 사 온 물건은 원재료창고로
-        # 들어오고, 공급사에 돌려보내는 것도 원재료창고에서만 나간다.
+        # 들어오고, 공급사에 돌려보내는 것도 원재료창고에서만 나간다. 이동은 원재료창고에서 빠져
+        # 생산창고로 든다.
         CheckConstraint(
             _LEDGER_TYPE_SETS_WAREHOUSE, name="ck_stock_ledger_entry_type_sets_warehouse"
         ),
@@ -581,9 +768,9 @@ class StockLedgerEntry(Base):
             unique=True,
             postgresql_where=text(f"txn_type = '{codes.TXN_PURCHASE_RECEIPT}'"),
         ),
-        # **잔량을 세는 자리.** 트리거가 줄마다 그 로트의 줄을 합하므로 `lot_id` 로 찾을
-        # 길이 있어야 한다 — 위의 부분 유일 인덱스는 입고 줄만 담아 반품 줄을 함께 세는 합에
-        # 쓰이지 못하고, PostgreSQL 은 외래키 칸에 인덱스를 저절로 두지 않는다. 없으면 줄이
+        # **잔량을 세는 자리.** 트리거가 줄마다 그 로트 · 그 창고의 줄을 합하므로 `lot_id` 로
+        # 찾을 길이 있어야 한다 — 위의 부분 유일 인덱스는 입고 줄만 담아 반품 줄을 함께 세는
+        # 합에 쓰이지 못하고, PostgreSQL 은 외래키 칸에 인덱스를 저절로 두지 않는다. 없으면 줄이
         # 늘수록 넣을 때마다 표 전체를 훑고 그동안 로트 잠금을 쥔다(Codex 리뷰 2 라운드).
         Index("ix_stock_ledger_entry_lot", "lot_id"),
         # **반품 문서 하나에 원장 줄은 하나다.** 둘이 서면 한 번 돌려보낸 것을 두 번
@@ -594,11 +781,14 @@ class StockLedgerEntry(Base):
             unique=True,
             postgresql_where=text("purchase_return_id IS NOT NULL"),
         ),
-        # **재검사 하나에 폐기 줄은 하나다** — 그리고 커밋할 때 그 줄을 찾는 자리다
-        # (`retest_failure_has_its_disposal_line`).
+        # **재검사 하나에 폐기 줄은 창고마다 하나다**(4단계) — 그리고 커밋할 때 그 줄을 찾는
+        # 자리다(`retest_failure_has_its_disposal_line`). 줄 하나하나가 그 창고의 잔량
+        # 전부인지는 잔량 트리거가, 합쳐서 로트의 잔량 전부인지는 커밋 때의 트리거가 본다 — 셋이
+        # 함께 「잔량이 남은 창고마다 한 줄」을 만든다.
         Index(
-            "uq_stock_ledger_entry_one_line_per_retest",
+            "uq_stock_ledger_entry_one_line_per_retest_warehouse",
             "retest_id",
+            "warehouse",
             unique=True,
             postgresql_where=text("retest_id IS NOT NULL"),
         ),
@@ -623,10 +813,11 @@ class StockLedgerEntry(Base):
     # 품목 유형」을 이 줄에서 묻게 한다.
     item_type: Mapped[str] = mapped_column(String(20))
 
-    # **그 로트를 만든 검사를 가리킨다.** 입고 줄에는 그것이 근거이고, 반품 · 폐기 줄에는
-    # 「어느 판정으로 들어온 물건이 나갔는가」다. 반품은 검사를 아는 로트만 하고, 폐기는
-    # 잔량이 있는 로트만 하는데 잔량은 입고 줄에서 오므로 비어 있을 수 없다 — 판정에서
-    # 나지 않은 로트의 줄(전기이월 · 생산입고)이 서는 날 함께 넓어진다.
+    # **그 로트를 만든 검사를 가리킨다.** 입고 줄에는 그것이 근거이고, 반품 · 폐기 줄에는 「어느
+    # 판정으로 들어온 물건이 나갔는가」다. 반품은 검사를 아는 로트만 하고, 폐기는 잔량이 있는
+    # 로트만 하는데 잔량은 입고 줄에서 오므로 비어 있을 수 없다. 이동 줄도 같다 — 옮기는 것은
+    # 입고 줄이 선 로트뿐이다(`stock_transfer_request_comes_after_the_receipt`). 판정에서 나지
+    # 않은 로트의 줄(전기이월 · 자사 로트의 생산입고)이 서는 날 함께 넓어진다.
     inspection_id: Mapped[int] = mapped_column(Integer)
 
     # 반품 줄에서만 찬다 — 위의 양방향 CHECK 가 그것을 건다.
@@ -637,5 +828,15 @@ class StockLedgerEntry(Base):
     # **값을 나르는 칸이 아니라 외래키의 자리다** — 차면 언제나 불합격이다.
     retest_result: Mapped[str | None] = mapped_column(String(10), nullable=True)
 
+    # 이동 줄(생산출고 · 생산입고)에서만 찬다 — 그 이동을 처리한 종결.
+    transfer_closure_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # **값을 나르는 칸이 아니라 외래키의 자리다** — 차면 언제나 처리다.
+    transfer_closure_type: Mapped[str | None] = mapped_column(String(10), nullable=True)
 
-install_ledger_guards(ledger=StockLedgerEntry.__table__, returns=PurchaseReturn.__table__)
+
+install_ledger_guards(
+    ledger=StockLedgerEntry.__table__,
+    returns=PurchaseReturn.__table__,
+    requests=StockTransferRequest.__table__,
+    closures=StockTransferClosure.__table__,
+)

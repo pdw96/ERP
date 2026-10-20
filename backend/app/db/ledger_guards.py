@@ -33,6 +33,11 @@
 순간 묻는 트리거와, 그 규칙이 읽는 것(재검사 줄 · 검사 단계 · 로트의 만료일)을 고정하는
 트리거가 이 파일 뒤쪽에 있다.
 
+**이동도 같은 자리다**(4단계). 「요청은 로트가 들어온 뒤에만」은 원장의 입고 줄을, 「만료된
+로트의 처리를 막는다」는 재검사 줄과 로트의 만료일을, 「처리는 원장 두 줄을 가진다」는 원장 줄을
+세는 규칙이라 CHECK 로 적을 수 없다. 요청과 종결은 원장처럼 고치지도 지우지도 않는다. 맨 뒤에
+있다.
+
 **잠금은 `FOR NO KEY UPDATE` 다**(Codex 리뷰 · 감사 ㉟ OB-1). 반품 문서를 넣을 때 외래키
 검사가 로트 · 검사 줄에 `KEY SHARE` 를 잡는데, `FOR UPDATE` 는 그것과 부딪쳐 「문서 먼저,
 원장 줄 나중」인 두 트랜잭션이 서로를 기다리다 교착으로 끊겼다. `NO KEY UPDATE` 끼리는 줄을
@@ -75,6 +80,20 @@ from app.core import codes
 # 일부만 버리면 떨어진 물건이 재고에 남는다. 폐기 줄은 재검사만 가리키고 양을 들지 않으므로
 # (재검사는 로트를 통째로 본다) 그 양이 맞는지는 합을 세는 이 자리가 본다.
 #
+# **잔량은 로트 × 창고로 센다**(4단계). 이동이 서면 로트 하나가 두 창고에 나뉘어 있고, 로트
+# 전체의 합으로 세면 원재료창고에 30 이 남은 로트에서 50 을 옮기는 줄이 생산창고의 20 을 빌려
+# 지나간다. 잠그는 것은 여전히 로트 줄이다 — 같은 로트의 두 처리는 창고가 같든 다르든 그 줄에서
+# 줄을 선다. **폐기 줄은 그 창고의 잔량 전부다** — 합쳐서 로트의 잔량 전부인지는 커밋 때
+# 재검사의 지연 트리거가 본다. **반품이 넘지 못하는 잔량도 원재료창고의 것이 된다** — 반품 줄은
+# 원재료창고에만 서고 (`ck_stock_ledger_entry_type_sets_warehouse`) 그 창고의 합으로 세어지므로,
+# 생산창고로 옮긴 분량은 반품으로 나가지 못한다. 반품 문서의 트리거를 따로 고치지 않는 까닭이다.
+#
+# **설 수 없는 창고에 선 줄은 넘긴다**(4단계) — 창고가 그 품목을 담지 못하거나, 유형이 정하는
+# 창고가 아니거나, 유형이 로트와 다른 줄. 그런 줄은 원장 줄의 CHECK 와 유형 쌍 외래키가 거부하고
+# 그 이름이 더 정확하다 — 넘기지 않으면 아무것도 들어온 적 없는 창고의 합이 음수가 되어 이
+# 트리거가 엉뚱한 말 (「잔량이 음수다」)로 먼저 거부한다. 조건은 그 CHECK 가 쓰는 같은 목록에서
+# 짓는다.
+#
 # **입고 줄의 창고는 그 로트의 `lots.warehouse` 다**(4단계). 로트의 창고는 「들어온 창고」라는
 # 지나간 사실이 되고, 입고 줄이 그것을 원장에 적는다. 둘이 갈리면 로트는 생산창고로 들어왔다고
 # 말하는데 원장은 원재료창고로 들어왔다고 말한다. 입고 수량을 로트와 견주는 같은 자리에서 본다 —
@@ -89,12 +108,29 @@ _EXPECTED_EFFECTS = " ".join(
     f"WHEN '{txn_type}' THEN '{effect}'" for txn_type, effect in codes.LEDGER_EFFECTS.items()
 )
 
+
+def _quoted(values: tuple[str, ...]) -> str:
+    return ", ".join(f"'{value}'" for value in values)
+
+
+# 들어오는 줄이 설 수 있는 창고인가 — 원장 줄의 CHECK 둘(창고가 담는 품목 유형 · 유형이 정하는
+# 창고)이 쓰는 같은 목록에서 짓는다.
+_NEW_LINE_HOLDS_ITS_TYPE = " OR ".join(
+    f"(NEW.warehouse = '{warehouse}' AND NEW.item_type IN ({_quoted(item_types)}))"
+    for warehouse, item_types in codes.WAREHOUSE_ITEM_TYPES.items()
+)
+_NEW_LINE_STANDS_WHERE_ITS_TYPE_SAYS = " AND ".join(
+    f"(NEW.txn_type <> '{txn_type}' OR NEW.warehouse = '{warehouse}')"
+    for txn_type, warehouse in codes.LEDGER_TYPE_WAREHOUSES.items()
+)
+
 LEDGER_GUARD_FUNCTION = f"""
 CREATE OR REPLACE FUNCTION stock_ledger_entry_keeps_the_balance() RETURNS trigger
 LANGUAGE plpgsql AS $$
 DECLARE
   lot_quantity double precision;
   lot_warehouse text;
+  lot_item_type text;
   lot_label text;
   effect text;
   expected text;
@@ -111,7 +147,8 @@ BEGIN
     RETURN NEW;
   END IF;
 
-  SELECT quantity, warehouse, lot_number INTO lot_quantity, lot_warehouse, lot_label
+  SELECT quantity, warehouse, item_type, lot_number
+    INTO lot_quantity, lot_warehouse, lot_item_type, lot_label
   FROM lots WHERE id = NEW.lot_id FOR NO KEY UPDATE;
   IF NOT FOUND THEN
     RETURN NEW;
@@ -129,6 +166,12 @@ BEGIN
     RAISE EXCEPTION '입고 줄의 창고(%)가 로트 %의 들어온 창고(%)와 다르다',
       NEW.warehouse, lot_label, lot_warehouse
       USING ERRCODE = 'check_violation';
+  END IF;
+
+  IF NEW.item_type IS DISTINCT FROM lot_item_type
+     OR NOT ({_NEW_LINE_HOLDS_ITS_TYPE})
+     OR NOT ({_NEW_LINE_STANDS_WHERE_ITS_TYPE_SAYS}) THEN
+    RETURN NEW;
   END IF;
 
   SELECT total_effect INTO effect FROM txn_type_attributes
@@ -164,7 +207,7 @@ BEGIN
     INTO balance
   FROM stock_ledger_entries AS e
   JOIN txn_type_attributes AS a ON a.group_code = e.txn_type_group AND a.code = e.txn_type
-  WHERE e.lot_id = NEW.lot_id;
+  WHERE e.lot_id = NEW.lot_id AND e.warehouse = NEW.warehouse;
 
   IF effect = '{codes.EFFECT_INCREASE}' THEN
     balance := balance + NEW.quantity::numeric;
@@ -173,12 +216,14 @@ BEGIN
   END IF;
 
   IF balance < 0 THEN
-    RAISE EXCEPTION '로트 %의 잔량이 %이 된다 — 있는 것보다 많이 뺄 수 없다', lot_label, balance
+    RAISE EXCEPTION '로트 %의 % 창고 잔량이 %이 된다 — 그 창고에 있는 것보다 많이 뺄 수 없다',
+      lot_label, NEW.warehouse, balance
       USING ERRCODE = 'check_violation';
   END IF;
 
   IF NEW.txn_type = '{codes.TXN_DISPOSAL}' AND balance <> 0 THEN
-    RAISE EXCEPTION '폐기출고는 로트 %의 잔량 전부다 — %이 남는다', lot_label, balance
+    RAISE EXCEPTION '폐기출고는 로트 %의 % 창고 잔량 전부다 — %이 남는다',
+      lot_label, NEW.warehouse, balance
       USING ERRCODE = 'check_violation';
   END IF;
 
@@ -591,16 +636,45 @@ FOR EACH ROW EXECUTE FUNCTION lot_expiry_stays_as_labelled()
 # 떨어진 물건이 잔량에 남는다 — 반품 문서와 그 원장 줄의 자리
 # (`purchase_return_has_its_ledger_line`)와 같다. 재검사는 잔량이 있는 로트에만 서므로(위의
 # 트리거) 폐기할 것이 언제나 있다.
+#
+# **커밋 때 로트의 잔량이 0 이다**(4단계). 나뉜 로트는 잔량이 남은 창고마다 폐기 줄이 서는데, 줄
+# 하나하나는 그 창고의 잔량 전부일 뿐이라 창고 하나를 빠뜨린 폐기도 줄마다의 검사를 지난다 —
+# 「모든 창고가 비었는가」는 여러 줄을 함께 보는 규칙이라 줄이 들어오는 순간에는 볼 수 없다.
+# 합은 모든 창고에 걸쳐 센다. 줄을 넣을 때 잔량 트리거가 쥔 로트 잠금이 커밋까지 남으므로 그사이
+# 다른 처리가 끼지 못한다.
 RETEST_LINE_FUNCTION = f"""
 CREATE OR REPLACE FUNCTION retest_failure_has_its_disposal_line() RETURNS trigger
 LANGUAGE plpgsql AS $$
+DECLARE
+  lot_label text;
+  remaining numeric;
 BEGIN
-  IF NEW.inspection_stage = '{codes.RETEST_STAGE}'
-     AND NEW.result = '{codes.JUDGMENT_FAILED}'
-     AND NOT EXISTS (SELECT 1 FROM stock_ledger_entries WHERE retest_id = NEW.id) THEN
+  IF NEW.inspection_stage IS DISTINCT FROM '{codes.RETEST_STAGE}'
+     OR NEW.result IS DISTINCT FROM '{codes.JUDGMENT_FAILED}' THEN
+    RETURN NULL;
+  END IF;
+
+  IF NOT EXISTS (SELECT 1 FROM stock_ledger_entries WHERE retest_id = NEW.id) THEN
     RAISE EXCEPTION
       '재검사 %는 로트를 떨어뜨렸는데 원장에 폐기 줄이 없다 — 판정과 폐기는 함께 선다',
       NEW.id
+      USING ERRCODE = 'check_violation';
+  END IF;
+
+  SELECT coalesce(sum(CASE a.total_effect
+                        WHEN '{codes.EFFECT_INCREASE}' THEN e.quantity::numeric
+                        WHEN '{codes.EFFECT_DECREASE}' THEN -e.quantity::numeric
+                      END), 0)
+    INTO remaining
+  FROM stock_ledger_entries AS e
+  JOIN txn_type_attributes AS a ON a.group_code = e.txn_type_group AND a.code = e.txn_type
+  WHERE e.lot_id = NEW.target_lot_id;
+
+  IF remaining <> 0 THEN
+    SELECT lot_number INTO lot_label FROM lots WHERE id = NEW.target_lot_id;
+    RAISE EXCEPTION
+      '재검사 %는 로트 %를 떨어뜨렸는데 %이 남는다 — 잔량이 남은 창고마다 폐기 줄이 선다',
+      NEW.id, lot_label, remaining
       USING ERRCODE = 'check_violation';
   END IF;
   RETURN NULL;
@@ -614,6 +688,166 @@ DEFERRABLE INITIALLY DEFERRED
 FOR EACH ROW EXECUTE FUNCTION retest_failure_has_its_disposal_line()
 """
 
+# ── 이동 요청 — 로트가 들어온 뒤에만, 고치지도 지우지도 않는다 (4단계) ────────
+#
+# **들어오기 전의 물건은 옮기지 않는다.** 입고 시각은 원장의 구매입고 줄에만 있고 로트에는
+# 날짜뿐이라 쌍 외래키로 끌어올 칸이 없다 — 원장 가드가 나가는 줄의 시각을 입고 줄과 견주는
+# 모양을 요청에 건다. 원장 가드는 처리가 내는 줄만 보므로, 처리를 기다리는 요청 자체는 여기서
+# 본다(PR #96 Codex 리뷰). **입고 줄이 없는 로트에는 요청이 서지 않는다** — 들어왔다는 사실이
+# 없다.
+#
+# **잠그지 않는다.** 읽는 것은 입고 줄 하나이고, 그 줄은 고칠 수도 지울 수도 없으며 로트 하나에
+# 하나뿐이다(`uq_stock_ledger_entry_one_receipt_per_lot`). 입고 줄이 아직 커밋되기 전이면
+# 「없다」를 보고 거부한다 — 조용히 지나가는 쪽이 아니다.
+#
+# **고치지 않는다.** 잘못 낸 요청은 취소하고 새로 낸다(원칙 ⑦). 고칠 수 있으면 종결이 받은 로트
+# · 수량 · 시각의 짝이 사라져 그 수정이 외래키에 막히지만, 종결이 서기 전의 요청은 막을 것이
+# 없다. 로트가 없으면 넘긴다 — 외래키가 더 정확한 말로 거부한다.
+TRANSFER_REQUEST_FUNCTION = f"""
+CREATE OR REPLACE FUNCTION stock_transfer_request_comes_after_the_receipt() RETURNS trigger
+LANGUAGE plpgsql AS $$
+DECLARE
+  lot_label text;
+  came_in timestamp;
+BEGIN
+  IF TG_OP <> 'INSERT' THEN
+    RAISE EXCEPTION
+      '이동 요청은 고치거나 지우지 않는다 — 잘못 낸 요청은 취소하고 새로 낸다 (요청 %)',
+      OLD.id
+      USING ERRCODE = 'restrict_violation';
+  END IF;
+
+  SELECT lot_number INTO lot_label FROM lots WHERE id = NEW.lot_id;
+  IF NOT FOUND THEN
+    RETURN NEW;
+  END IF;
+
+  SELECT occurred_at INTO came_in FROM stock_ledger_entries
+  WHERE lot_id = NEW.lot_id AND txn_type = '{codes.TXN_PURCHASE_RECEIPT}';
+  IF NOT FOUND THEN
+    RAISE EXCEPTION '로트 %에 입고 줄이 없다 — 들어왔다는 사실이 없는 로트는 옮기지 않는다',
+      lot_label
+      USING ERRCODE = 'check_violation';
+  END IF;
+  IF NEW.requested_at < came_in THEN
+    RAISE EXCEPTION
+      '요청 시각(%)이 로트 %의 입고 시각(%)보다 앞선다 — 들어오기 전의 물건이다',
+      NEW.requested_at, lot_label, came_in
+      USING ERRCODE = 'check_violation';
+  END IF;
+
+  RETURN NEW;
+END $$
+"""
+
+TRANSFER_REQUEST_TRIGGER = """
+CREATE TRIGGER stock_transfer_request_comes_after_the_receipt
+BEFORE INSERT OR UPDATE OR DELETE ON stock_transfer_requests
+FOR EACH ROW EXECUTE FUNCTION stock_transfer_request_comes_after_the_receipt()
+"""
+
+# ── 이동 종결 — 만료된 로트는 처리하지 않고, 고치지도 지우지도 않는다 (4단계) ──
+#
+# **처리 시각에 살아 있던 만료일을 그 시각의 현장 날짜와 견준다**(`PRD.md` 성공 기준 5). 살아
+# 있던 만료일은 처리 시각 이전에 판정된 재검사 가운데 가장 늦게 합격한 것의 갱신 만료일, 없으면
+# 로트의 기준 만료일이다. 「지금 만료일」로 견주면 뒤에 선 갱신 재검사를 믿고 그보다 이른 처리를
+# 받아, 원장이 만료된 로트를 옮겼다고 말하게 된다(PR #96 Codex 리뷰). 시각은 현장 시각으로
+# 적히므로(ADR 0019) 날짜는 그 칸의 날짜다.
+#
+# **경계는 재검사와 같다** — 만료일이 그날보다 **앞설 때만**
+# 만료다(`retest_comes_only_to_an_expired_lot`). 그래서 재검사를 받을 수 있는 날에는 처리가
+# 막히고, 처리가 되는 날에는 재검사가 막힌다. 만료일이 없으면 만료가 아니다.
+#
+# **잠그지 않는다.** 줄을 세우는 것은 뒤에 원장 줄을 넣는 잔량 트리거다 — 같은 로트 줄을 `FOR NO
+# KEY UPDATE` 로 잡아, 같은 로트의 처리 · 재검사가 거기서 줄을 선다. 여기서 읽는 재검사가 아직
+# 커밋되기 전이면 갱신을 보지 못하고 거부한다 — 조용히 지나가는 쪽이 아니다. 떨어진 재검사가
+# 커밋되기 전이면 이 검사는 지나가지만, 원장 줄이 그 재검사의 커밋을 기다렸다가 비워진 창고를
+# 본다.
+#
+# **취소는 묻지 않는다** — 원장을 건드리지 않는다. 요청에도 걸지 않는다 — 요청은 의도이고,
+# 만료는 옮기는 순간의 사실이다. 로트가 없으면 넘긴다 — 외래키가 더 정확한 말로 거부한다.
+TRANSFER_CLOSURE_FUNCTION = f"""
+CREATE OR REPLACE FUNCTION stock_transfer_closure_moves_only_a_live_lot() RETURNS trigger
+LANGUAGE plpgsql AS $$
+DECLARE
+  lot_label text;
+  labelled date;
+  expires date;
+BEGIN
+  IF TG_OP <> 'INSERT' THEN
+    RAISE EXCEPTION '이동 종결은 고치거나 지우지 않는다 — 일어난 일이다 (종결 %)', OLD.id
+      USING ERRCODE = 'restrict_violation';
+  END IF;
+
+  IF NEW.closure_type IS DISTINCT FROM '{codes.CLOSURE_PROCESSED}' THEN
+    RETURN NEW;
+  END IF;
+
+  SELECT lot_number, expiry_date INTO lot_label, labelled
+  FROM lots WHERE id = NEW.lot_id;
+  IF NOT FOUND THEN
+    RETURN NEW;
+  END IF;
+
+  SELECT renewed_expiry_date INTO expires FROM inspections
+  WHERE target_lot_id = NEW.lot_id AND result = '{codes.JUDGMENT_PASSED}'
+    AND judged_at <= NEW.closed_at
+  ORDER BY judged_at DESC, id DESC LIMIT 1;
+  IF NOT FOUND THEN
+    expires := labelled;
+  END IF;
+
+  IF expires < NEW.closed_at::date THEN
+    RAISE EXCEPTION '로트 %의 처리 시각 만료일(%)이 처리일(%)보다 앞선다 — %',
+      lot_label, expires, NEW.closed_at::date, '만료된 로트는 옮기지 않는다'
+      USING ERRCODE = 'check_violation';
+  END IF;
+
+  RETURN NEW;
+END $$
+"""
+
+TRANSFER_CLOSURE_TRIGGER = """
+CREATE TRIGGER stock_transfer_closure_moves_only_a_live_lot
+BEFORE INSERT OR UPDATE OR DELETE ON stock_transfer_closures
+FOR EACH ROW EXECUTE FUNCTION stock_transfer_closure_moves_only_a_live_lot()
+"""
+
+# ── 처리 종결 → 원장 두 줄 — 커밋 시점에 묻는다 (4단계) ──────────────────────
+#
+# **원장 쪽 외래키는 줄 → 종결 방향만 본다.** 처리가 원장 줄 없이 홀로 서면 요청은 끝났다고
+# 말하는데 재고는 원재료창고에 그대로 있다. 한쪽 줄만 서면 물건이 한 창고에서 사라지거나
+# 생산창고에서 생긴다. 반품 문서(`purchase_return_has_its_ledger_line`)와
+# 재검사(`retest_failure_has_its_disposal_line`)의 모양이다 — 종결을 먼저, 줄을 나중에 넣는
+# 순서가 그래서 선다. 줄이 둘을 넘지 않는 것은 부분 유일
+# 인덱스(`uq_stock_ledger_entry_one_line_per_transfer_side`)가 지킨다.
+TRANSFER_LINES_FUNCTION = f"""
+CREATE OR REPLACE FUNCTION stock_transfer_processing_has_its_ledger_lines() RETURNS trigger
+LANGUAGE plpgsql AS $$
+BEGIN
+  IF NEW.closure_type = '{codes.CLOSURE_PROCESSED}'
+     AND (NOT EXISTS (SELECT 1 FROM stock_ledger_entries
+                      WHERE transfer_closure_id = NEW.id
+                        AND txn_type = '{codes.TXN_TRANSFER_OUT}')
+          OR NOT EXISTS (SELECT 1 FROM stock_ledger_entries
+                         WHERE transfer_closure_id = NEW.id
+                           AND txn_type = '{codes.TXN_TRANSFER_IN}')) THEN
+    RAISE EXCEPTION
+      '처리 %에 원장의 %과 % 두 줄이 다 서지 않았다 — 처리와 두 줄은 함께 선다',
+      NEW.id, '{codes.TXN_TRANSFER_OUT}', '{codes.TXN_TRANSFER_IN}'
+      USING ERRCODE = 'check_violation';
+  END IF;
+  RETURN NULL;
+END $$
+"""
+
+TRANSFER_LINES_TRIGGER = """
+CREATE CONSTRAINT TRIGGER stock_transfer_processing_has_its_ledger_lines
+AFTER INSERT ON stock_transfer_closures
+DEFERRABLE INITIALLY DEFERRED
+FOR EACH ROW EXECUTE FUNCTION stock_transfer_processing_has_its_ledger_lines()
+"""
+
 
 def _run(*statements: str) -> Callable[..., None]:
     def listener(target: FromClause, connection: Connection, **_: object) -> None:
@@ -623,12 +857,15 @@ def _run(*statements: str) -> Callable[..., None]:
     return listener
 
 
-def install(*, ledger: FromClause, returns: FromClause) -> None:
+def install(
+    *, ledger: FromClause, returns: FromClause, requests: FromClause, closures: FromClause
+) -> None:
     """표가 설 때 트리거도 서게 한다 — `create_all` 이 메타데이터 밖의 것을 모르므로.
 
     **가리켜지는 표 위의 트리거는 가리키는 표가 설 때 건다.** `create_all` 은 외래키
     순서대로 세우므로, 원장이 설 때 로트 · 유형 속성 · 검사 표가, 반품 문서가 설 때 검사 표가
-    이미 있다. 함수 본문이 읽는 다른 표는 부를 때 찾으므로 순서를 타지 않는다.
+    이미 있다. 이동 요청 · 종결의 트리거는 제 표에 걸린다. 함수 본문이 읽는 다른 표는 부를 때
+    찾으므로 순서를 타지 않는다.
     """
     event.listen(
         ledger,
@@ -662,5 +899,20 @@ def install(*, ledger: FromClause, returns: FromClause) -> None:
             RETURN_LINE_TRIGGER,
             INSPECTION_FUNCTION,
             INSPECTION_TRIGGER,
+        ),
+    )
+    event.listen(
+        requests,
+        "after_create",
+        _run(TRANSFER_REQUEST_FUNCTION, TRANSFER_REQUEST_TRIGGER),
+    )
+    event.listen(
+        closures,
+        "after_create",
+        _run(
+            TRANSFER_CLOSURE_FUNCTION,
+            TRANSFER_CLOSURE_TRIGGER,
+            TRANSFER_LINES_FUNCTION,
+            TRANSFER_LINES_TRIGGER,
         ),
     )
