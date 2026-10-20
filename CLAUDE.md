@@ -43,9 +43,10 @@ ERP_TEST_DATABASE_URL="postgresql+psycopg://erp:erp@127.0.0.1:5432/erp_test" .ve
 
 ## 지금 어디인가
 
-**4단계 — 재고가 옮겨 가는 길. 둘째 조각(원장 줄의 창고, ADR 0022)이 닫혔고, 다음은 이동 조각이다.** 범위는 `PRD.md`, 표의 초안은
-`docs/schema-4단계.md`, 지어진 표의 색인은 `docs/schema.md` 가 든다. 닫힌 단계는
-`docs/PRD-1단계.md` · `docs/PRD-2단계.md` · `docs/PRD-3단계.md` 에 있고, 조각마다 무엇이 섰는지는 `README.md` 가 말한다.
+**진행은 `docs/master-plan.md` 를 본다** — 조각마다의 상태는 그 표의 상태 칸이, 조각 안의 PR 마다의 상태는
+그 조각 설계(`docs/slices/<조각>/design.md`)의 「PR 나눔」이 든다. 여기에 진행을 적지 않는다 — 조각이 넘어갈 때마다
+낡는다. 지금 단계의 범위는 `PRD.md`, 표의 초안은 `docs/schema-4단계.md`, 지어진 표의 색인은 `docs/schema.md` 가
+든다. 닫힌 단계는 `docs/PRD-1단계.md` · `docs/PRD-2단계.md` · `docs/PRD-3단계.md` 에 있다.
 **다음 조각을 시작하기 전에 대장(`docs/audit/README.md`)과 열린 `audit-low` 이슈를 읽는다** — 열린 부적합과
 그 담당이 거기 있다. 조각마다 겪은 일과 그 근거는 `docs/지나온-길.md` 에 있다.
 
