@@ -1596,3 +1596,18 @@ PostgreSQL 16)는 초록이다. 모델 쪽을 어긋낸 줄은 리비전과 모�
 | — | 재검사의 지연 트리거에서 「커밋 때 로트 잔량 0」 거부를 `FALSE` 로 껐다 | `test_a_disposal_that_misses_a_warehouse_does_not_stand` |
 | — | 폐기 줄의 창고마다 유일 인덱스를 `unique=False` 로 바꿨다(모델) | `test_one_retest_takes_one_disposal_line_in_each_warehouse` |
 | — | 그 인덱스를 옛 모양 `(retest_id)` 로 되돌렸다(모델) | `test_a_split_lot_is_disposed_of_in_each_warehouse` |
+
+## 4단계 조각 3 — 이동 PR B (`827e84a`, ADR 0025)
+
+재검사 쓰기 경로와 응답을 하나씩 어긋냈다. 어긋냄마다 `tests/test_retest_path.py` · `tests/test_retest_api.py` ·
+`tests/test_contract_judgment.py` 를 돌렸고, 어긋냄 없이 돌린 같은 트리의 `pytest` 전체(실제 PostgreSQL 16)는 초록이다.
+첫 줄은 설계 ④ 「열어 둔 것」이 PR 을 열기 전에 보라고 한 자리다 — 판정이 칸을 목록으로 바꾸는 것을 깨는 변경으로 가르는가.
+
+| NC | 무엇을 어긋냈나 | 빨개진 검사 |
+|---|---|---|
+| — | `API_VERSION` 을 `2.0` 에서 `1.1` 로 내렸다 | `test_the_version_moves_as_far_as_the_contract_moved` — 「칸이 사라졌다」 · 「필수가 풀렸다」를 깨는 변경으로 든다 |
+| — | 폐기를 3단계 모양으로 되돌렸다 — 들어온 창고에 로트 잔량 전부를 한 줄로 | `test_a_split_lot_is_thrown_away_in_each_warehouse` · `test_a_lot_moved_out_whole_is_thrown_away_where_it_now_is` · `test_a_split_lot_comes_back_with_a_disposal_line_for_each_warehouse` · `test_a_201_means_the_commit_passed_the_deferred_check` 의 나뉜 로트 |
+| — | 「잔량이 남은 창고만」 거름(`> 0`)을 뺐다 — 빈 창고에도 줄을 낸다 | `test_a_lot_moved_out_whole_is_thrown_away_where_it_now_is` — 0 짜리 폐기 줄을 CHECK 가 거부한다 |
+| — | 창고 순서를 `codes.WAREHOUSES` 의 거꾸로 했다 | `test_a_split_lot_is_thrown_away_in_each_warehouse` · `test_a_split_lot_comes_back_with_a_disposal_line_for_each_warehouse` · `test_a_201_means_the_commit_passed_the_deferred_check` 의 나뉜 로트 |
+| — | 잔량이 남은 창고 가운데 첫 창고만 버렸다 | `test_a_split_lot_is_thrown_away_in_each_warehouse` · `test_a_split_lot_comes_back_with_a_disposal_line_for_each_warehouse` · `test_a_201_means_the_commit_passed_the_deferred_check` 의 나뉜 로트 — 커밋 때의 지연 트리거가 500 을 낸다 |
+| — | 응답이 id 목록의 첫째만 싣게 했다 | `test_a_split_lot_comes_back_with_a_disposal_line_for_each_warehouse` · `test_a_201_means_the_commit_passed_the_deferred_check` 의 나뉜 로트 |
