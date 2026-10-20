@@ -37,12 +37,15 @@
 | 16 | `inspection_measurements` | 품질관리 | 측정값 줄 — 검사 한 건의 항목별 실측 |
 | 17 | `stock_ledger_entries` | 재고관리 | 수불 원장 — 로트가 생기고 움직인 사실 |
 | 18 | `purchase_returns` | 구매관리 | 구매반품 문서 — 무엇을 얼마나 왜 공급사에 돌려보냈나 |
+| 19 | `stock_transfer_requests` | 재고관리 | 이동 요청 — 어느 로트를 얼마나 생산창고로 옮겨 달라는 의도 |
+| 20 | `stock_transfer_closures` | 재고관리 | 이동 요청의 끝 — 처리 또는 취소 가운데 하나 |
 
 1–10 과 12–13 은 기준정보라 **비어 있으면 안 된다.** 11 은 기준정보이지만
 **비어서 선다** — 비가동 구간은 날짜를 가지므로 기준정보 SQL 에 넣을 수 없다
 (「오늘」이 나오면 파이썬). 14 부터는 거래 표라 **비어 있는 것이 정상**이다 —
 로트를 채우는 것은 판정이고, 그 판정과 근거와 사실을 적는 셋이 2단계가 세웠다.
-반품 문서는 3단계가 세웠다 — 원장이 처음으로 줄어드는 자리다.
+반품 문서는 3단계가 세웠다 — 원장이 처음으로 줄어드는 자리다. 이동 요청과 그 끝은 4단계가
+세웠다 — 원장에 창고를 건너는 줄이 처음 서는 자리다.
 
 ---
 
@@ -577,26 +580,32 @@ PostgreSQL 의 외래키가 기본키나 유일키에만 붙기 때문이다.
 | `retest_id` · `retest_result` | 복합 FK → `inspections` NULL | **폐기 줄에서만 찬다** — 그 로트를 떨어뜨린 재검사. 판정 칸은 외래키의 자리이고 차면 불합격이다 |
 | `warehouse` | str(20) | **그 줄이 일어난 창고**(4단계, ADR 0022). 로트는 하나여도 창고는 줄마다다 |
 | `item_type` | str(20) | 값을 나르는 칸이 아니라 외래키의 자리 — 로트의 유형을 끌어와 「창고가 담는 품목 유형」을 줄에서 묻는다 |
+| `transfer_closure_id` · `transfer_closure_type` | 복합 FK → `stock_transfer_closures` NULL | **이동 줄(생산출고 · 생산입고)에서만 찬다** — 그 이동을 처리한 종결. 구분 칸은 외래키의 자리이고 차면 처리다 |
 
 **제약**
 - `FK (lot_id, inspection_id) → lots (id, inspection_id)` — **홀로 검사를 가리키는 외래키는 없다.** 아래 「입고 줄은 그 로트를 만든 검사를 가리킨다」
 - `FK (txn_type_group, txn_type) → txn_type_attributes` — 공통코드를 가리키면 「그 코드가 있다」까지만 증명된다. **총량 영향이 없는 유형**이 원장에 서면 잔량을 세는 쪽이 그 줄을 더해야 하는지 빼야 하는지 모른다
-- `CHECK txn_type IN ('구매입고', '구매반품출고', '폐기출고')` — **근거 문서가 선 유형만** 받는다. 나머지는 내는 쪽이 뒤의 단계에 있고, 받아 두면 **근거 문서가 없는 줄**이 선다
+- `CHECK txn_type IN (…)` — **근거 문서가 선 유형만** 받는다. 목록은 `codes.LEDGER_EFFECTS` 가 든다. 나머지는 내는 쪽이 뒤의 단계에 있고, 받아 두면 **근거 문서가 없는 줄**이 선다
 - `FK (purchase_return_id, lot_id, quantity, occurred_at) → purchase_returns (id, lot_id, quantity, returned_at)` — 반품 줄은 자기 문서를 **같은 로트 · 같은 수량 · 같은 시각까지** 가리킨다
 - **양방향** — `(txn_type = '구매반품출고') = (purchase_return_id IS NOT NULL)`
 - **부분 유일 인덱스** `(purchase_return_id) WHERE purchase_return_id IS NOT NULL` — 문서 하나에 원장 줄은 하나다
 - `FK (retest_id, lot_id, retest_result, occurred_at) → inspections (id, target_lot_id, result, judged_at)` — 폐기 줄은 자기 재검사를 **같은 로트 · 불합격 · 같은 시각까지** 가리킨다. 양은 가리키지 않는다 — 재검사는 양을 들지 않고, 「잔량 전부」는 트리거가 본다
 - **양방향** — `(txn_type = '폐기출고') = (retest_id IS NOT NULL)`. 판정 칸은 `(retest_id IS NULL) = (retest_result IS NULL)` 이고 차면 `'불합격'` 이다 — 두 조건을 한 식으로 쓰면 판정이 빌 때 `NULL = '불합격'` 이 NULL 이 되어 통과한다(어긋내 확인했다)
-- **부분 유일 인덱스** `(retest_id) WHERE retest_id IS NOT NULL` — 재검사 하나에 폐기 줄은 하나다
+- **부분 유일 인덱스** `(retest_id, warehouse) WHERE retest_id IS NOT NULL` — 재검사 하나에 폐기 줄은 **창고마다** 하나다(4단계). 3단계가 세운 모양은 `(retest_id)` 였다 — 나뉜 로트는 잔량이 남은 창고마다 한 줄이 선다
+- `CHECK txn_type <> '폐기출고' OR quantity > 0` — **0 은 폐기가 아니다.** 원장 수량은 `>= 0` 이라 빈 창고에 선 0 짜리 폐기 줄이 「그 창고의 잔량 전부」와 커밋 때의 검사를 모두 지난다(PR #96 Codex 리뷰)
+- **지연 제약 트리거** `retest_failure_has_its_disposal_line` — 떨어진 재검사는 **커밋할 때** 폐기 줄이 있고, 그 로트의 잔량이 모든 창고에 걸쳐 0 이다. 줄 하나하나는 그 창고의 잔량 전부일 뿐이라 창고 하나를 빠뜨린 폐기도 줄마다의 검사를 지난다
+- `FK (transfer_closure_id, transfer_closure_type, lot_id, quantity, occurred_at) → stock_transfer_closures (id, closure_type, lot_id, quantity, closed_at)` — 이동 줄은 자기를 낸 처리를 **같은 로트 · 같은 수량 · 같은 시각까지** 가리킨다
+- **양방향** — `(txn_type IN ('생산출고', '생산입고')) = (transfer_closure_id IS NOT NULL)`. 구분 칸은 `(transfer_closure_id IS NULL) = (transfer_closure_type IS NULL)` 이고 차면 `'처리'` 다 — 없으면 이동 줄이 「취소」를 적고 취소 종결을 가리켜 외래키를 지난다(PR #96 Codex 리뷰)
+- **부분 유일 인덱스** `(transfer_closure_id, txn_type) WHERE transfer_closure_id IS NOT NULL` — 처리 하나에 출고 줄 하나 · 입고 줄 하나
 - **인덱스** `ix_stock_ledger_entry_lot (lot_id)` — 트리거가 줄마다 그 로트의 줄을 합하는 자리다. 입고 줄만 담은 부분 유일 인덱스는 그 합에 쓰이지 못한다(Codex 리뷰 2 라운드)
-- **트리거** `stock_ledger_entry_keeps_the_balance` — 한 로트의 줄을 합한 잔량이 0 밑으로 내려가지 않고, 입고 줄의 수량은 로트 수량과 같으며, 줄을 고치거나 지우지 않는다. 같은 자리를 로트 쪽에서 `lot_quantity_stays_with_its_ledger` 가 지킨다 — 원장에 줄이 선 로트의 수량을 고치지 않는다. **CHECK 로 적을 수 없는 규칙이라 트리거다**(ADR 0013, `app/db/ledger_guards.py`). 로트 줄을 `FOR NO KEY UPDATE` 로 잠근다 — `FOR UPDATE` 는 반품 문서의 외래키가 잡는 `KEY SHARE` 와 부딪쳐 교착이 났다. 유형 속성 줄은 `FOR SHARE` 로 읽어, 그 유형의 첫 줄이 커밋되기 전에 방향을 바꾸는 갱신을 그 뒤로 세운다. 줄의 유형이 `txn_type_attributes` 에 선 방향이 `codes.LEDGER_EFFECTS` 와 다르면 받지 않고, 나가는 줄의 시각이 그 로트의 입고 줄보다 앞서면 받지 않는다(Codex 리뷰 4 라운드). **폐기 줄은 잔량 전부다** — 그 줄이 들어간 뒤의 잔량이 0 이 아니면 받지 않는다
+- **트리거** `stock_ledger_entry_keeps_the_balance` — 한 로트가 **한 창고에** 가진 잔량이 0 밑으로 내려가지 않고(4단계 — 3단계가 세운 모양은 로트 하나의 합이었다), 입고 줄의 수량은 로트 수량과 같으며, 줄을 고치거나 지우지 않는다. 같은 자리를 로트 쪽에서 `lot_quantity_stays_with_its_ledger` 가 지킨다 — 원장에 줄이 선 로트의 수량을 고치지 않는다. **CHECK 로 적을 수 없는 규칙이라 트리거다**(ADR 0013, `app/db/ledger_guards.py`). 로트 줄을 `FOR NO KEY UPDATE` 로 잠근다 — `FOR UPDATE` 는 반품 문서의 외래키가 잡는 `KEY SHARE` 와 부딪쳐 교착이 났다. 유형 속성 줄은 `FOR SHARE` 로 읽어, 그 유형의 첫 줄이 커밋되기 전에 방향을 바꾸는 갱신을 그 뒤로 세운다. 줄의 유형이 `txn_type_attributes` 에 선 방향이 `codes.LEDGER_EFFECTS` 와 다르면 받지 않고, 나가는 줄의 시각이 그 로트의 입고 줄보다 앞서면 받지 않는다(Codex 리뷰 4 라운드). **폐기 줄은 그 창고의 잔량 전부다** — 그 줄이 들어간 뒤 그 창고의 잔량이 0 이 아니면 받지 않는다. 설 수 없는 창고에 선 줄(창고가 그 품목을 담지 못하거나 · 유형이 정하는 창고가 아니거나 · 유형이 로트와 다른 줄)은 넘긴다 — 그 줄은 CHECK 와 외래키가 더 정확한 이름으로 거부한다
 - `CHECK quantity >= 0` **이고 유한한 수** — 원장은 합으로 읽는 표라 `NaN` 한 줄의 피해가 표 하나에 그치지 않는다
 - **부분 유일 인덱스** `(lot_id) WHERE txn_type = '구매입고'` — 로트 하나에 입고 줄은 하나다
 - `CHECK warehouse IN (원재료 · 생산 · 제품)` 과 **창고가 담는 품목 유형** — `lots` 와 같은 규칙이 줄에도 걸린다
 - `FK (lot_id, item_type) → lots (id, item_type)` — 유형을 로트에서 끌어온다. 두 칸 다 `NOT NULL` 이라 복합 외래키가 건너뛰는 자리가 없다
-- **유형이 창고를 정한다** — 구매입고 · 구매반품출고는 원재료창고에만 선다(`codes.LEDGER_TYPE_WAREHOUSES`). 반품이 원재료창고에서만 나가는 것은 저장소 소유자가 정했다(2026-10-05). 폐기출고는 창고를 고르지 않는다
+- **유형이 창고를 정한다**(`codes.LEDGER_TYPE_WAREHOUSES`) — 구매입고 · 구매반품출고 · 생산출고는 원재료창고에, 생산입고는 생산창고에만 선다. 반품이 원재료창고에서만 나가는 것은 저장소 소유자가 정했다(2026-10-05) — 그래서 반품이 넘지 못하는 잔량은 원재료창고의 것이고, 잔량을 창고마다 세면 반품 문서의 트리거를 따로 고치지 않아도 그렇게 된다. 폐기출고는 창고를 고르지 않는다
 - **입고 줄의 창고는 로트의 들어온 창고다** — 위의 잔량 트리거가 입고 수량과 함께 견준다. 유형에 따라 걸리는 조건이라 외래키로 쓰면 입고 줄에서만 차는 칸과 양방향 CHECK 가 따라온다(저장소 소유자, 2026-10-05)
-- **잔량은 아직 로트 하나로 센다** — 창고별 잔량과 나뉜 로트의 폐기는 이동이 서는 조각의 일이다(저장소 소유자, 2026-10-05). 이동이 없으면 로트가 한 창고에만 있어 그 둘이 드러나지 않는다
+- **잔량은 로트 × 창고로 센다** — 이동 조각에서 섰다(`c3a9e7d41b58`). 원장 줄의 창고 조각은 칸과 제약까지만 짓고 이것을 넘겼다(저장소 소유자, 2026-10-05) — 이동이 없으면 로트가 한 창고에만 있어 드러나지 않았다. **창고별 잔량은 저장하지 않는다** — 원장의 합이다(`PRD.md` 성공 기준 9)
 
 ### 수량은 늘 양수다 — 방향은 유형이 말한다
 
@@ -658,6 +667,48 @@ PostgreSQL 의 외래키가 기본키나 유일키에만 붙기 때문이다.
 
 **검사를 모르는 로트(기초재고)는 반품할 수 없다** — 언제나 검사를 가리키기로 한 대가다.
 그런 로트를 만드는 쓰기 경로(전기이월)가 서는 날 이 제약을 함께 본다.
+
+## 19. `stock_transfer_requests` — 이동 요청
+
+**어느 로트를 얼마나 생산창고로 옮겨 달라는 의도.** 요청은 재고를 잡지 않는다 — 잔량은 처리하는 순간
+원장이 본다(원칙 ②). 초안과 그 근거는 `schema-4단계.md` 의 `stock_transfer_requests` 절이다.
+
+| 칸 | 형 | 비고 |
+|---|---|---|
+| `id` | PK | |
+| `lot_id` | FK → `lots` | 옮길 로트 |
+| `quantity` | float | `items.stock_uom` 단위. `> 0` 이고 유한한 수 |
+| `requested_at` | datetime | |
+| `requested_by` | str(50) | 식별 칸. `is_present()` |
+
+**제약**
+- `UNIQUE (id, lot_id, quantity, requested_at)` — 행을 좁히지 않는다. **종결이 가리킬 상대**다
+- **트리거** `stock_transfer_request_comes_after_the_receipt` — 요청 시각이 그 로트의 입고 줄보다 앞서지 않고, **입고 줄이 없는 로트에는 요청이 서지 않는다.** 입고 시각은 원장에만 있어 쌍 외래키로 끌어올 칸이 없다. 요청을 고치거나 지우지 않는다 — 잘못 낸 요청은 취소하고 새로 낸다(원칙 ⑦)
+
+**구간 칸이 없다** — 지금 구간은 원재료창고 → 생산창고 하나뿐이고 처리가 내는 수불유형이 그것을 말한다.
+
+## 20. `stock_transfer_closures` — 이동 요청의 끝
+
+**처리 또는 취소 가운데 하나**(ADR 0023). 처리에는 원장 두 줄(원재료창고의 생산출고 · 생산창고의
+생산입고)이 같은 트랜잭션에서 나고, 취소에는 원장 줄이 없다.
+
+| 칸 | 형 | 비고 |
+|---|---|---|
+| `id` | PK | |
+| `request_id` | FK → `stock_transfer_requests` | **유일** |
+| `closure_type` | str(10) | 처리 · 취소(`codes.CLOSURE_TYPES`) |
+| `lot_id` · `quantity` · `requested_at` | 요청과 쌍 | 값을 나르는 칸이 아니라 외래키의 자리 — 처리 수량은 요청 수량과 같다(부분 처리 없음) |
+| `closed_at` | datetime | 처리 시각 또는 취소 시각 |
+| `closed_by` | str(50) | 처리자 또는 취소자. 식별 칸. `is_present()`. 취소는 누구든 낸다 — 요청자와 견주지 않는다 |
+
+**제약**
+- `UNIQUE (request_id)` — 요청 하나에 종결 하나. 「처리된 요청을 취소」와 「취소된 요청을 처리」가 이 유일키 하나에 걸린다 — 동시에 와도 하나가 진다
+- `CHECK closure_type IN ('처리', '취소')`
+- `FK (request_id, lot_id, quantity, requested_at) → stock_transfer_requests (id, lot_id, quantity, requested_at)` — 네 칸 모두 `NOT NULL` 이라 복합 외래키가 건너뛰는 자리가 없다
+- `CHECK closed_at >= requested_at` — 요청보다 먼저 끝나지 않는다. 요청 시각을 쌍으로 받아 한 줄 안에서 본다
+- `UNIQUE (id, closure_type, lot_id, quantity, closed_at)` — 행을 좁히지 않는다. **원장의 이동 줄이 가리킬 상대**다
+- **트리거** `stock_transfer_closure_moves_only_a_live_lot` — **만료된 로트의 처리를 받지 않는다**(`PRD.md` 성공 기준 5). 처리 시각에 살아 있던 만료일(그 시각 이전에 판정된 재검사 가운데 가장 늦게 합격한 것의 갱신 만료일, 없으면 `lots.expiry_date`)을 처리 시각의 날짜와 견주고, 경계는 재검사(`retest_comes_only_to_an_expired_lot`)와 같다. 로트 줄을 `FOR NO KEY UPDATE` 로 잠근다. 요청과 취소에는 걸지 않는다. 종결을 고치거나 지우지 않는다
+- **지연 제약 트리거** `stock_transfer_processing_has_its_ledger_lines` — 처리 종결은 **커밋할 때** 원장에 생산출고 · 생산입고 두 줄이 있어야 한다. 원장 쪽 외래키는 줄 → 종결 방향만 본다 — 반품 문서 · 재검사와 같은 모양이다
 
 ---
 

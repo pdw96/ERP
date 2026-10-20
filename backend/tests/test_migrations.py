@@ -2320,9 +2320,10 @@ def test_the_data_step_fills_each_line_from_its_lot(engine: Engine) -> None:
     assert filled == [("구매입고", "원재료", "원자재")], filled
 
 
-# 머리까지 올린 뒤 만료된 로트를 재검사에서 떨어뜨리고, 그 폐기 줄을 **들어온 창고와 다른
-# 창고**에 세운다. 이동이 서기 전에는 쓰기 경로가 그런 줄을 내지 않지만 제약은 막지 않는다 —
-# 폐기는 창고를 고르지 않는 유형이고, 나뉜 로트를 창고마다 폐기하는 것은 이동 조각의 일이다.
+# 원장 줄의 창고 리비전(`1e5667151a9f`)까지 올린 뒤 만료된 로트를 재검사에서 떨어뜨리고, 그 폐기
+# 줄을 **들어온 창고와 다른 창고**에 세운다. 이동이 서기 전에는 쓰기 경로가 그런 줄을 내지
+# 않지만 제약은 막지 않는다 — 폐기는 창고를 고르지 않는 유형이고 잔량은 로트 하나로 세었다. 이동
+# 리비전부터는 잔량 트리거가 그 창고의 합으로 세어 받지 않는다.
 _A_DISPOSAL_ELSEWHERE = """
 INSERT INTO code_groups (group_code, name, value_fixed, description) VALUES
   ('NC_REASON', '불합격사유', FALSE, '시험');
@@ -2363,7 +2364,9 @@ def test_downgrade_counts_the_lines_that_would_lose_their_warehouse(engine: Engi
     schema = "ledger_warehouse_downgrade"
     with _schema(engine, schema):
         config = _upgrade_with(engine, schema, "e84fbec436c0", _WITH_AN_EXPIRED_LOT)
-        command.upgrade(config, "head")
+        # 이 리비전까지만 올린다 — 이동 리비전(`c3a9e7d41b58`)부터는 잔량을 창고마다 세어 그런
+        # 줄을 받지 않는다.
+        command.upgrade(config, "1e5667151a9f")
         scoped = _engine_for_schema(engine, schema)
         try:
             with scoped.begin() as conn:
@@ -2448,3 +2451,227 @@ def test_upgrading_does_not_miss_a_lot_moved_while_it_runs(engine: Engine) -> No
 
         assert isinstance(outcome["upgrade"], Exception), outcome["upgrade"]
         assert "SL-2026-0001" in str(outcome["upgrade"])
+
+
+# ── 4단계 조각 3 — 이동 (`c3a9e7d41b58`) ─────────────────────────────────────────
+# 요청 · 종결 표가 서고, 원장이 이동 줄을 받고, 잔량을 로트 × 창고로 센다. 올릴 때는 그 셈에서
+# 음수가 되는 (로트, 창고)와 0 짜리 폐기 줄을 묻고, 내릴 때는 요청을 센다.
+
+# 원장 줄의 창고 리비전까지 올리고 만료된 로트(입고 줄까지)를 심는다.
+_TO_LEDGER_WAREHOUSE = "1e5667151a9f"
+
+# 같은 재검사 불합격의 폐기 줄을 **원재료창고에 0 으로** 세운다. 잔량을 로트 하나로 세던
+# 트리거는 「잔량 전부가 아니다」라며 막지만 원장의 제약(`quantity >= 0`)은 받는다 — 가드가 묻는
+# 것은 제약이 받은 줄이므로 트리거를 끄고 심는다.
+_A_DISPOSAL_OF_NOTHING = (
+    "ALTER TABLE stock_ledger_entries DISABLE TRIGGER stock_ledger_entry_keeps_the_balance;\n"
+    + _A_DISPOSAL_ELSEWHERE.replace("500.0, r.judged_at", "0.0, r.judged_at").replace(
+        "r.result, '생산'", "r.result, '원재료'"
+    )
+    + ";\nALTER TABLE stock_ledger_entries ENABLE TRIGGER stock_ledger_entry_keeps_the_balance"
+)
+
+# 머리까지 올린 뒤 이동 요청 한 건 — 입고 줄(2026-09-21 09:30) 뒤에 낸다.
+_ONE_TRANSFER_REQUEST = """
+INSERT INTO stock_transfer_requests (lot_id, quantity, requested_at, requested_by)
+SELECT id, 100.0, TIMESTAMP '2026-09-22 09:00', '생산 1' FROM lots
+"""
+
+
+def _planted_at_the_ledger_warehouse(engine: Engine, schema: str, planted: str) -> Config:
+    """원장 줄의 창고 리비전에 만료된 로트를 심고, 그 위에 줄을 더 심는다."""
+    config = _upgrade_with(engine, schema, "e84fbec436c0", _WITH_AN_EXPIRED_LOT)
+    command.upgrade(config, _TO_LEDGER_WAREHOUSE)
+    _run_statements(engine, schema, planted)
+    return config
+
+
+def _run_statements(engine: Engine, schema: str, planted: str) -> None:
+    scoped = _engine_for_schema(engine, schema)
+    try:
+        with scoped.begin() as conn:
+            for statement in planted.strip().split(";"):
+                if statement.strip():
+                    conn.execute(text(statement))
+    finally:
+        scoped.dispose()
+
+
+def test_upgrading_says_which_lot_goes_below_zero_in_a_warehouse(engine: Engine) -> None:
+    """**조이기 전에 묻는다**(감사 ㊸ OB-1) — 잔량을 창고마다 세면 음수가 되는 (로트, 창고)를
+    로트 번호와 창고로 말한다.
+
+    잔량을 로트 하나로 세던 동안에는 폐기 줄이 로트가 한 번도 있지 않은 창고에도 설 수 있었다 —
+    폐기는 창고를 고르지 않는다. 바뀐 트리거 아래에서 그 창고는 다음 줄을 받지 못하고, 그 줄이
+    왜 거기 섰는지는 사람만 안다."""
+    schema = "transfer_upgrade_guard_short"
+    with _schema(engine, schema):
+        config = _planted_at_the_ledger_warehouse(engine, schema, _A_DISPOSAL_ELSEWHERE)
+
+        with pytest.raises(
+            Exception,
+            match="창고마다 세면 잔량이 음수가 되는 로트가 있다: SL-2026-0001 생산창고",
+        ):
+            command.upgrade(config, "head")
+
+
+def test_upgrading_says_which_lot_holds_a_disposal_of_nothing(engine: Engine) -> None:
+    """**0 짜리 폐기 줄을 로트 번호로 말한다** — 새 CHECK(「0 은 폐기가 아니다」)가 먼저 걸리면
+    나오는 말은 제약 이름뿐이다."""
+    schema = "transfer_upgrade_guard_empty"
+    with _schema(engine, schema):
+        config = _planted_at_the_ledger_warehouse(engine, schema, _A_DISPOSAL_OF_NOTHING)
+
+        with pytest.raises(
+            Exception, match="수량이 0 인 폐기 줄이 있는 로트가 있다: SL-2026-0001"
+        ):
+            command.upgrade(config, "head")
+
+
+def test_upgrading_does_not_stop_for_a_lot_disposed_where_it_stood(engine: Engine) -> None:
+    """**가드가 정상 경로를 막지 않는다** — 들어온 창고에서 잔량 전부를 버린 로트는 창고마다
+    세어도 0 이다. 옛 줄은 종결 칸이 빈 채로 남는다."""
+    schema = "transfer_upgrade_quiet"
+    with _schema(engine, schema):
+        config = _planted_at_the_ledger_warehouse(
+            engine,
+            schema,
+            _A_DISPOSAL_ELSEWHERE.replace("r.result, '생산'", "r.result, '원재료'"),
+        )
+
+        command.upgrade(config, "head")
+
+        scoped = _engine_for_schema(engine, schema)
+        try:
+            with scoped.connect() as conn:
+                lines = conn.execute(
+                    text(
+                        "SELECT txn_type, warehouse, transfer_closure_id, transfer_closure_type"
+                        " FROM stock_ledger_entries ORDER BY id"
+                    )
+                ).all()
+        finally:
+            scoped.dispose()
+
+    assert [tuple(line) for line in lines] == [
+        ("구매입고", "원재료", None, None),
+        ("폐기출고", "원재료", None, None),
+    ]
+
+
+def test_downgrade_counts_the_transfer_requests_that_would_vanish(engine: Engine) -> None:
+    """**되돌리기가 사람이 남긴 것을 조용히 지우지 않는다**(W-6 ①) — 요청을 세면 종결과 이동
+    줄도 센다. 종결은 요청 없이, 이동 줄은 종결 없이 설 수 없다."""
+    schema = "transfer_downgrade"
+    with _schema(engine, schema):
+        config = _upgrade_with(engine, schema, "e84fbec436c0", _WITH_A_LEDGER_LINE)
+        command.upgrade(config, "head")
+        _run_statements(engine, schema, _ONE_TRANSFER_REQUEST)
+
+        with pytest.raises(Exception, match="이동 요청 1건"):
+            command.downgrade(config, _TO_LEDGER_WAREHOUSE)
+
+
+def test_downgrade_goes_quietly_when_nothing_was_requested(engine: Engine) -> None:
+    """**가드가 정상 경로를 막지 않는다** — 요청이 없으면 조용히 내려가고, 원장 줄은 그대로
+    남는다."""
+    schema = "transfer_downgrade_quiet"
+    with _schema(engine, schema):
+        config = _upgrade_with(engine, schema, "e84fbec436c0", _WITH_A_LEDGER_LINE)
+        command.upgrade(config, "head")
+
+        command.downgrade(config, _TO_LEDGER_WAREHOUSE)
+
+        scoped = _engine_for_schema(engine, schema)
+        try:
+            with scoped.connect() as conn:
+                kept = conn.execute(text("SELECT count(*) FROM stock_ledger_entries")).scalar()
+        finally:
+            scoped.dispose()
+
+    assert kept == 1
+
+
+def _while_a_writer_holds(
+    engine: Engine, schema: str, planted: str, step: object
+) -> dict[str, object]:
+    """**쓰는 쪽이 커밋하기 전에 리비전을 보내고, 리비전이 잠금을 기다리기 시작한 뒤에
+    커밋한다.** 기다리는지를 보지 않고 커밋하면 리비전이 커밋 뒤에 출발했을 때 잠금이 없어도
+    통과한다."""
+    scoped = _engine_for_schema(engine, schema)
+    writer = scoped.connect()
+    outcome: dict[str, object] = {}
+    try:
+        writer.begin()
+        for statement in planted.strip().split(";"):
+            if statement.strip():
+                writer.execute(text(statement))
+
+        def go() -> None:
+            try:
+                assert callable(step)
+                step()
+                outcome["revision"] = "went through"
+            except Exception as error:
+                outcome["revision"] = error
+
+        runner = threading.Thread(target=go)
+        runner.start()
+        deadline = time.monotonic() + 10
+        with scoped.connect() as watcher:
+            while runner.is_alive() and time.monotonic() < deadline:
+                waiting = watcher.execute(
+                    text(
+                        "SELECT count(*) FROM pg_locks AS l"
+                        " JOIN pg_class AS c ON c.oid = l.relation"
+                        " JOIN pg_namespace AS n ON n.oid = c.relnamespace"
+                        " WHERE NOT l.granted AND n.nspname = :schema"
+                    ),
+                    {"schema": schema},
+                ).scalar_one()
+                if waiting:
+                    break
+                time.sleep(0.02)
+        writer.commit()
+        runner.join(30)
+        assert not runner.is_alive(), "리비전이 끝나지 않았다"
+    finally:
+        writer.close()
+        scoped.dispose()
+    return outcome
+
+
+def test_upgrading_does_not_miss_a_line_written_while_it_runs(engine: Engine) -> None:
+    """**쓰는 중인 줄을 놓치지 않는다** — 옛 버전의 트랜잭션이 들어온 적 없는 창고에 폐기 줄을
+    넣는 동안 올리면, 원장을 잠그지 않은 업그레이드는 그 줄을 보지 못하고 가드를 지난다. 뒤의 칸
+    더하기가 쓰는 쪽을 기다렸다가 서면 그 창고의 합이 음수인 채로 올라간다."""
+    schema = "transfer_upgrade_race"
+    with _schema(engine, schema):
+        config = _planted_at_the_ledger_warehouse(engine, schema, "SELECT 1")
+
+        outcome = _while_a_writer_holds(
+            engine, schema, _A_DISPOSAL_ELSEWHERE, lambda: command.upgrade(config, "head")
+        )
+
+        assert isinstance(outcome["revision"], Exception), outcome["revision"]
+        assert "SL-2026-0001 생산창고" in str(outcome["revision"])
+
+
+def test_downgrade_does_not_miss_a_request_still_being_written(engine: Engine) -> None:
+    """**쓰는 중인 요청을 세지 못하고 지나가지 않는다** — 반품 · 재검사 쪽 가드와 같은 자리다.
+    세기 전에 요청 표를 잠그지 않으면 가드는 0 을 보고 지나가고, 뒤의 표 지우기가 쓰는 쪽을
+    기다렸다가 커밋된 요청째 지운다."""
+    schema = "transfer_downgrade_race"
+    with _schema(engine, schema):
+        config = _upgrade_with(engine, schema, "e84fbec436c0", _WITH_A_LEDGER_LINE)
+        command.upgrade(config, "head")
+
+        outcome = _while_a_writer_holds(
+            engine,
+            schema,
+            _ONE_TRANSFER_REQUEST,
+            lambda: command.downgrade(config, _TO_LEDGER_WAREHOUSE),
+        )
+
+        assert isinstance(outcome["revision"], Exception), outcome["revision"]
+        assert "이동 요청 1건" in str(outcome["revision"])

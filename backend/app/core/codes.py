@@ -180,7 +180,8 @@ TOTAL_EFFECTS = (
 )
 
 # **원장에 나는 유형.** 합격이 로트를 만들고 그 자리에 입고 한 줄이 남고,
-# 공급사에 돌려보낸 재고는 반품 한 줄로, 재검사에서 떨어진 로트는 폐기 한 줄로 빠진다.
+# 공급사에 돌려보낸 재고는 반품 한 줄로, 재검사에서 떨어진 로트는 폐기 줄로 빠진다.
+# 처리된 이동은 창고를 건너는 두 줄이다.
 #
 # **열둘을 다 적지 않는다.** 나머지는 부르는 쪽이 없고, 부르는 쪽이 없는
 # 상수는 빈 기준정보와 같다 — 그 유형을 내는 조각이 설 때 하나씩 온다. 시드와
@@ -189,8 +190,14 @@ TXN_PURCHASE_RECEIPT = "구매입고"
 # 대물이든 대금이든 이 유형 하나다 — 원장은 「재고가 줄었다」만 적고, 정산
 # 구분은 반품 문서에 한 번만 산다(원칙 ⑥).
 TXN_PURCHASE_RETURN = "구매반품출고"
-# 재검사에서 떨어진 로트의 잔량 전부가 이 한 줄로 나간다. 근거 문서는 그 재검사다.
+# 재검사에서 떨어진 로트의 잔량이 이 유형으로 나간다 — 잔량이 남은 창고마다 한 줄이다(4단계).
+# 근거 문서는 그 재검사다.
 TXN_DISPOSAL = "폐기출고"
+# **창고를 건너는 이동은 두 줄이다**(4단계) — 원재료창고에서 빠지는 줄과 생산창고에 드는 줄.
+# 근거 문서는 둘 다 그 이동 요청의 처리 종결이다.
+TXN_TRANSFER_OUT = "생산출고"
+TXN_TRANSFER_IN = "생산입고"
+TRANSFER_TXN_TYPES = (TXN_TRANSFER_OUT, TXN_TRANSFER_IN)
 # **유형마다 잔량을 세는 방향**(Codex 리뷰 4 라운드). 시드가 `txn_type_attributes` 에 같은 값을
 # 심지만, 그 칸은 원장 줄이 서기 전까지 고칠 수 있다 — 줄이 들어올 때 잔량 트리거가 이 방향과
 # 견주어 거꾸로 선 유형의 첫 줄을 막는다. 원장 CHECK 가 받는 유형도 이 목록이다.
@@ -198,8 +205,21 @@ LEDGER_EFFECTS = {
     TXN_PURCHASE_RECEIPT: EFFECT_INCREASE,
     TXN_PURCHASE_RETURN: EFFECT_DECREASE,
     TXN_DISPOSAL: EFFECT_DECREASE,
+    TXN_TRANSFER_OUT: EFFECT_DECREASE,
+    TXN_TRANSFER_IN: EFFECT_INCREASE,
 }
 LEDGER_TXN_TYPES = tuple(LEDGER_EFFECTS)
+
+# ── 이동 요청의 끝 (4단계, ADR 0023) ───────────────────────────────────────
+# **요청 하나에 종결 하나 — 처리 또는 취소.** 둘이 한 표의 한 칸이라 「처리된 요청을 취소」와
+# 「취소된 요청을 처리」가 같은 유일키에 걸린다. 처리에는 원장 두 줄이 따르고 취소에는 없다.
+#
+# **공통코드 그룹으로 두지 않는다** — 판정(`JUDGMENTS`)과 같은 자리다. 셋째 종결이 생기면 값이
+# 느는 것이 아니라 「요청은 처리되거나 거두어진다」가 바뀌는 것이고, 그룹을 더하는 것은
+# 앵커볼트다.
+CLOSURE_PROCESSED = "처리"
+CLOSURE_CANCELLED = "취소"
+CLOSURE_TYPES = (CLOSURE_PROCESSED, CLOSURE_CANCELLED)
 
 # ── 불합격 처분 ─────────────────────────────────────────────────────────────
 # 「고칠 수 있는가」가 처분을 가른다 — 고칠 수 없는 것(이물 · 접착력 · 배합비)은
@@ -264,11 +284,14 @@ WAREHOUSE_ITEM_TYPES: dict[str, tuple[str, ...]] = {
 
 # **유형이 정하는 창고**(4단계 — `docs/schema-4단계.md`). 원장 줄의 창고는 그 유형이 말하는
 # 자리다 — 사 온 물건은 원재료창고로 들어오고, 공급사에 돌려보내는 것도 원재료창고에서만 나간다
-# (저장소 소유자, 2026-10-05). 여기 없는 유형(폐기출고)은 창고를 고르지 않는다 — 그 로트가 있는
-# 창고에서 나간다. 원장 CHECK 가 이 목록으로 걸린다.
+# (저장소 소유자, 2026-10-05). 이동은 원재료창고에서 빠져 생산창고로 든다 — 4단계가 짓는 구간은
+# 그 하나뿐이다(`PRD.md` 「하지 않을 일」 2). 여기 없는 유형(폐기출고)은 창고를 고르지 않는다 —
+# 그 로트가 있는 창고마다 나간다. 원장 CHECK 가 이 목록으로 걸린다.
 LEDGER_TYPE_WAREHOUSES = {
     TXN_PURCHASE_RECEIPT: WAREHOUSE_RAW,
     TXN_PURCHASE_RETURN: WAREHOUSE_RAW,
+    TXN_TRANSFER_OUT: WAREHOUSE_RAW,
+    TXN_TRANSFER_IN: WAREHOUSE_PRODUCTION,
 }
 
 # ── 로트가 온 곳 ───────────────────────────────────────────────────────────
