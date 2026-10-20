@@ -90,6 +90,7 @@ backend/
   app/db/inventory.py    로트 한 표와 수불 원장
   app/services/incoming.py  관문 1 — 판정 · 채번 · 한 트랜잭션
   app/services/returns.py   구매반품 — 문서 · 원장 줄 · 한 트랜잭션
+  app/services/transfers.py 재고이동 — 요청 · 처리(종결 · 원장 두 줄) · 취소
   app/api/app.py         쓰기 엔드포인트 (POST /inspections · /purchase-returns)
   app/db/inspection.py   검사 기록과 측정값 줄 — 관문 1
   app/core/locks.py      자문 잠금 키 — 한 곳에 모은다

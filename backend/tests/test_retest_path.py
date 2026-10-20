@@ -122,8 +122,10 @@ def an_expired_lot(
     quantity: float = 500.0,
     number: str = "RM-01-250101-01",
     receipt: bool = True,
+    no_expiry: bool = False,
 ) -> Lot:
-    """IQC 를 지나 오래 전에 들어온 로트 — 넘긴 만료일로, 입고 줄은 넘기면 뺀다.
+    """IQC 를 지나 오래 전에 들어온 로트 — 넘긴 만료일로(`no_expiry` 면 만료일 없이), 입고 줄은
+    넘기면 뺀다.
 
     **관문 1 의 쓰기 경로로 짓지 않는다** — 그 경로는 이미 지난 자재를 합격으로 세우지 않는다
     (`material_is_already_expired`). 로트의 만료일은 고칠 수도 없으므로 처음부터 지난 날로
@@ -158,7 +160,11 @@ def an_expired_lot(
         quantity=quantity,
         received_date=arrived,
         passed_date=arrived,
-        expiry_date=today - timedelta(days=10) if expires is None else expires,
+        expiry_date=None
+        if no_expiry
+        else today - timedelta(days=10)
+        if expires is None
+        else expires,
         inspection_id=passed.id,
         inspection_result=passed.result,
     )
@@ -186,31 +192,37 @@ def planted(session: Session) -> Session:
     return session
 
 
-def split(session: Session, lot: Lot, moved: float) -> None:
-    """**로트를 나눈다** — `moved` 만큼 원재료창고에서 생산창고로 옮긴 처리 하나를 넣는다.
-
-    이동의 쓰기 경로가 서기 전이라 요청 · 처리 종결 · 원장 두 줄을 데이터베이스에 그대로
-    넣는다(`tests/test_stock_transfer.py` 의 `_process` 와 같은 모양). 시각은 입고 다음 날이다 —
-    로트가 아직 살아 있던 때다. 이동의 유형과 생산창고는 여기서 심는다 — 재검사의 기준정보에는
-    없다.
-    """
+def plant_transfer_types(session: Session) -> None:
+    """이동의 유형과 생산창고 — 재검사의 기준정보에는 없다. 이미 심겼으면 넘긴다."""
     planted_already = select(TxnTypeAttribute).where(
         TxnTypeAttribute.code == codes.TXN_TRANSFER_OUT
     )
-    if session.scalars(planted_already).first() is None:
-        add_code(session, codes.WAREHOUSE, codes.WAREHOUSE_PRODUCTION, "생산창고")
-        for txn_type in codes.TRANSFER_TXN_TYPES:
-            add_code(session, codes.TXN_TYPE, txn_type)
-        session.flush()
-        session.add_all(
-            TxnTypeAttribute(
-                code=txn_type,
-                total_effect=codes.LEDGER_EFFECTS[txn_type],
-                source_document_type="이동 처리",
-            )
-            for txn_type in codes.TRANSFER_TXN_TYPES
+    if session.scalars(planted_already).first() is not None:
+        return
+    add_code(session, codes.WAREHOUSE, codes.WAREHOUSE_PRODUCTION, "생산창고")
+    for txn_type in codes.TRANSFER_TXN_TYPES:
+        add_code(session, codes.TXN_TYPE, txn_type)
+    session.flush()
+    session.add_all(
+        TxnTypeAttribute(
+            code=txn_type,
+            total_effect=codes.LEDGER_EFFECTS[txn_type],
+            source_document_type="이동 처리",
         )
-        session.flush()
+        for txn_type in codes.TRANSFER_TXN_TYPES
+    )
+    session.flush()
+
+
+def split(session: Session, lot: Lot, moved: float) -> None:
+    """**로트를 나눈다** — `moved` 만큼 원재료창고에서 생산창고로 옮긴 처리 하나를 넣는다.
+
+    쓰기 경로를 거치지 않고 요청 · 처리 종결 · 원장 두 줄을 데이터베이스에 그대로 넣는다
+    (`tests/test_stock_transfer.py` 의 `_process` 와 같은 모양) — 시각을 입고 다음 날로 두어야
+    해서다. 그때는 로트가 아직 살아 있었고, 지금 「만료된 로트」를 나눌 수 있다. 쓰기 경로는
+    `tests/test_transfer_path.py` 가 본다.
+    """
+    plant_transfer_types(session)
     at = datetime.combine(lot.received_date + timedelta(days=1), datetime.min.time())
     request = StockTransferRequest(
         lot_id=lot.id, quantity=moved, requested_at=at, requested_by="생산 1"

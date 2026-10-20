@@ -18,11 +18,11 @@
 
 ### 데이터베이스가 막는 것을 먼저 이름으로 막는다
 
-잔량과 불합격분의 합은 트리거가 지킨다(ADR 0013). 여기서 같은 것을 먼저 묻는 것은
-**검사원이 제약 이름 대신 까닭을 받게** 하려는 것이고, 지키는 것은 여전히 트리거다 —
-이 가드들을 지워도 데이터는 틀리지 않는다. 그래서 **트리거와 같은 순서로 잠근다**
-(검사 줄 → 로트 줄). 묻는 순간과 넣는 순간 사이에 남이 끼면 이름 대신 500 이
-나가고, 순서가 다르면 교착이 난다.
+원재료창고의 잔량(로트 × 창고로 센다)과 불합격분의 합은 트리거가 지킨다(ADR 0013).
+여기서 같은 것을 먼저 묻는 것은 **검사원이 제약 이름 대신 까닭을 받게** 하려는 것이고,
+지키는 것은 여전히 트리거다 — 이 가드들을 지워도 데이터는 틀리지 않는다. 그래서
+**트리거와 같은 순서로 잠근다**(검사 줄 → 로트 줄). 묻는 순간과 넣는 순간 사이에 남이
+끼면 이름 대신 500 이 나가고, 순서가 다르면 교착이 난다.
 
 **이 경로가 못 보는 부류**(W-6 ③) —
 
@@ -80,6 +80,10 @@ class ReturnRefusal(StrEnum):
     REASON_IS_NOT_ACTIVE = "reason_is_not_active"
     MORE_THAN_THE_LOT_HOLDS = "more_than_the_lot_holds"
     MORE_THAN_WAS_REJECTED = "more_than_was_rejected"
+
+
+# 반품 줄이 서는 창고 — 원장 CHECK 가 쓰는 같은 목록에서 꺼낸다.
+_LEAVES_FROM = codes.LEDGER_TYPE_WAREHOUSES[codes.TXN_PURCHASE_RETURN]
 
 
 @dataclass(frozen=True)
@@ -176,11 +180,14 @@ def _as_counted(quantity: float) -> object:
     return cast(literal(quantity, Float), Numeric)
 
 
-def _lot_would_go_below_zero(session: Session, lot: Lot, quantity: float) -> bool:
-    """**로트 줄을 잠근 뒤에** 그 로트의 원장 합을 센다 — 원장 트리거와 같은 셈이다.
+def goes_below_zero(session: Session, lot: Lot, warehouse: str, quantity: float) -> bool:
+    """**로트 줄을 잠근 뒤에** 그 로트가 그 창고에 가진 원장 합을 센다 — 원장 트리거와 같은
+    셈(로트 × 창고)이다. 이동의 처리도 이것으로 묻는다(`app/services/transfers.py`).
 
     방향은 원장 줄에 없고 유형이 말한다(`total_effect`). 그 셈을 여기 다시 적는
-    것은 거절의 이름을 위한 것이고, 틀려도 트리거가 막는다.
+    것은 거절의 이름을 위한 것이고, 틀려도 트리거가 막는다. **창고를 골라 센다**(4단계) —
+    로트 전체의 합으로 세면 생산창고로 옮긴 분량을 빌려 원재료창고에서 빼게 되고, 그 줄은
+    트리거가 이름 없이 막는다.
     """
     session.execute(select(Lot.id).where(Lot.id == lot.id).with_for_update(key_share=True))
     signed = case(
@@ -200,7 +207,7 @@ def _lot_would_go_below_zero(session: Session, lot: Lot, quantity: float) -> boo
             (TxnTypeAttribute.group_code == StockLedgerEntry.txn_type_group)
             & (TxnTypeAttribute.code == StockLedgerEntry.txn_type),
         )
-        .where(StockLedgerEntry.lot_id == lot.id)
+        .where(StockLedgerEntry.lot_id == lot.id, StockLedgerEntry.warehouse == warehouse)
         .scalar_subquery()
     )
     return bool(session.scalar(select(balance - _as_counted(quantity) < 0)))
@@ -262,10 +269,14 @@ def return_to_supplier(session: Session, request: IncomingReturn) -> Returned:
         _must_be_a_reason_for_this_gate(session, request.nonconformity_code)
         # 합격 · 특채는 로트를 만든다 — 같은 트랜잭션에서 섰다(`incoming.receive`).
         lot = session.scalars(select(Lot).where(Lot.inspection_id == inspection.id)).one()
-        if _lot_would_go_below_zero(session, lot, request.quantity):
+        # **원재료창고의 잔량만 돌려보낼 수 있다**(저장소 소유자, 2026-10-05) — 생산창고로 옮긴
+        # 분량은 반품으로 나가지 않는다. 이름은 이동 전의 것 그대로다 — 까닭은
+        # `app/services/transfers.py` 머리의 「거절의 이름」이 든다.
+        if goes_below_zero(session, lot, _LEAVES_FROM, request.quantity):
             raise RefusedReturn(
                 ReturnRefusal.MORE_THAN_THE_LOT_HOLDS,
-                f"로트 {lot.lot_number} 에 남은 것보다 많이 돌려보내게 된다",
+                f"로트 {lot.lot_number} 의 {_LEAVES_FROM}창고에 남은 것보다 많이 돌려보내게"
+                " 된다 — 생산창고로 옮긴 분량은 돌려보내지 않는다",
             )
 
     # **시각은 서버가 적는다.** 판정 시각과 같은 시계라 「판정보다 앞선 반품」이
@@ -293,7 +304,7 @@ def return_to_supplier(session: Session, request: IncomingReturn) -> Returned:
         txn_type=codes.TXN_PURCHASE_RETURN,
         # 반품은 원재료창고에서만 나간다(저장소 소유자, 2026-10-05) — 원장 CHECK 가 같은
         # 목록으로 건다
-        warehouse=codes.LEDGER_TYPE_WAREHOUSES[codes.TXN_PURCHASE_RETURN],
+        warehouse=_LEAVES_FROM,
         item_type=lot.item_type,
         quantity=request.quantity,
         occurred_at=returned_at,

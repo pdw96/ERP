@@ -22,10 +22,21 @@ from sqlalchemy.orm import Session
 
 from app.core import clock
 from app.db.inspection import Inspection
-from app.db.inventory import PurchaseReturn, StockLedgerEntry
+from app.db.inventory import (
+    PurchaseReturn,
+    StockLedgerEntry,
+    StockTransferClosure,
+    StockTransferRequest,
+)
 
 # 쓰기 경로가 「지금」을 적는 칸 — 새 칸이 생기면 여기 더한다.
-_STAMPED = (Inspection.judged_at, PurchaseReturn.returned_at, StockLedgerEntry.occurred_at)
+_STAMPED = (
+    Inspection.judged_at,
+    PurchaseReturn.returned_at,
+    StockLedgerEntry.occurred_at,
+    StockTransferRequest.requested_at,
+    StockTransferClosure.closed_at,
+)
 
 
 def latest_stamp(session: Session) -> datetime | None:
