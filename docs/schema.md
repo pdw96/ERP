@@ -707,7 +707,7 @@ PostgreSQL 의 외래키가 기본키나 유일키에만 붙기 때문이다.
 - `FK (request_id, lot_id, quantity, requested_at) → stock_transfer_requests (id, lot_id, quantity, requested_at)` — 네 칸 모두 `NOT NULL` 이라 복합 외래키가 건너뛰는 자리가 없다
 - `CHECK closed_at >= requested_at` — 요청보다 먼저 끝나지 않는다. 요청 시각을 쌍으로 받아 한 줄 안에서 본다
 - `UNIQUE (id, closure_type, lot_id, quantity, closed_at)` — 행을 좁히지 않는다. **원장의 이동 줄이 가리킬 상대**다
-- **트리거** `stock_transfer_closure_moves_only_a_live_lot` — **만료된 로트의 처리를 받지 않는다**(`PRD.md` 성공 기준 5). 처리 시각에 살아 있던 만료일(그 시각 이전에 판정된 재검사 가운데 가장 늦게 합격한 것의 갱신 만료일, 없으면 `lots.expiry_date`)을 처리 시각의 날짜와 견주고, 경계는 재검사(`retest_comes_only_to_an_expired_lot`)와 같다. 로트 줄을 `FOR NO KEY UPDATE` 로 잠근다. 요청과 취소에는 걸지 않는다. 종결을 고치거나 지우지 않는다
+- **트리거** `stock_transfer_closure_moves_only_a_live_lot` — **만료된 로트의 처리를 받지 않는다**(`PRD.md` 성공 기준 5). 처리 시각에 살아 있던 만료일(그 시각 이전에 판정된 재검사 가운데 가장 늦게 합격한 것의 갱신 만료일, 없으면 `lots.expiry_date`)을 처리 시각의 날짜와 견주고, 경계는 재검사(`retest_comes_only_to_an_expired_lot`)와 같다. **잠그지 않는다** — 줄을 세우는 것은 뒤의 원장 줄이 로트 줄을 잡는 잔량 트리거다. 요청과 취소에는 걸지 않는다. 종결을 고치거나 지우지 않는다
 - **지연 제약 트리거** `stock_transfer_processing_has_its_ledger_lines` — 처리 종결은 **커밋할 때** 원장에 생산출고 · 생산입고 두 줄이 있어야 한다. 원장 쪽 외래키는 줄 → 종결 방향만 본다 — 반품 문서 · 재검사와 같은 모양이다
 
 ---
