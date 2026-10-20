@@ -4,7 +4,8 @@
 입고 → 원재료창고 → 생산창고 → 제품창고 → 출하 — 을 장부에 적는다.
 
 - **설계도**: [조기경보 ERP 설계도 42판](https://claude.ai/artifact/GMJpbFywKh8wj6N4vEukT6)
-- **지금의 자리**: [`PRD.md`](PRD.md) — 4단계 · 재고가 옮겨 가는 길. 둘째 조각(원장 줄의 창고)이 닫혔고, 다음은 이동 조각이다
+- **지금의 자리**: [`PRD.md`](PRD.md) — 4단계 · 재고가 옮겨 가는 길. 셋째 조각(이동)이 진행 중이다 — PR A(데이터베이스)가 머지됐고 다음은 B 다.
+  PR 마다의 상태는 [`docs/slices/3-이동/design.md`](docs/slices/3-이동/design.md) ⑥ 이 든다
   (닫힌 단계는 [`docs/PRD-1단계.md`](docs/PRD-1단계.md) · [`docs/PRD-2단계.md`](docs/PRD-2단계.md) · [`docs/PRD-3단계.md`](docs/PRD-3단계.md))
 - **표의 모양**: [`docs/schema.md`](docs/schema.md)
 - **작업 규칙**: [`CLAUDE.md`](CLAUDE.md) · [`CHECKLIST.md`](CHECKLIST.md)
