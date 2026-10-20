@@ -3,7 +3,7 @@
 
   python3 scripts/verify-docs.py               # 이 저장소 — `scripts/` 의 링크로 부른다
   python3 scripts/verify-docs.py <루트>         # 다른 폴더 — 자체 시험이 베낀 트리로 쓴다
-  python3 <이 파일> --repo <루트>                 # 다른 레포 — 원천은 이 파일 옆의 틀 넷
+  python3 <이 파일> --repo <루트>                 # 다른 레포 — 원천은 이 파일 옆의 틀 다섯
 
 **자리.** 실물은 `vibe-slice/skills/slice-docs/scripts/` 에 있고 플러그인 · 사본(`sync-slice.sh`)이 이 파일을 싣는다.
 `scripts/verify-docs.py` 는 그것을 가리키는 링크다(ADR 0018 의 3). 인자 없이 부르면 **부른 경로**의 두 단 위가 루트다 —
@@ -17,11 +17,14 @@
 그 보장의 번호다 — 여기 따로 옮겨 적지 않는다.
 
 **모양의 원천은 `docs/procedure.md` 다.** 필수 제목은 그 파일의 「…의 칸」 표에서 읽는다. 여기에
-있는 것은 그 표를 찾는 네 절 이름뿐이고, 그 자리는 앵커볼트다(`CLAUDE.md`, ADR 0010 의 8).
+있는 것은 그 표를 찾는 다섯 절 이름뿐이고, 그 자리는 앵커볼트다(`CLAUDE.md`, ADR 0010 의 8 · ADR 0041 의 7).
 
-**다른 레포 모드(`--repo`)의 원천은 이 파일 옆의 틀 넷이다.** 지도는 다른 레포에 가지 않는다(ADR 0013 의 2). 틀의 `##`
+**다른 레포 모드(`--repo`)의 원천은 이 파일 옆의 틀 다섯이다.** 지도는 다른 레포에 가지 않는다(ADR 0013 의 2). 틀의 `##`
 제목은 claude-kit 에서 T2 가 「…의 칸」 표와 글자 그대로 같게 무니 같은 원천이다. 모드는 인자로만 고른다 —
 `docs/slices/9-repo-doc-check/design.md` ② A(ADR 0018 의 2 · 5).
+
+**입구 `CLAUDE.md` 는 절 제목을 묻지 않는다.** 의도의 경로와 마스터플랜을 백틱 토막으로 드는지만 본다 — 이미 있는
+`CLAUDE.md` 를 덮지 않으므로 절은 레포마다 다르다. `docs/slices/30-claude-md-template/design.md` ② C1 ~ C3 · ③(ADR 0041 의 6 · 10).
 
 표준 라이브러리만 쓴다.
 """
@@ -34,6 +37,7 @@ import sys
 KINDS = [
     ("의도 문서의 칸", "intent.md"),
     ("마스터플랜의 칸", "master-plan.md"),
+    ("CLAUDE.md 의 칸", "claude-md.md"),
     ("요구사항 문서의 칸", "requirements.md"),
     ("설계 문서의 칸", "design.md"),
 ]
@@ -46,6 +50,10 @@ FOLDER = re.compile(r"^`(docs/slices/\d+-[^/`\s]+/)`$")
 SLICES = "docs/slices/"
 NONE_MARK = re.compile(r"^`?없음 — ")
 HEADING = re.compile(r"^(#+) (.*)$")
+# 입구 — 세션이 저절로 읽는 파일. 의도와 마스터플랜을 백틱 토막 하나로 가리켜야 한다(조각 30 설계 ③).
+ENTRY = "CLAUDE.md"
+MASTER = "docs/master-plan.md"
+TICK = re.compile(r"`([^`]+)`")
 
 
 class Report:
@@ -263,7 +271,7 @@ def check_master(r, root, schema, repo):
         r.fail(mp, "M1", why)
 
     body, _ = section(ls, 2, "가리키는 문서")
-    intents = []
+    intents, sound = [], []
     for row in table(body or []):
         if len(row) != 2:
             r.fail(mp, "M2", f"「가리키는 문서」 줄이 두 칸이 아니다 — {' | '.join(row)}")
@@ -288,6 +296,9 @@ def check_master(r, root, schema, repo):
                 r.fail(mp, "M2", f"「{what}」 줄의 `{tok}` 가 {why}")
         if is_intent:
             p, why = inside(root, toks[0])
+            # C2 가 견줄 의도 — I2 를 지난 것만. 떨어진 의도로 C2 를 또 찍지 않는다(한 까닭에 줄 하나).
+            if not why and p.is_file():
+                sound.append(toks[0])
             if why or not p.is_file():
                 r.fail(mp, "I2", f"의도 줄의 `{toks[0]}` 가 저장소 안의 파일이 아니다 — {why or '폴더다'}")
             elif p.name == "INTENT.md" and (need := schema.get("의도 문서의 칸")):
@@ -295,7 +306,20 @@ def check_master(r, root, schema, repo):
                     r.fail(p, "I3", why)
     if len(intents) != 1:
         r.fail(mp, "I1", f"「가리키는 문서」에 의도 줄이 {len(intents)} 개다 — 꼭 하나여야 한다")
-    return mp, rows
+    return mp, rows, (sound[0] if len(intents) == 1 and sound else None)
+
+
+def check_entry(r, root, intent):
+    """C1 · C2 · C3 — 입구 `CLAUDE.md` 가 있고 의도와 마스터플랜을 가리킨다. 절 제목은 묻지 않는다(조각 30 설계 ②)."""
+    entry, why = inside(root, ENTRY)
+    if why or not entry.is_file():
+        r.fail(ENTRY, "C1", f"저장소 맨 위의 입구가 {why or '폴더다'} — 세션이 의도와 마스터플랜을 찾을 파일이어야 한다")
+        return
+    toks = {t for ln in lines(entry) for t in TICK.findall(ln)}
+    if intent and intent not in toks:
+        r.fail(entry, "C2", f"의도 `{intent}` 를 가리키지 않는다 — 그 경로를 백틱 토막 하나로 적는다")
+    if MASTER not in toks:
+        r.fail(entry, "C3", f"마스터플랜 `{MASTER}` 를 가리키지 않는다 — 그 경로를 백틱 토막 하나로 적는다")
 
 
 def check_slices(r, root, schema, mp, rows):
@@ -432,7 +456,9 @@ def main(argv):
         check_templates(r, root, schema)
     got = check_master(r, root, schema, repo)
     if got:
-        check_slices(r, root, schema, *got)
+        mp, rows, intent = got
+        check_slices(r, root, schema, mp, rows)
+        check_entry(r, root, intent)
     for p, why in UNREADABLE.items():
         r.fail(p, "R1", f"읽지 못했다 — UTF-8 문서여야 한다({why})")
 
@@ -442,9 +468,9 @@ def main(argv):
             print(f"  - {b}")
         return 1
     if tpl:
-        print(f"PASS 문서의 모양(다른 레포 — 원천 {tpl.as_posix()}) — 의도 · 마스터플랜 · 조각 나눔 · 조각 폴더")
+        print(f"PASS 문서의 모양(다른 레포 — 원천 {tpl.as_posix()}) — 의도 · 마스터플랜 · 입구 · 조각 나눔 · 조각 폴더")
     else:
-        print("PASS 문서의 모양 — 원천 · 틀 · 의도 · 마스터플랜 · 조각 나눔 · 조각 폴더")
+        print("PASS 문서의 모양 — 원천 · 틀 · 의도 · 마스터플랜 · 입구 · 조각 나눔 · 조각 폴더")
     return 0
 
 

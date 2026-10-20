@@ -1,13 +1,13 @@
 ---
 name: slice-docs
-description: 프로젝트를 조각으로 나눠 진행할 때 의도 · 마스터플랜 · 조각 요구사항 · 설계 문서를 틀대로 씁니다. 새 프로젝트의 의도나 마스터플랜을 처음 세울 때, 마스터플랜에서 조각을 꺼내 착공(요구사항 + 설계)할 때, 조각을 닫는 기록을 쓸 때 쓰세요.
+description: 프로젝트를 조각으로 나눠 진행할 때 의도 · 마스터플랜 · 작업 규칙(CLAUDE.md) · 조각 요구사항 · 설계 문서를 틀대로 씁니다. 새 프로젝트의 의도나 마스터플랜을 처음 세울 때, 마스터플랜에서 조각을 꺼내 착공(요구사항 + 설계)할 때, 조각을 닫는 기록을 쓸 때 쓰세요.
 ---
 
-<!-- pdw96/claude-kit@f4ea3a5 에서 옴. 이 레포에서만 참인 고침은 이 사본에만 산다 — 다른 레포에서도 같은 말이면 원본으로 넘긴다. -->
+<!-- pdw96/claude-kit@4ef24a9 에서 옴. 이 레포에서만 참인 고침은 이 사본에만 산다 — 다른 레포에서도 같은 말이면 원본으로 넘긴다. -->
 
 # 조각 문서
 
-절차는 claude-kit 의 절차 지도가 든다 — https://github.com/pdw96/claude-kit/blob/f4ea3a51fcc30f44554f83b66cead05a60a70cdd/docs/procedure.md .
+절차는 claude-kit 의 절차 지도가 든다 — https://github.com/pdw96/claude-kit/blob/4ef24a9cdbd3c068ccdd1ed2cd3d1cc5a436a7dc/docs/procedure.md .
 단계마다 들어가고 나가는 조건, 문서의 칸, 살아 있는 문서와 기록의 규칙은 거기서 읽는다. 여기에 옮겨 적지 않는다.
 
 ## 틀
@@ -18,6 +18,7 @@ description: 프로젝트를 조각으로 나눠 진행할 때 의도 · 마스�
 |---|---|---|
 | 의도 | `${CLAUDE_SKILL_DIR}/templates/intent.md` | `INTENT.md` |
 | 마스터플랜 | `${CLAUDE_SKILL_DIR}/templates/master-plan.md` | `docs/master-plan.md` |
+| 작업 규칙 | `${CLAUDE_SKILL_DIR}/templates/claude-md.md` | `CLAUDE.md`(저장소 맨 위) |
 | 요구사항 | `${CLAUDE_SKILL_DIR}/templates/requirements.md` | `docs/slices/<순서>-<이름>/requirements.md` |
 | 설계 | `${CLAUDE_SKILL_DIR}/templates/design.md` | `docs/slices/<순서>-<이름>/design.md` |
 
@@ -27,6 +28,10 @@ description: 프로젝트를 조각으로 나눠 진행할 때 의도 · 마스�
 
 - **마스터플랜(`docs/master-plan.md`)이 없다** — 처음 쓰는 호출이다. 의도와 마스터플랜을 먼저 쓴다. 의도를 이미 든
   문서(예: `PRD.md`)가 있으면 `INTENT.md` 를 새로 쓰지 않고, 마스터플랜 「가리키는 문서」의 의도 줄이 그 문서를 가리킨다.
+- **`CLAUDE.md`** — 처음 쓰는 호출에서, 그리고 검사가 C1 ~ C3 를 찍을 때 다룬다. 빌드 · 시험 명령 같은 사실은 쓰지 않는다.
+  없으면 `/init` 을 먼저 부르라고 말하고, 그 뒤 틀의 세 절을 저자 인터뷰로 받아 쓴다. 있으면 덮지 않는다 — 빠진 절과
+  가리키는 줄만 사용자에게 먼저 보이고 받으면 더한다. 가리키는 줄은 작업 방식에 의도의 경로와 `docs/master-plan.md`
+  를 백틱 토막으로 — 그 레포에 `AGENTS.md` 가 있으면 그것도.
 - **마스터플랜이 있다** — 조각 나눔에서 조각을 꺼낸다. 그 조각의 줄이 없으면 요구사항 · 설계를 쓰지 않고, 줄을 먼저
   더하라고 사용자에게 말한다.
 - **조각을 꺼낼 때** — 조각 나눔의 상태를 `진행` 으로, 조각 폴더 칸을 `docs/slices/<순서>-<이름>/` 으로 고친다.
@@ -37,5 +42,5 @@ description: 프로젝트를 조각으로 나눠 진행할 때 의도 · 마스�
 
 ## 이 스킬의 일이 아닌 것
 
-ADR · `CLAUDE.md` · README · 스키마 문서는 쓰지 않는다. 리뷰 지적을 가르는 일은 같은 플러그인의 스킬 `slice-review` 다. 구현 코드도 쓰지 않는다 — 구현은 착공 PR 이 머지된 뒤
+ADR · README · 스키마 문서 · `AGENTS.md` 는 쓰지 않는다. 리뷰 지적을 가르는 일은 같은 플러그인의 스킬 `slice-review` 다. 구현 코드도 쓰지 않는다 — 구현은 착공 PR 이 머지된 뒤
 설계 ⑥ 의 나눔대로 간다.
