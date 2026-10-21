@@ -1639,3 +1639,22 @@ PostgreSQL 16)는 초록이다. 모델 쪽을 어긋낸 줄은 리비전과 모�
 **세우지 않은 가드 둘** — 어긋낼 것이 없어 표에 없다. 처리 경로가 만료를 묻기 전에 로트 줄을 따로 잠그는 것(잔량 셈이 같은 줄을
 잠그므로 겹치고, 겹친 잠금은 걷어 내도 빨개질 시험이 없다)과, 트리거의 「처리 시각 이전에 판정된 재검사」 조건(처리 시각이 「지금」이라
 시계가 거꾸로 가지 않고는 닿지 않는다, NC-129). 까닭은 `app/services/transfers.py` 의 `_may_move` · `_live_expiry` 가 든다.
+
+## 파이썬 판을 한 파일로 (`df65bc2`, ADR 0026)
+
+새 검사 둘을 하나씩 어긋냈다. 어긋냄 없이 돌린 같은 트리의 `pytest` 전체(실제 PostgreSQL 16)는 Python 3.11 · 3.12 · 3.14 에서
+모두 911 통과다.
+
+| NC | 무엇을 어긋냈나 | 빨개진 검사 |
+|---|---|---|
+| — | 오류 응답의 선언이 설명 글자를 싣지 않게 했다(`_declared` 가 `description` 을 뺀다) — 3.14 로 돌렸다 | `test_the_spec_does_not_lean_on_the_python_status_names` 하나 — 3.14 의 이름표가 사진과 같은 글자라 사진 대조는 이 어긋냄을 물지 않는다 |
+| — | 같은 어긋냄 — 3.12 로 돌렸다 | `test_the_spec_does_not_lean_on_the_python_status_names` · `test_the_spec_matches_the_snapshot_in_the_repository` |
+| — | 404 하나를 `_STATUS_TEXT` 에서 뺐다(그 자리는 이름표가 채운다) — 3.12 로 돌렸다 | `test_the_spec_does_not_lean_on_the_python_status_names` 하나 — 3.12 의 404 이름이 같은 글자라 사진 대조는 이 어긋냄을 물지 않는다 |
+| — | 이미지의 `FROM` 을 3.12 로 | `test_one_file_holds_the_python_version` |
+| — | CI 의 `setup-python` 을 옛 모양(`python-version: "3.12"`)으로 | `test_one_file_holds_the_python_version` |
+| — | 개발 잠금의 머리를 「with Python 3.12」로 | `test_one_file_holds_the_python_version` |
+| — | 세션 훅이 판을 파일에서 읽지 않고 글자로 적게(`want=3.14`) | `test_one_file_holds_the_python_version` |
+
+첫 셋이 이 검사를 세운 까닭이다 — **사진 대조는 돌린 판의 이름표와 같은 글자이면 지나가므로, 설명이 빠진 것을 판에 따라
+놓친다.** 세션 훅의 나머지(판이 다른 `.venv` 를 다시 짓는 것, 빈 패키지 목록에서 shellcheck 를 까는 것)는 시험이 아니라
+클라우드 세션에서 훅을 돌려 봤다 — 3.13 의 `.venv` 가 3.14 로 다시 지어졌고, 패키지 목록을 지운 상태에서도 끝까지 섰다.
