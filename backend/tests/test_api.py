@@ -9,6 +9,7 @@
 """
 
 import asyncio
+import http.client
 import json
 import logging
 from collections.abc import Iterator
@@ -477,6 +478,24 @@ def test_the_spec_matches_the_snapshot_in_the_repository() -> None:
     assert spec.render() == spec.SNAPSHOT.read_text(encoding="utf-8"), (
         "밖으로 나가는 계약이 `docs/openapi.json` 과 다르다 — 의도한 변경이면 "
         "`cd backend && .venv/bin/python -m app.api.spec` 로 다시 짓고 그 diff 를 함께 올린다"
+    )
+
+
+def test_the_spec_does_not_lean_on_the_python_status_names(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """**사진은 돌린 파이썬 판에 따라 갈리지 않는다** (ADR 0026).
+
+    선언에 설명 글자가 없으면 FastAPI 가 표준 라이브러리의 이름표(`http.client.responses`)로
+    채운다. 그 이름표는 판마다 다르다 — 3.13 이 422 의 이름을 바꿔 CI(3.12)는 초록인데 3.13
+    로컬에서는 위의 사진 대조가 빨갰다. 이름표를 비우고 다시 지어도 사진과 같으면, 사진의 어느
+    글자도 그 이름표에서 오지 않는다 — 하한 3.11 부터 CI 의 판까지 같은 사진이다.
+    """
+    monkeypatch.setattr(http.client, "responses", {})
+    monkeypatch.setattr(app, "openapi_schema", None)
+    assert spec.render() == spec.SNAPSHOT.read_text(encoding="utf-8"), (
+        "사진의 글자 가운데 파이썬의 상태 이름표에서 온 것이 있다 — 그 응답의 선언에 "
+        "`description` 을 적는다(`app/api/app.py` 의 `_STATUS_TEXT`)"
     )
 
 

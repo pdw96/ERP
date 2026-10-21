@@ -73,7 +73,7 @@
 
 ## 제약
 
-- **스택**: 3단계 그대로 — Python 3.12 · FastAPI · SQLAlchemy 2 · Alembic · PostgreSQL 16.
+- **스택**: 3단계 그대로이고 파이썬의 판만 다르다 — Python(판은 `backend/.python-version` 한 자리, 3단계는 3.12 — ADR 0026) · FastAPI · SQLAlchemy 2 · Alembic · PostgreSQL 16.
   **운영 의존성은 늘지 않는다** — 잔량 · 만료 트리거는 PostgreSQL 이 이미 들고 있다. 개발 의존성은 하나가
   는다 — 판정 모듈의 분기 커버리지 도구(ADR 0024)
 - **호스팅**: 로컬 Docker Compose만. 배포처 없음
