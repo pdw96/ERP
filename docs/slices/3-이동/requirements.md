@@ -57,3 +57,49 @@
   먼저 세고 로트 번호를 말한다(감사 ㊸ OB-1, `docs/schema-4단계.md`)
 - **리뷰 한도**: `docs/리뷰-루프.md` 가 정한다 — 점수 · 쏠림 신호 · 소유자에게 묻는 문턱
 - **닫기 전에 감사 회차** — 스키마가 움직이므로 `audit-data`, 공개 계약이 깨지므로 `audit-contract`
+
+## 닫으며 (2026-10-21)
+
+설계 ⑥ 의 세 PR — A #119 · B #121 · C #124 — 이 모두 머지됐고, 「제약」이 정한 닫기 전의 감사 회차를 돌렸다(㊹ `audit-data` ·
+㊺ `audit-contract`, `docs/audit/회차-기록.md`). 배포는 `PRD.md` 「하지 않을 일」이라 절차의 「배포 · 롤백」은 `없음 — 배포처가 없다`.
+
+**돌린 결과** — `c80bcbf`(= 닫을 때의 `main`)에서 CI 와 같은 Python 3.12 로 전체 시험 910 통과, `ERP_CONTRACT_BASELINE=190bfe0` 으로
+판정 시험 111 통과. CI(`backend`)는 세 PR 과 그 뒤의 의존성 올림 #118 에서 모두 초록이었다.
+
+### 성공 기준마다 무엇에 대어 봤나
+
+| 성공 기준 | 무엇에 대어 봤나 | 결과 |
+|---|---|---|
+| `PRD.md` 1 · 잔량을 로트 × 창고로, 동시에 와도 | `test_a_transfer_takes_no_more_than_the_raw_warehouse_holds` · `test_two_processings_of_one_lot_at_once_do_not_both_take_it` · 경로 쪽 `test_two_processings_of_one_lot_at_once_the_second_is_named` | 맞음 |
+| `PRD.md` 2 · 종결 · 출고 · 입고가 한 트랜잭션, 같은 로트 · 수량 · 시각 | `test_processing_takes_both_ledger_lines` · `test_a_transfer_line_says_what_its_processing_says` · `test_a_transfer_runs_from_raw_to_production` · `test_processing_moves_the_quantity_in_one_transaction` · `test_a_201_means_the_commit_passed_the_deferred_check` | 맞음 |
+| `PRD.md` 3 · 요청 하나에 종결 하나 — 유일키로 | `test_one_request_has_one_end` · `test_processing_and_cancelling_one_request_at_once` | 맞음 |
+| `PRD.md` 4 · 한 번에 전부 처리 | `test_an_end_carries_what_its_request_says` | 맞음 |
+| `PRD.md` 5 · 만료된 로트의 처리 거부, 요청은 막지 않음 | `test_an_expired_lot_is_not_moved` · `test_a_request_for_an_expired_lot_still_stands_and_can_be_cancelled` · `test_a_renewal_judged_after_the_processing_does_not_cover_it` · `test_processing_and_retest_share_one_boundary` | 맞음 |
+| `PRD.md` 6 · 나뉜 로트의 폐기는 창고마다 한 줄, 합쳐서 잔량 전부 | `test_a_split_lot_is_disposed_of_in_each_warehouse` · `test_a_disposal_that_misses_a_warehouse_does_not_stand` · `test_one_retest_takes_one_disposal_line_in_each_warehouse` · 쓰기 경로 `test_a_split_lot_is_thrown_away_in_each_warehouse` | 맞음 |
+| `PRD.md` 7 · 요청자 · 처리자 · 취소자 | `test_a_request_names_who_asked` · `test_an_end_names_who_closed_it` | 맞음 |
+| `PRD.md` 8 · 기존 원장 줄이 창고를 얻고, 못 채우면 가드가 말한다 | 칸과 채우기는 조각 「원장 줄의 창고」가 섰다. 이 조각의 몫 — 로트 × 창고로 세기 전에 묻는 가드 — 는 `test_upgrading_says_which_lot_goes_below_zero_in_a_warehouse` · `test_upgrading_says_which_lot_holds_a_disposal_of_nothing`, 감사 ㊹ 가 ㊸ OB-1 을 해소로 판정 | 맞음 |
+| `PRD.md` 10 · 마이그레이션이 모델과 같다 · 화면 0 | `tests/test_migrations.py` 의 대조(함수 본문 · 트리거 정의까지) · 감사 ㊹ 체크 1. 프론트엔드 폴더가 없다 | 맞음 |
+| 요청과 종결을 HTTP 로, 거절은 경로마다 열거 하나 | `tests/test_transfer_api.py` 전부 — 특히 `test_what_the_database_would_break_on_is_refused_at_the_request_boundary` · `…_closure_boundary` · `test_the_spec_lists_every_transfer_refusal_name` | 맞음 |
+| 취소는 누구나, 끝난 요청은 이름 있는 거절 | `test_anyone_may_cancel_and_a_cancellation_moves_nothing` · `test_a_request_closes_once` | 맞음 |
+| 재검사 응답이 폐기 줄 id 를 목록으로, 판 `2.0` | `test_a_split_lot_comes_back_with_a_disposal_line_for_each_warehouse` · `test_the_version_moves_as_far_as_the_contract_moved` — 판 `1.1` 에서 빨개지는 것(`docs/audit/mutations.md` 「이동 PR B」) · 감사 ㊺ 가 ㊸ 이 넘긴 자리를 적합으로 닫음 | 맞음 |
+| 구매반품은 원재료창고의 잔량을 넘지 못한다 | `test_what_moved_to_production_is_not_returned` · `test_a_return_counts_only_what_is_left_in_the_raw_warehouse` | 맞음 |
+| 새 검사마다 어긋내서 빨갛게 | `docs/audit/mutations.md` 「4단계 조각 3 — 이동 PR A」 · 「PR B」 · 「PR C」 | 맞음 |
+
+못 미친 성공 기준은 없다. `PRD.md` 성공 기준 9(창고별 잔량을 읽는 엔드포인트)는 처음부터 「이동-읽기」의 것이다.
+
+### 넘긴 것
+
+- **같은 이동 요청을 두 번 보내면 요청이 둘 서고 둘 다 처리될 수 있다**(NC-230, 보통) → 조각 「이동-읽기」. 설계 ② 가 알려진 한계로
+  적으며 「NC-67 · 226 과 같은 자리」라고 가리켰지만 그 두 줄의 기한으로는 닫히지 않는다는 것이 감사 ㊹ 의 지적이다. 지금 막지 않고
+  처리를 기다리는 요청이 처음 보이는 조각에서 멱등 키와 함께 본다(저장소 소유자, 2026-10-21)
+- **반품의 거절 이름과 `balance` 의 뜻을 스펙 산문에 적는 것**(감사 ㊺ OB-1) → 조각 「이동-읽기」. 창고별 잔량이 밖으로 나갈 때
+  `more_than_the_lot_holds` 가 원재료창고의 잔량을 넘었다는 뜻이고 `balance` 가 모든 창고의 합이라는 것을 함께 적는다
+- **스펙 산문에 내부 이름을 싣지 않는 규칙을 세울지**(감사 ㊺ OB-3, 세 번째) → 저장소 소유자의 판단. 이 조각에서 정하지 않았다
+- 감사 ㊹ · ㊺ 가 다른 담당에 넘긴 것(동시성 시험의 무는 힘 → `audit-quality`, 종결 거절이 로트 정보를 되비춤 → `audit-secrets`)은
+  그 회차 절이 든다
+- 잘못 처리된 이동을 되돌리는 길은 넘기지 않는다 — `PRD.md` 「하지 않을 일」 2 가 정한 범위다
+
+### 다음 조각
+
+**이동-읽기** — `docs/master-plan.md` 조각 나눔의 4. 의존한 「이동」이 닫혔다. 착공 전에 대장(`docs/audit/README.md`)의 NC-230 과
+이 절의 넘긴 것을 읽는다.
