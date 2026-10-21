@@ -3,7 +3,7 @@
 
   python3 scripts/verify-docs.py               # 이 저장소 — `scripts/` 의 링크로 부른다
   python3 scripts/verify-docs.py <루트>         # 다른 폴더 — 자체 시험이 베낀 트리로 쓴다
-  python3 <이 파일> --repo <루트>                 # 다른 레포 — 원천은 이 파일 옆의 틀 다섯
+  python3 <이 파일> --repo <루트>                 # 다른 레포 — 원천은 이 파일 옆의 틀 여섯
 
 **자리.** 실물은 `vibe-slice/skills/slice-docs/scripts/` 에 있고 플러그인 · 사본(`sync-slice.sh`)이 이 파일을 싣는다.
 `scripts/verify-docs.py` 는 그것을 가리키는 링크다(ADR 0018 의 3). 인자 없이 부르면 **부른 경로**의 두 단 위가 루트다 —
@@ -17,14 +17,17 @@
 그 보장의 번호다 — 여기 따로 옮겨 적지 않는다.
 
 **모양의 원천은 `docs/procedure.md` 다.** 필수 제목은 그 파일의 「…의 칸」 표에서 읽는다. 여기에
-있는 것은 그 표를 찾는 다섯 절 이름뿐이고, 그 자리는 앵커볼트다(`CLAUDE.md`, ADR 0010 의 8 · ADR 0041 의 7).
+있는 것은 그 표를 찾는 여섯 절 이름뿐이고, 그 자리는 앵커볼트다(`CLAUDE.md`, ADR 0010 의 8 · ADR 0041 의 7 · ADR 0042 의 5).
 
-**다른 레포 모드(`--repo`)의 원천은 이 파일 옆의 틀 다섯이다.** 지도는 다른 레포에 가지 않는다(ADR 0013 의 2). 틀의 `##`
+**다른 레포 모드(`--repo`)의 원천은 이 파일 옆의 틀 여섯이다.** 지도는 다른 레포에 가지 않는다(ADR 0013 의 2). 틀의 `##`
 제목은 claude-kit 에서 T2 가 「…의 칸」 표와 글자 그대로 같게 무니 같은 원천이다. 모드는 인자로만 고른다 —
 `docs/slices/9-repo-doc-check/design.md` ② A(ADR 0018 의 2 · 5).
 
 **입구 `CLAUDE.md` 는 절 제목을 묻지 않는다.** 의도의 경로와 마스터플랜을 백틱 토막으로 드는지만 본다 — 이미 있는
 `CLAUDE.md` 를 덮지 않으므로 절은 레포마다 다르다. `docs/slices/30-claude-md-template/design.md` ② C1 ~ C3 · ③(ADR 0041 의 6 · 10).
+
+**프로필 `Profile.md` 도 절 제목을 묻지 않는다.** 고르는 문서라 없으면 묻지 않고, 있으면 저장소 안의 파일이고 `CLAUDE.md` 나
+`CLAUDE.local.md` 가 `@Profile.md` 로 가져오는지만 본다. `docs/slices/31-profile/design.md` ② P1 · ③(ADR 0042 의 6 · 7).
 
 표준 라이브러리만 쓴다.
 """
@@ -38,6 +41,7 @@ KINDS = [
     ("의도 문서의 칸", "intent.md"),
     ("마스터플랜의 칸", "master-plan.md"),
     ("CLAUDE.md 의 칸", "claude-md.md"),
+    ("Profile.md 의 칸", "profile.md"),
     ("요구사항 문서의 칸", "requirements.md"),
     ("설계 문서의 칸", "design.md"),
 ]
@@ -54,6 +58,17 @@ HEADING = re.compile(r"^(#+) (.*)$")
 ENTRY = "CLAUDE.md"
 MASTER = "docs/master-plan.md"
 TICK = re.compile(r"`([^`]+)`")
+# 펜스 — CommonMark 의 여는 꼴: 공백 0 ~ 3 칸 뒤 같은 글자 셋 이상, 그 뒤는 정보 문자열(조각 31 설계 ③).
+FENCE = re.compile(r"^ {0,3}(`{3,}|~{3,})(.*)$")
+# 프로필 — 저장소 맨 위의 그 이름 하나와, 그것을 가져올 수 있는 파일 둘(조각 31 설계 ③).
+PROFILE = "Profile.md"
+IMPORTERS = ("CLAUDE.md", "CLAUDE.local.md")
+# 백틱 토막 — 같은 수의 백틱으로 여닫는다. 짝이 없는 백틱은 글자로 남는다. 문단 안에서는 줄을 넘는다(CommonMark 의 코드 토막).
+SPAN = re.compile(r"(?<!`)(`+)(?!`).*?(?<!`)\1(?!`)", re.S)
+# 따옴표 구간 — 같은 줄의 큰따옴표 · 작은따옴표 짝 안. Claude Code 는 따옴표로 감싼 경로를 가져오지 않는다(ADR 0042 「맥락」).
+QUOTE = re.compile(r"\"[^\"\n]*\"|'[^'\n]*'")
+# 가져오는 줄의 꼴 — 백틱 토막과 따옴표 구간을 뺀 글에서 앞이 줄 머리나 공백, 뒤가 줄 끝이나 공백인 `@Profile.md` 하나(ADR 0042 의 7).
+IMPORT = re.compile(r"(?:^|\s)@Profile\.md(?=\s|$)", re.M)
 
 
 class Report:
@@ -75,22 +90,29 @@ UNREADABLE = {}
 
 
 def lines(path):
-    """코드 펜스와 줄 머리에서 연 주석을 뺀 줄. 읽지 못하면 빈 목록 — 까닭은 UNREADABLE 에."""
+    """코드 펜스와 줄 머리에서 연 주석을 뺀 줄. 읽지 못하면 빈 목록 — 까닭은 UNREADABLE 에.
+
+    펜스는 CommonMark 의 꼴을 안다(조각 31 설계 ③) — 백틱 펜스의 정보 문자열에 백틱이 있으면 펜스가 아니다. 닫는 줄은
+    여는 줄과 같은 글자가 그 수 이상이고 뒤에 공백만 있다. 닫히지 않은 펜스는 파일 끝까지다.
+    """
     try:
         text = path.read_text(encoding="utf-8")
     except (OSError, UnicodeDecodeError) as e:
         UNREADABLE.setdefault(path, f"{type(e).__name__}: {e}")
         return []
-    out, fence, comment = [], False, False
+    out, fence, comment = [], None, False
     for ln in text.splitlines():
         if comment:
             if "-->" in ln:
                 comment = False
             continue
-        if ln.startswith("```"):
-            fence = not fence
-            continue
+        m = FENCE.match(ln)
         if fence:
+            if m and m.group(1)[0] == fence[0] and len(m.group(1)) >= len(fence) and not m.group(2).strip():
+                fence = None
+            continue
+        if m and not (m.group(1)[0] == "`" and "`" in m.group(2)):
+            fence = m.group(1)
             continue
         if ln.startswith("<!--"):
             comment = "-->" not in ln
@@ -322,6 +344,48 @@ def check_entry(r, root, intent):
         r.fail(entry, "C3", f"마스터플랜 `{MASTER}` 를 가리키지 않는다 — 그 경로를 백틱 토막 하나로 적는다")
 
 
+def imports(ls):
+    """`ls` 에 가져오는 줄이 있나 — 빈 줄로 나눈 문단마다 백틱 토막을 빼고(토막은 빈 줄을 넘지 못한다), 같은 줄의 따옴표
+    구간을 뺀 뒤 꼴을 찾는다(조각 31 설계 ③ · 끝의 「경계를 정했다」)."""
+    paras, cur = [], []
+    for ln in ls:
+        if ln.strip():
+            cur.append(ln)
+        else:
+            paras.append("\n".join(cur))
+            cur = []
+    paras.append("\n".join(cur))
+    return any(IMPORT.search(QUOTE.sub("\0", SPAN.sub("\0", p))) for p in paras)
+
+
+def check_profile(r, root):
+    """P1 — 맨 위의 `Profile.md` 는 저장소 안의 파일이고 `CLAUDE.md` 나 `CLAUDE.local.md` 가 가져온다. 이름이 없으면 묻지
+    않는다 — 고르는 문서다. 절 제목도 묻지 않는다(조각 31 설계 ② · ③, ADR 0042 의 6 · 7)."""
+    if not os.path.lexists(root / PROFILE):
+        return
+    prof, why = inside(root, PROFILE)
+    if why or not prof.is_file():
+        r.fail(PROFILE, "P1", f"저장소 맨 위의 프로필이 {why or '폴더다'} — 저장소 안의 파일이어야 한다")
+        return
+    lines(prof)  # 읽지 못하면 [R1] — 줄의 뜻은 보지 않는다
+    unread = False
+    for name in IMPORTERS:
+        f = root / name
+        # 저장소 안의 파일일 때만 읽는다 — 없거나 폴더거나 밖 링크면 가져오지 않는 것으로 친다.
+        if inside(root, name)[1] or not f.is_file():
+            continue
+        ls = lines(f)
+        if f in UNREADABLE:
+            # 읽지 못한 파일은 가져오는지 모른다 — 다른 파일이 가져오지 않으면 P1 을 묻지 않고 [R1] 만 선다.
+            unread = True
+            continue
+        if imports(ls):
+            return
+    if not unread:
+        r.fail(PROFILE, "P1", "`CLAUDE.md` 도 `CLAUDE.local.md` 도 가져오지 않는다 — 둘 중 하나에 `@Profile.md` 를 백틱 밖에, "
+                              "앞뒤를 공백이나 줄 끝으로 적는다")
+
+
 def check_slices(r, root, schema, mp, rows):
     good = []
     for row in rows:
@@ -459,6 +523,7 @@ def main(argv):
         mp, rows, intent = got
         check_slices(r, root, schema, mp, rows)
         check_entry(r, root, intent)
+        check_profile(r, root)
     for p, why in UNREADABLE.items():
         r.fail(p, "R1", f"읽지 못했다 — UTF-8 문서여야 한다({why})")
 
@@ -468,9 +533,9 @@ def main(argv):
             print(f"  - {b}")
         return 1
     if tpl:
-        print(f"PASS 문서의 모양(다른 레포 — 원천 {tpl.as_posix()}) — 의도 · 마스터플랜 · 입구 · 조각 나눔 · 조각 폴더")
+        print(f"PASS 문서의 모양(다른 레포 — 원천 {tpl.as_posix()}) — 의도 · 마스터플랜 · 입구 · 프로필 · 조각 나눔 · 조각 폴더")
     else:
-        print("PASS 문서의 모양 — 원천 · 틀 · 의도 · 마스터플랜 · 입구 · 조각 나눔 · 조각 폴더")
+        print("PASS 문서의 모양 — 원천 · 틀 · 의도 · 마스터플랜 · 입구 · 프로필 · 조각 나눔 · 조각 폴더")
     return 0
 
 
