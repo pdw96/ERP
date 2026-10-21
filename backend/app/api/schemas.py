@@ -18,6 +18,7 @@ from app.db.constraints import blank_characters
 from app.services.incoming import Refusal
 from app.services.retests import RetestRefusal
 from app.services.returns import ReturnRefusal
+from app.services.transfers import TransferClosureRefusal, TransferRequestRefusal
 
 # **데이터베이스가 깎는 글자와 같은 목록이다.** 두 벌로 적지 않는다 —
 # `app/db/constraints.py` 가 SQL 쪽 형태를 들고, 여기서는 그것을 푼 것을 쓴다.
@@ -215,6 +216,73 @@ class RetestOut(BaseModel):
     ledger_entry_ids: list[int]
 
 
+class TransferRequestIn(BaseModel):
+    """이동 요청 한 건 — **로트를 가리킨다.** 원재료창고에서 생산창고로 옮겨 달라는 의도다.
+
+    시각은 받지 않는다 — 서버가 「지금」으로 적는다(ADR 0019).
+    """
+
+    model_config = _ONLY_THE_FIELDS_WE_NAME
+
+    # 검사 응답의 `lot_id` 다.
+    lot_id: int = Field(gt=0, le=_INT4_MAX)
+    # **`> 0` 이다.** 옮길 것이 없는 요청은 처리해도 원장에 아무 일도 일어나지 않는다
+    # (`ck_stock_transfer_request_quantity`).
+    quantity: float = Field(gt=0, allow_inf_nan=False)
+    requested_by: Present = Field(min_length=1, max_length=50)
+
+
+class TransferRequestOut(BaseModel):
+    """요청이 선 뒤 남은 것.
+
+    - `transfer_request_id` — 요청에는 다른 손잡이가 없다. 같은 로트에 요청이 여럿 설 수 있고,
+      처리 · 취소(`POST /stock-transfer-closures`)가 **그 건을 가리키는 값**이다
+    """
+
+    transfer_request_id: int
+
+
+class ClosureType(StrEnum):
+    """종결의 구분 — **요청이 고르는 닫힌 열거다.** 처리 또는 취소(ADR 0023).
+
+    값은 `codes.CLOSURE_TYPES` 와 같은 목록이다 — 열거로 적느라 두 벌이 되었으므로
+    `tests/test_transfer_api.py` 가 둘을 견준다.
+    """
+
+    PROCESSED = codes.CLOSURE_PROCESSED
+    CANCELLED = codes.CLOSURE_CANCELLED
+
+
+class TransferClosureIn(BaseModel):
+    """이동 요청의 처리 또는 취소 한 건 — **요청을 가리킨다.** 로트와 수량은 요청에서 끌어온다
+    (부분 처리 없음). 시각은 받지 않는다.
+
+    `closed_by` 는 처리자 또는 취소자다. 취소는 누구든 낸다 — 요청자와 견주지 않는다.
+    """
+
+    model_config = _ONLY_THE_FIELDS_WE_NAME
+
+    # 요청 응답의 `transfer_request_id` 다.
+    transfer_request_id: int = Field(gt=0, le=_INT4_MAX)
+    closure_type: ClosureType
+    closed_by: Present = Field(min_length=1, max_length=50)
+
+
+class TransferClosureOut(BaseModel):
+    """종결이 선 뒤 남은 것.
+
+    - `ledger_entry_ids` — 처리면 원재료창고의 `생산출고` 와 생산창고의 `생산입고` 두 줄이
+      원장에 섰다는 것을 부르는 쪽이 확인할 자리다. 순서가 그 둘이다. **취소면 빈 목록이다** —
+      원장을 건드리지 않는다. 비어 있음이 그 구별을 말하므로 구분을 다시 싣지 않는다
+
+    **종결의 id 는 싣지 않는다** — 요청 하나에 종결 하나라 `transfer_request_id` 가 이미 그 건을
+    가리킨다. 부르는 쪽 없는 칸을 미리 두지 않는다(감사 ⑫ NC-137) — 칸을 더하는 것은 나중에도
+    넓히는 변경이다.
+    """
+
+    ledger_entry_ids: list[int]
+
+
 class LotOut(BaseModel):
     """로트 하나의 지금 — **잔량과 지금 만료일은 저장된 값이 아니라 센 값이다.**
 
@@ -316,6 +384,36 @@ class RetestRefused(BaseModel):
     """재검사 422 의 본문 — `Refused` 와 **같은 모양이고 업무 이름의 열거만 다르다.**"""
 
     detail: list[RetestRefusalDetail | ValidationDetail]
+
+
+class TransferRequestRefusalDetail(BaseModel):
+    """이동 요청의 업무 규칙이 거절할 때 `detail[]` 에 실리는 줄 — 이름은
+    `TransferRequestRefusal` 이 든다."""
+
+    loc: list[str]
+    msg: str
+    type: str = known_names(TransferRequestRefusal)
+
+
+class TransferRequestRefused(BaseModel):
+    """이동 요청 422 의 본문 — `Refused` 와 **같은 모양이고 업무 이름의 열거만 다르다.**"""
+
+    detail: list[TransferRequestRefusalDetail | ValidationDetail]
+
+
+class TransferClosureRefusalDetail(BaseModel):
+    """이동 종결의 업무 규칙이 거절할 때 `detail[]` 에 실리는 줄 — 이름은
+    `TransferClosureRefusal` 이 든다."""
+
+    loc: list[str]
+    msg: str
+    type: str = known_names(TransferClosureRefusal)
+
+
+class TransferClosureRefused(BaseModel):
+    """이동 종결 422 의 본문 — `Refused` 와 **같은 모양이고 업무 이름의 열거만 다르다.**"""
+
+    detail: list[TransferClosureRefusalDetail | ValidationDetail]
 
 
 class Transport(StrEnum):

@@ -1,8 +1,8 @@
-"""쓰기 엔드포인트 — 관문 1 · 구매반품 · 만료 재검사.
+"""쓰기 엔드포인트 — 관문 1 · 구매반품 · 만료 재검사 · 재고이동.
 
 **사건 하나가 요청 하나이고 트랜잭션 하나다.** 수입검사 한 건은 판정 · 로트 · 원장
-줄을, 구매반품 한 건은 문서 · 원장 줄을, 재검사 한 건은 판정과 (떨어지면) 폐기 줄을
-한 번에 남긴다. 「검사를 적는다 · 로트를
+줄을, 구매반품 한 건은 문서 · 원장 줄을, 재검사 한 건은 판정과 (떨어지면) 폐기 줄을,
+이동의 처리 한 건은 종결과 원장 두 줄을 한 번에 남긴다. 「검사를 적는다 · 로트를
 만든다 · 원장에 적는다」를 셋으로 나누면 **둘까지만 성공한 상태**가 생기고, 그것이
 원칙 ⑦ 이 없애려는 것이다.
 
@@ -47,6 +47,12 @@ from app.api.schemas import (
     RetestOut,
     RetestRefused,
     ReturnRefused,
+    TransferClosureIn,
+    TransferClosureOut,
+    TransferClosureRefused,
+    TransferRequestIn,
+    TransferRequestOut,
+    TransferRequestRefused,
     Transport,
     TransportRefused,
 )
@@ -61,6 +67,13 @@ from app.services.lots import LotView, list_lots, look_up
 from app.services.retests import IncomingRetest, retest
 from app.services.returns import IncomingReturn, RefusedReturn, return_to_supplier
 from app.services.site_clock import assert_the_site_clock_holds
+from app.services.transfers import (
+    IncomingTransferClosure,
+    IncomingTransferRequest,
+    RefusedTransfer,
+    close_transfer,
+    request_transfer,
+)
 
 # **이 API 의 판이다 — 패키지의 판과 다른 축이다.** 같은 코드가 계약을 깨지 않고
 # 여러 번 배포될 수 있고, 반대로 코드를 한 줄도 안 고치고 계약만 넓힐 수도 있다.
@@ -84,11 +97,12 @@ from app.services.site_clock import assert_the_site_clock_holds
 #
 # **앞자리가 처음 오른 것은 `2.0` 이다**(ADR 0025) — 재검사 응답의 폐기 줄 id 가 칸 하나에서
 # 목록으로 바뀌었다. 이동으로 나뉜 로트는 창고마다 폐기 줄이 서서 칸 하나로는 다 돌려줄 수 없다.
+# `2.1` 은 이동의 두 경로가 선 넓힘이다.
 #
 # **그리고 프레임워크의 기본값과 달라야 한다.** 기본값이 하필 `0.1.0` 이라, 그
 # 값을 쓰면 「적었다」와 「안 적었다」가 밖에서 구별되지 않는다 — 검사가 통과하면서
 # 아무것도 지키지 않게 된다(실제로 돌연변이가 그것을 드러냈다).
-API_VERSION = "2.0"
+API_VERSION = "2.1"
 
 
 @asynccontextmanager
@@ -105,11 +119,12 @@ async def the_site_clock_must_hold(_: FastAPI) -> AsyncIterator[None]:
 
 
 app = FastAPI(
-    title="조기경보 ERP — 관문 1 · 구매반품 · 재검사",
+    title="조기경보 ERP — 관문 1 · 구매반품 · 재검사 · 재고이동",
     summary=(
         "수입검사 한 건을 받아 판정하고, 합격이면 로트를 만든다."
         " 공급사에 돌려보낸 것을 적고, 재고 로트였으면 원장에서 뺀다."
         " 만료된 로트를 다시 검사해, 합격이면 새 만료일을 내고 불합격이면 잔량을 버린다."
+        " 원재료창고의 로트를 생산창고로 옮기는 요청을 받고, 그 요청을 처리하거나 취소한다."
     ),
     # **판의 규칙을 밖이 읽는 자리에 적는다** (감사 ⑯ NC-158). 밖에서 보이는 것이
     # `info.version` 하나뿐이면 소비자는 그 수가 무엇을 약속하는지 알 길이 없다.
@@ -474,7 +489,11 @@ def session_scope() -> Iterator[Session]:
 
 
 def _answers(
-    refused: type[Refused] | type[ReturnRefused] | type[RetestRefused],
+    refused: type[Refused]
+    | type[ReturnRefused]
+    | type[RetestRefused]
+    | type[TransferRequestRefused]
+    | type[TransferClosureRefused],
 ) -> dict[int | str, dict[str, Any]]:
     """쓰기 라우트가 **실제로 내는 응답**의 선언 — 라우트마다 다른 것은 422 의 이름뿐이다.
 
@@ -668,6 +687,79 @@ def post_retest(
         renewed_expiry_date=retested.renewed_expiry_date,
         ledger_entry_ids=list(retested.ledger_entry_ids),
     )
+
+
+@app.post(
+    "/stock-transfer-requests",
+    response_model=TransferRequestOut,
+    status_code=status.HTTP_201_CREATED,
+    responses=_answers(TransferRequestRefused),
+)
+def post_stock_transfer_request(
+    payload: TransferRequestIn, session: Annotated[Session, Depends(session_scope)]
+) -> TransferRequestOut | JSONResponse:
+    """원재료창고의 로트 하나를 생산창고로 옮겨 달라는 요청을 받는다.
+
+    요청은 의도라 재고를 잡지 않는다 — 잔량과 만료는 처리할 때 본다. **어떤 갈래를 무엇이
+    막는지는** `app/services/transfers.py` 의 `TransferRequestRefusal` 이 든다.
+    """
+    try:
+        requested = request_transfer(
+            session,
+            IncomingTransferRequest(
+                lot_id=payload.lot_id,
+                quantity=payload.quantity,
+                requested_by=payload.requested_by,
+            ),
+        )
+    except RefusedTransfer as refused:
+        return _refusal(
+            status.HTTP_422_UNPROCESSABLE_CONTENT,
+            [{"loc": ["body"], "msg": refused.message, "type": refused.code}],
+        )
+
+    # **응답을 만들기 전에 커밋한다.** 터지면 500 이고, 그것이 「저장되지 않았다」의
+    # 올바른 모양이다.
+    session.commit()
+
+    return TransferRequestOut(transfer_request_id=requested.transfer_request_id)
+
+
+@app.post(
+    "/stock-transfer-closures",
+    response_model=TransferClosureOut,
+    status_code=status.HTTP_201_CREATED,
+    responses=_answers(TransferClosureRefused),
+)
+def post_stock_transfer_closure(
+    payload: TransferClosureIn, session: Annotated[Session, Depends(session_scope)]
+) -> TransferClosureOut | JSONResponse:
+    """이동 요청 하나를 처리하거나 취소한다.
+
+    처리면 종결과 원장의 `생산출고` · `생산입고` 두 줄이 함께 서고, 취소면 종결만 선다. 요청
+    하나에 종결은 하나다. **어떤 갈래를 무엇이 막는지는** `app/services/transfers.py` 의
+    `TransferClosureRefusal` 이 든다.
+    """
+    try:
+        closed = close_transfer(
+            session,
+            IncomingTransferClosure(
+                transfer_request_id=payload.transfer_request_id,
+                closure_type=payload.closure_type.value,
+                closed_by=payload.closed_by,
+            ),
+        )
+    except RefusedTransfer as refused:
+        return _refusal(
+            status.HTTP_422_UNPROCESSABLE_CONTENT,
+            [{"loc": ["body"], "msg": refused.message, "type": refused.code}],
+        )
+
+    # **응답을 만들기 전에 커밋한다** — 처리가 두 줄을 가졌는지 묻는 지연 트리거도 여기서
+    # 돈다. 터지면 500 이고, 그것이 「저장되지 않았다」의 올바른 모양이다.
+    session.commit()
+
+    return TransferClosureOut(ledger_entry_ids=list(closed.ledger_entry_ids))
 
 
 def _read_answers(
