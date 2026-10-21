@@ -1,13 +1,13 @@
 ---
 name: slice-docs
-description: 프로젝트를 조각으로 나눠 진행할 때 의도 · 마스터플랜 · 작업 규칙(CLAUDE.md) · 조각 요구사항 · 설계 문서를 틀대로 씁니다. 새 프로젝트의 의도나 마스터플랜을 처음 세울 때, 마스터플랜에서 조각을 꺼내 착공(요구사항 + 설계)할 때, 조각을 닫는 기록을 쓸 때 쓰세요.
+description: 프로젝트를 조각으로 나눠 진행할 때 의도 · 마스터플랜 · 작업 규칙(CLAUDE.md) · 프로필(Profile.md) · 조각 요구사항 · 설계 문서를 틀대로 씁니다. 새 프로젝트의 의도나 마스터플랜을 처음 세울 때, 일하는 사람의 수준 · 묻는 법을 프로필로 세울 때, 마스터플랜에서 조각을 꺼내 착공(요구사항 + 설계)할 때, 조각을 닫는 기록을 쓸 때 쓰세요.
 ---
 
-<!-- pdw96/claude-kit@4ef24a9 에서 옴. 이 레포에서만 참인 고침은 이 사본에만 산다 — 다른 레포에서도 같은 말이면 원본으로 넘긴다. -->
+<!-- pdw96/claude-kit@ee9f58f 에서 옴. 이 레포에서만 참인 고침은 이 사본에만 산다 — 다른 레포에서도 같은 말이면 원본으로 넘긴다. -->
 
 # 조각 문서
 
-절차는 claude-kit 의 절차 지도가 든다 — https://github.com/pdw96/claude-kit/blob/4ef24a9cdbd3c068ccdd1ed2cd3d1cc5a436a7dc/docs/procedure.md .
+절차는 claude-kit 의 절차 지도가 든다 — https://github.com/pdw96/claude-kit/blob/ee9f58fe12a708052a1eb2f5017918389dda9c94/docs/procedure.md .
 단계마다 들어가고 나가는 조건, 문서의 칸, 살아 있는 문서와 기록의 규칙은 거기서 읽는다. 여기에 옮겨 적지 않는다.
 
 ## 틀
@@ -19,6 +19,7 @@ description: 프로젝트를 조각으로 나눠 진행할 때 의도 · 마스�
 | 의도 | `${CLAUDE_SKILL_DIR}/templates/intent.md` | `INTENT.md` |
 | 마스터플랜 | `${CLAUDE_SKILL_DIR}/templates/master-plan.md` | `docs/master-plan.md` |
 | 작업 규칙 | `${CLAUDE_SKILL_DIR}/templates/claude-md.md` | `CLAUDE.md`(저장소 맨 위) |
+| 프로필 | `${CLAUDE_SKILL_DIR}/templates/profile.md` | `Profile.md`(저장소 맨 위) |
 | 요구사항 | `${CLAUDE_SKILL_DIR}/templates/requirements.md` | `docs/slices/<순서>-<이름>/requirements.md` |
 | 설계 | `${CLAUDE_SKILL_DIR}/templates/design.md` | `docs/slices/<순서>-<이름>/design.md` |
 
@@ -32,6 +33,15 @@ description: 프로젝트를 조각으로 나눠 진행할 때 의도 · 마스�
   없으면 `/init` 을 먼저 부르라고 말하고, 그 뒤 틀의 세 절을 저자 인터뷰로 받아 쓴다. 있으면 덮지 않는다 — 빠진 절과
   가리키는 줄만 사용자에게 먼저 보이고 받으면 더한다. 가리키는 줄은 작업 방식에 의도의 경로와 `docs/master-plan.md`
   를 백틱 토막으로 — 그 레포에 `AGENTS.md` 가 있으면 그것도.
+- **프로필(`Profile.md`)** — 처음 쓰는 호출에서 `CLAUDE.md` 다음에 세울지 묻고, 사용자가 세우거나 고치자고 할 때와 검사가
+  P1 을 찍을 때 다룬다. 틀 머리의 물음으로 인터뷰한다. 아래 고침은 다 먼저 보이고 받으면 한다.
+  - 혼자 쓰면 `Profile.md` 를 올리고 `CLAUDE.md` 에 `@Profile.md` 줄을 넣는다.
+  - 여럿이 쓰면 `.gitignore` 에 `/Profile.md` · `/CLAUDE.local.md` 를 더하고 `CLAUDE.local.md` 에 그 줄을 넣는다. 두 파일
+    가운데 `git ls-files` 에 나오는 것은 `git rm --cached <파일>` 로 뺀다 — 빼기 전에는 올라가지 않는다고 말하지 않는다.
+    세운 뒤 이 작업 트리에만 있으니 다른 작업 트리 · 새 클론에서는 이 스킬을 다시 부르라고 말한다.
+  - 혼자 · 여럿을 바꾸면 그 줄을 다른 파일로 옮겨 한 자리에만 둔다 — 여럿으로 가면 위의 색인 빼기도, 혼자로 가면
+    `.gitignore` 의 `/Profile.md` 줄 빼기도 함께.
+  - 이미 있으면 덮지 않는다 — 빠진 절 · 가져오는 줄 · `.gitignore` 의 다른 꼴(빗금 없는 `Profile.md` 따위)만 고친다.
 - **마스터플랜이 있다** — 조각 나눔에서 조각을 꺼낸다. 그 조각의 줄이 없으면 요구사항 · 설계를 쓰지 않고, 줄을 먼저
   더하라고 사용자에게 말한다.
 - **조각을 꺼낼 때** — 조각 나눔의 상태를 `진행` 으로, 조각 폴더 칸을 `docs/slices/<순서>-<이름>/` 으로 고친다.
