@@ -1182,7 +1182,7 @@
                 }
               }
             },
-            "description": "Unprocessable Entity",
+            "description": "Unprocessable Content",
             "headers": {
               "X-Request-Id": {
                 "description": "이 요청을 가리키는 값. 보내면 그대로 돌아오고, 없거나 모양이 맞지 않으면 우리가 짓는다.",
@@ -1310,7 +1310,7 @@
                 }
               }
             },
-            "description": "Unprocessable Entity",
+            "description": "Unprocessable Content",
             "headers": {
               "X-Request-Id": {
                 "description": "이 요청을 가리키는 값. 보내면 그대로 돌아오고, 없거나 모양이 맞지 않으면 우리가 짓는다.",
@@ -1428,7 +1428,7 @@
                 }
               }
             },
-            "description": "Unprocessable Entity",
+            "description": "Unprocessable Content",
             "headers": {
               "X-Request-Id": {
                 "description": "이 요청을 가리키는 값. 보내면 그대로 돌아오고, 없거나 모양이 맞지 않으면 우리가 짓는다.",
@@ -1561,7 +1561,7 @@
                 }
               }
             },
-            "description": "Unprocessable Entity",
+            "description": "Unprocessable Content",
             "headers": {
               "X-Request-Id": {
                 "description": "이 요청을 가리키는 값. 보내면 그대로 돌아오고, 없거나 모양이 맞지 않으면 우리가 짓는다.",
@@ -1694,7 +1694,7 @@
                 }
               }
             },
-            "description": "Unprocessable Entity",
+            "description": "Unprocessable Content",
             "headers": {
               "X-Request-Id": {
                 "description": "이 요청을 가리키는 값. 보내면 그대로 돌아오고, 없거나 모양이 맞지 않으면 우리가 짓는다.",
@@ -1827,7 +1827,7 @@
                 }
               }
             },
-            "description": "Unprocessable Entity",
+            "description": "Unprocessable Content",
             "headers": {
               "X-Request-Id": {
                 "description": "이 요청을 가리키는 값. 보내면 그대로 돌아오고, 없거나 모양이 맞지 않으면 우리가 짓는다.",
@@ -1960,7 +1960,7 @@
                 }
               }
             },
-            "description": "Unprocessable Entity",
+            "description": "Unprocessable Content",
             "headers": {
               "X-Request-Id": {
                 "description": "이 요청을 가리키는 값. 보내면 그대로 돌아오고, 없거나 모양이 맞지 않으면 우리가 짓는다.",

@@ -1,4 +1,5 @@
-FROM python:3.12-slim
+# 판은 `.python-version` 과 같아야 한다 — 이 줄은 그 파일을 읽지 못해 `tests/test_dependencies.py` 가 견준다(ADR 0026)
+FROM python:3.14-slim
 
 ENV PYTHONUNBUFFERED=1 PYTHONDONTWRITEBYTECODE=1
 WORKDIR /app

@@ -184,6 +184,26 @@ _ALLOW_SPEC = {
     }
 }
 
+# **오류 응답의 설명 글자를 우리가 든다.** 비워 두면 FastAPI 가 표준 라이브러리의 이름표
+# (`http.client.responses`)로 채우는데, 그 이름표는 파이썬 판마다 다르다 — 3.13 이 422 를
+# 「Unprocessable Entity」에서 RFC 9110 의 「Unprocessable Content」로 바꿨다. 그러면 밖으로
+# 나가는 계약의 사진(`docs/openapi.json`)이 돌린 판에 따라 갈려, CI 와 로컬 가운데 한쪽의 사진
+# 대조가 빨갛다(ADR 0026). 글자는 RFC 9110 의 이름이다. 성공(200 · 201)은 라우트의
+# `response_description` 이 채우므로 이름표에 기대지 않는다.
+_STATUS_TEXT = {
+    status.HTTP_400_BAD_REQUEST: "Bad Request",
+    status.HTTP_404_NOT_FOUND: "Not Found",
+    status.HTTP_405_METHOD_NOT_ALLOWED: "Method Not Allowed",
+    status.HTTP_422_UNPROCESSABLE_CONTENT: "Unprocessable Content",
+    status.HTTP_500_INTERNAL_SERVER_ERROR: "Internal Server Error",
+}
+
+
+def _declared(code: int, model: type[BaseModel], headers: Mapping[str, Any]) -> dict[str, Any]:
+    """오류 응답 하나의 선언 — 설명 글자를 `_STATUS_TEXT` 에서 꺼내 함께 싣는다."""
+    return {"description": _STATUS_TEXT[code], "model": model, "headers": headers}
+
+
 # **받은 값을 그대로 되돌려 싣지 않는다.** 이 값은 응답 헤더로 나가고 로그에
 # 찍히므로, 모양을 좁히지 않으면 **밖에서 온 글자가 우리 로그 줄의 모양을
 # 정한다.** HTTP 헤더는 latin-1 이라 그 밖의 글자는 응답을 만들다 터지기도 한다.
@@ -521,17 +541,21 @@ def _answers(
         # **성공도 그 헤더를 단다.** 미들웨어가 모든 응답에 달므로 201 만 빼면
         # 선언이 다시 실제보다 좁아진다 — NC-160 이 낸 그 모양이다(찍어서 봤다).
         status.HTTP_201_CREATED: {"headers": _REQUEST_ID_SPEC},
-        status.HTTP_400_BAD_REQUEST: {"model": TransportRefused, "headers": _REQUEST_ID_SPEC},
-        status.HTTP_404_NOT_FOUND: {"model": TransportRefused, "headers": _REQUEST_ID_SPEC},
-        status.HTTP_405_METHOD_NOT_ALLOWED: {
-            "model": TransportRefused,
-            "headers": _REQUEST_ID_SPEC | _ALLOW_SPEC,
-        },
-        status.HTTP_422_UNPROCESSABLE_CONTENT: {"model": refused, "headers": _REQUEST_ID_SPEC},
-        status.HTTP_500_INTERNAL_SERVER_ERROR: {
-            "model": TransportRefused,
-            "headers": _REQUEST_ID_SPEC,
-        },
+        status.HTTP_400_BAD_REQUEST: _declared(
+            status.HTTP_400_BAD_REQUEST, TransportRefused, _REQUEST_ID_SPEC
+        ),
+        status.HTTP_404_NOT_FOUND: _declared(
+            status.HTTP_404_NOT_FOUND, TransportRefused, _REQUEST_ID_SPEC
+        ),
+        status.HTTP_405_METHOD_NOT_ALLOWED: _declared(
+            status.HTTP_405_METHOD_NOT_ALLOWED, TransportRefused, _REQUEST_ID_SPEC | _ALLOW_SPEC
+        ),
+        status.HTTP_422_UNPROCESSABLE_CONTENT: _declared(
+            status.HTTP_422_UNPROCESSABLE_CONTENT, refused, _REQUEST_ID_SPEC
+        ),
+        status.HTTP_500_INTERNAL_SERVER_ERROR: _declared(
+            status.HTTP_500_INTERNAL_SERVER_ERROR, TransportRefused, _REQUEST_ID_SPEC
+        ),
     }
 
 
@@ -773,18 +797,20 @@ def _read_answers(
     """
     answers: dict[int | str, dict[str, Any]] = {
         status.HTTP_200_OK: {"headers": _REQUEST_ID_SPEC},
-        status.HTTP_405_METHOD_NOT_ALLOWED: {
-            "model": TransportRefused,
-            "headers": _REQUEST_ID_SPEC | _ALLOW_SPEC,
-        },
-        status.HTTP_422_UNPROCESSABLE_CONTENT: {"model": refused, "headers": _REQUEST_ID_SPEC},
-        status.HTTP_500_INTERNAL_SERVER_ERROR: {
-            "model": TransportRefused,
-            "headers": _REQUEST_ID_SPEC,
-        },
+        status.HTTP_405_METHOD_NOT_ALLOWED: _declared(
+            status.HTTP_405_METHOD_NOT_ALLOWED, TransportRefused, _REQUEST_ID_SPEC | _ALLOW_SPEC
+        ),
+        status.HTTP_422_UNPROCESSABLE_CONTENT: _declared(
+            status.HTTP_422_UNPROCESSABLE_CONTENT, refused, _REQUEST_ID_SPEC
+        ),
+        status.HTTP_500_INTERNAL_SERVER_ERROR: _declared(
+            status.HTTP_500_INTERNAL_SERVER_ERROR, TransportRefused, _REQUEST_ID_SPEC
+        ),
     }
     if missing is not None:
-        answers[status.HTTP_404_NOT_FOUND] = {"model": missing, "headers": _REQUEST_ID_SPEC}
+        answers[status.HTTP_404_NOT_FOUND] = _declared(
+            status.HTTP_404_NOT_FOUND, missing, _REQUEST_ID_SPEC
+        )
     return answers
 
 

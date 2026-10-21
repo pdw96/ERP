@@ -6,7 +6,7 @@
 
 ## 스택
 
-- Python 3.12 (컨테이너) · 하한 3.11 (로컬에서도 같은 테스트가 돌게)
+- Python — CI · 이미지 · 세션의 판은 `backend/.python-version` 한 자리가 든다 · 하한 3.11 (로컬에서도 같은 테스트가 돌게, ADR 0026)
 - SQLAlchemy 2.x — `Mapped` / `mapped_column`
 - Alembic — 마이그레이션. 스키마 변경에 반드시 따라붙는다
 - PostgreSQL 16 — 로컬 Docker Compose

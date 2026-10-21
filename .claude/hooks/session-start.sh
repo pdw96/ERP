@@ -31,15 +31,31 @@ wait_until() {  # 이름, 로그 파일(없으면 빈 값), 확인 명령…
   return 1
 }
 
-# 파이썬 — CI 와 같은 잠금에서 해시까지 맞춰 깐다(`backend/requirements.in` 머리)
+# 파이썬 — CI 와 같은 판(`.python-version`, ADR 0026)에 같은 잠금을 해시까지 맞춰 깐다(`requirements.in` 머리).
+# **이 컨테이너의 `python3` 는 그 판이 아닐 수 있다** — 3.13 이었고, CI 는 3.12 였다. 판이 다른 `.venv` 는
+# 다시 짓고, 그 판이 없으면 uv 로 받는다.
+want=$(cat .python-version)
+if [ -x .venv/bin/python ] \
+  && [ "$(.venv/bin/python -c 'import sys; print("%d.%d" % sys.version_info[:2])')" != "$want" ]; then
+  rm -rf .venv
+fi
 if [ ! -x .venv/bin/python ]; then
-  python3 -m venv .venv
+  if command -v "python$want" >/dev/null; then
+    "python$want" -m venv .venv
+  else
+    uv=$(command -v uv || echo "$HOME/.local/bin/uv")
+    "$uv" python install --quiet "$want"
+    "$("$uv" python find "$want")" -m venv .venv
+  fi
 fi
 .venv/bin/pip install -q --disable-pip-version-check --require-hashes -r requirements-dev.txt
 
 # 셸 검사 — CI 의 「셸」 스텝이 쓴다
+# 새 컨테이너는 패키지 목록이 비어 있어 설치가 「Unable to locate package」로 떨어지고, 그 뒤의
+# PostgreSQL 이 서지 않은 채 세션이 열렸다. 떨어지면 목록을 받고 한 번 더 깐다.
 if ! command -v shellcheck >/dev/null; then
-  apt-get install -y -q shellcheck >/dev/null
+  apt-get install -y -q shellcheck >/dev/null 2>&1 \
+    || { apt-get update -q >/dev/null && apt-get install -y -q shellcheck >/dev/null; }
 fi
 
 # PostgreSQL 16 — 테스트는 실제 DB 에 붙는다. 없으면 건너뛰지 않고 실패한다(`CLAUDE.md`)
