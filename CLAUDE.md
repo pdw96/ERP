@@ -38,6 +38,7 @@ ERP_TEST_DATABASE_URL="postgresql+psycopg://erp:erp@127.0.0.1:5432/erp_test" .ve
   PR 의 상태는 그 조각 설계(`docs/slices/<조각>/design.md`)의 「PR 나눔」이 든다. **여기에 진행을 적지 않는다.**
   그 밖의 문서(닫힌 단계의 PRD · 표의 초안과 색인)의 자리는 마스터플랜 「가리키는 문서」가 든다
 - 리뷰 봇에게 짚어 달라는 자리와 알려진 한계는 `AGENTS.md` 가 든다
+- **감사자 · 스킬은 스코프 없는 이름으로 부른다** — `vibe-audit:` · `vibe-slice:` 는 원본이라 이 레포의 특화가 빠진다
 - **다음 조각을 시작하기 전에 대장(`docs/audit/README.md`)과 열린 `audit-low` 이슈를 읽는다** — 열린 부적합과
   그 담당이 거기 있다
 - **설명하고 결정을 묻는 법은 소유자 프로필을 따른다** — @Profile.md
