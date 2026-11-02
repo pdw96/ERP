@@ -10,7 +10,7 @@
 | 시스템 구조 | `README.md` — 「구조」 절 |
 | 데이터 모델 | `docs/schema.md` — 지어진 표의 색인. 지금 단계의 초안은 `docs/schema-4단계.md` |
 | 작업 규칙과 앵커볼트 | `CLAUDE.md` · `CHECKLIST.md` |
-| 절차 | 없음 — 절차 지도는 claude-kit 에 있고, 스킬 `slice-docs` 가 판을 박아 가리킨다. 이 저장소에 사본을 두지 않는다 |
+| 절차 | 없음 — 절차 지도는 claude-kit 에 있고, 플러그인 스킬 `vibe-slice:slice-docs` 가 판을 박아 가리킨다. 이 저장소에 사본을 두지 않는다 |
 | 조각의 요구사항 · 설계 | `docs/slices/` |
 
 ## 조각 나눔
